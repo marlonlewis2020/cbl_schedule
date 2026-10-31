@@ -1,0 +1,3127 @@
+const SCHEDULE_TEMPLATE_BASE="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";
+const SCHEDULE_TEMPLATE_FILES=["xl/workbook.xml", "xl/styles.xml", "xl/theme/theme1.xml", "xl/sharedStrings.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml", "xl/worksheets/sheet3.xml", "_rels/.rels", "xl/_rels/workbook.xml.rels", "[Content_Types].xml"];
+const BAMBOO_CONNECTOR_FILES={
+    "README.txt": "CBL SCHEDULING \u2014 LOCAL BAMBOOHR CONNECTOR\n\nRequires Python 3.9 or newer on the computer running the app. No pip packages.\n\n1. Extract every file from this ZIP into one folder.\n2. Windows: double-click Start-Windows.cmd.\n   macOS/Linux: open a terminal in this folder and run: sh start.sh\n3. The connector opens the Scheduling app in your normal browser. Keep the\n   connector window open. If the browser does not open, use the full session\n   URL printed in that window, including the #connector= part.\n4. In Profile, enter your first name and BambooHR API key/API password.\n   BambooHR normally uses x as the API password.\n5. Click Test connection. If successful, Save & continue, then generate schedules.\n\nOpen the app through the connector's browser URL, rather than double-clicking\nits HTML file. This serves both app and connector from the same browser origin\nand avoids direct browser-to-BambooHR cross-origin restrictions.\n\nThe ZIP includes your current scheduling workspace and configuration. If you\nare moving from an older app file, restore its workspace backup in the updated\napp before downloading this kit. API\ncredentials and connector tokens are excluded from this ZIP and from backups.\nEnter the credentials once in the app served by the connector; browser saving\nfor that address is separate from the downloaded HTML's browser storage.\n\nThe connector binds only to 127.0.0.1, accepts a random per-launch session token,\nchecks Host/Origin and proxies only the CBL BambooHR Who's Out endpoint. It does\nnot store API credentials or employee responses on disk and does not log them.\nRequests go from your browser to the connector on your computer, then over\nHTTPS to cbljm.bamboohr.com. Do not expose this connector to a network or use it\nas a shared production server.\n\nClose the launcher window or press Ctrl+C to stop. Each restart changes the\nconnector token, so use the newly opened browser tab or the new session URL.\n\nTroubleshooting:\n- Connection blocked in the downloaded HTML: use the connector browser URL.\n- Connector session expired: use the full URL printed in the launcher window.\n- BambooHR HTTP 401: verify the API key and API password (normally x).\n- BambooHR HTTP 403: the key may lack access to Who's Out or the feature is disabled.\n- Connector cannot reach BambooHR: check internet/VPN/company proxy/certificates.\n- Port busy: close the existing connector, or run python connector.py --port 8766.\n\nIf the API request still fails, the app clearly reports the error and continues\nscheduling without the fresh BambooHR time-off check, as configured.\n", "Start-Windows.cmd": "@echo off\ncd /d \"%~dp0\"\nwhere py >nul 2>nul\nif errorlevel 1 (\n  python connector.py\n) else (\n  py -3 connector.py\n)\necho.\necho If Python was not found, install Python 3, then run this launcher again.\npause\n", "start.sh": "#!/bin/sh\ncd -- \"$(dirname -- \"$0\")\" || exit 1\nexec python3 connector.py\n", "connector.py": "#!/usr/bin/env python3\n\"\"\"CBL loopback-only BambooHR connector. Python 3.9+, standard library only.\"\"\"\nimport argparse\nimport datetime as dt\nimport hmac\nimport json\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\nfrom pathlib import Path\nimport secrets\nimport threading\nfrom urllib import error, parse, request\nimport webbrowser\n\nAPP_FILE = 'CBL-Scheduling-Command-Centre.html'\nBAMBOO_URL = 'https://cbljm.bamboohr.com/api/v1/time_off/whos_out'\n\nclass NoRedirect(request.HTTPRedirectHandler):\n    def redirect_request(self, req, fp, code, msg, headers, newurl):\n        return None\n\nclass ConnectorServer(ThreadingHTTPServer):\n    daemon_threads = True\n    def __init__(self, port, app_path, token=None, upstream=None):\n        self.token = token or secrets.token_urlsafe(32)\n        self.app_path = Path(app_path)\n        self.upstream = upstream or self.fetch_bamboo\n        super().__init__(('127.0.0.1', port), ConnectorHandler)\n    def fetch_bamboo(self, start, end, authorization):\n        url = BAMBOO_URL + '?' + parse.urlencode({'start': start, 'end': end})\n        req = request.Request(url, headers={'Accept': 'application/json', 'Authorization': authorization}, method='GET')\n        opener = request.build_opener(NoRedirect())\n        with opener.open(req, timeout=20) as response:\n            data = json.loads(response.read(10_000_001))\n        if not isinstance(data, list):\n            raise ValueError('BambooHR did not return a list of time-off records.')\n        return data\n\nclass ConnectorHandler(BaseHTTPRequestHandler):\n    server_version = 'CBLConnector/1.0'\n    def log_message(self, fmt, *args):\n        pass  # Never log authorization, personal records or request URLs.\n    def allowed_request(self):\n        port = self.server.server_address[1]\n        hosts = {f'127.0.0.1:{port}', f'localhost:{port}'}\n        origin = self.headers.get('Origin')\n        return self.headers.get('Host') in hosts and (not origin or origin in {f'http://{host}' for host in hosts})\n    def send_data(self, status, payload, content_type='application/json; charset=utf-8'):\n        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode('utf-8')\n        self.send_response(status)\n        self.send_header('Content-Type', content_type)\n        self.send_header('Content-Length', str(len(body)))\n        self.send_header('Cache-Control', 'no-store')\n        self.send_header('X-Content-Type-Options', 'nosniff')\n        self.send_header('X-Frame-Options', 'DENY')\n        self.send_header('Referrer-Policy', 'no-referrer')\n        if self.allowed_request() and self.headers.get('Origin'):\n            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])\n            self.send_header('Vary', 'Origin')\n        self.end_headers()\n        try:\n            self.wfile.write(body)\n        except (BrokenPipeError, ConnectionResetError):\n            pass\n    def do_OPTIONS(self):\n        if not self.allowed_request() or parse.urlsplit(self.path).path not in {'/bamboo/time-offs', '/health'}:\n            return self.send_data(403, {'error': 'Connector origin or endpoint is not allowed.'})\n        self.send_response(204)\n        if self.headers.get('Origin'):\n            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])\n        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')\n        self.send_header('Access-Control-Allow-Headers', 'Accept, Authorization, X-CBL-Connector-Token')\n        self.send_header('Access-Control-Max-Age', '300')\n        self.end_headers()\n    def do_GET(self):\n        if not self.allowed_request():\n            return self.send_data(403, {'error': 'Connector origin or host is not allowed.'})\n        parsed = parse.urlsplit(self.path)\n        if parsed.path in {'/', '/' + APP_FILE}:\n            try:\n                return self.send_data(200, self.server.app_path.read_bytes(), 'text/html; charset=utf-8')\n            except OSError:\n                return self.send_data(404, {'error': 'Place the Scheduling HTML in the connector folder.'})\n        if parsed.path not in {'/health', '/bamboo/time-offs'}:\n            return self.send_data(404, {'error': 'Unknown connector endpoint.'})\n        token = self.headers.get('X-CBL-Connector-Token', '')\n        if not token or not hmac.compare_digest(token, self.server.token):\n            return self.send_data(403, {'error': 'Connector session expired. Reopen the URL printed by the connector.'})\n        if parsed.path == '/health':\n            return self.send_data(200, {'service': 'cbl-bamboo-local', 'ready': True})\n        authorization = self.headers.get('Authorization', '')\n        if not authorization.startswith('Basic ') or len(authorization) > 8192:\n            return self.send_data(400, {'error': 'BambooHR Basic authorization is required.'})\n        try:\n            query = parse.parse_qs(parsed.query, keep_blank_values=True)\n            if set(query) != {'start', 'end'} or any(len(v) != 1 for v in query.values()):\n                raise ValueError('Provide one start and one end date.')\n            start, end = query['start'][0], query['end'][0]\n            a, b = dt.date.fromisoformat(start), dt.date.fromisoformat(end)\n            if a.isoformat() != start or b.isoformat() != end or b < a or (b - a).days > 3660:\n                raise ValueError('Invalid date range.')\n        except (ValueError, KeyError):\n            return self.send_data(400, {'error': 'Use valid start/end dates in YYYY-MM-DD format.'})\n        try:\n            data = self.server.upstream(start, end, authorization)\n            return self.send_data(200, data)\n        except error.HTTPError as exc:\n            status = exc.code if exc.code in {400, 401, 403, 404, 422, 429, 500, 502, 503} else 502\n            return self.send_data(status, {'error': f'BambooHR returned HTTP {exc.code}.', 'upstreamStatus': exc.code})\n        except (error.URLError, TimeoutError, OSError):\n            return self.send_data(502, {'error': 'The local connector could not reach BambooHR. Check this computer\u2019s internet, VPN, proxy or certificate configuration.'})\n        except (ValueError, json.JSONDecodeError):\n            return self.send_data(502, {'error': 'BambooHR returned an invalid JSON time-off response.'})\n\n\ndef main():\n    parser = argparse.ArgumentParser(description='Run the local CBL Scheduling app and BambooHR connector.')\n    parser.add_argument('--port', type=int, default=8765)\n    parser.add_argument('--no-browser', action='store_true')\n    args = parser.parse_args()\n    app = Path(__file__).resolve().parent / APP_FILE\n    if not app.is_file():\n        raise SystemExit(f'Keep {APP_FILE} in the same folder as connector.py.')\n    try:\n        server = ConnectorServer(args.port, app)\n    except OSError as exc:\n        raise SystemExit('Cannot start the local connector. Close an existing connector, or run python connector.py --port 8766.') from exc\n    url = f'http://127.0.0.1:{server.server_address[1]}/#connector={server.token}'\n    print('CBL Scheduling local connector is running on this computer only.')\n    print('Leave this window open while using BambooHR. Press Ctrl+C to stop.')\n    print('Open this session in your browser:\\n' + url)\n    if not args.no_browser:\n        threading.Timer(0.5, lambda: webbrowser.open(url)).start()\n    try:\n        server.serve_forever()\n    except KeyboardInterrupt:\n        pass\n    finally:\n        server.server_close()\n\nif __name__ == '__main__':\n    main()\n"
+}
+;
+function scheduleWeeks(m){
+    return m.controls.weeks===undefined?Math.max(1,...m.pools.filter(p=>p.enabled).map(p=>Number.isInteger(p.weeks)&&p.weeks>=1&&p.weeks<=52?p.weeks:1)):m.controls.weeks
+}
+function migrateScheduleWeeks(m){
+    m.controls.weeks=scheduleWeeks(m);
+    for(let p of m.pools)delete p.weeks;
+    return m
+}
+'use strict';
+const STARTS=[6,8.5,14,22],DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const isNum=v=>v!==null&&v!==''&&v!==undefined&&Number.isFinite(Number(v)),n=v=>isNum(v)?Number(v):null,clone=o=>JSON.parse(JSON.stringify(o)),key=(l,r)=>l+'|'+r;
+function isoDate(x){
+    if(typeof x==='number')return new Date(Date.UTC(1899,11,30)+x*864e5).toISOString().slice(0,10);
+    return typeof x==='string'&&/^\d{4}-\d{2}-\d{2}/.test(x)?x.slice(0,10):''
+}
+function addDays(date,d){
+    return new Date(Date.parse(date+'T00:00:00Z')+d*864e5).toISOString().slice(0,10)
+}
+function timeLabel(x){
+    let h=((x%24)+24)%24,hh=Math.floor(h),m=Math.round((h-hh)*60);
+    return (hh%12||12)+':'+String(m).padStart(2,'0')+(hh>=12?' PM':' AM')
+}
+function shiftLabel(s,span){
+    return timeLabel(s)+' – '+timeLabel(s+span)+(s+span>=24?' (+1d)':'')
+}
+function fromWorkbook(db,name){
+    for(let s of ['Roster','Location Roles','Controls','META'])if(!db[s])throw Error('Missing required sheet: '+s);
+    if(db.Roster[5]?.[0]!=='ID'||db['Location Roles'][5]?.[0]!=='Location')throw Error('Workbook layout is not compatible. Expected headers on row 6 in Roster and Location Roles.');
+    if(db.Roster.slice(206).some(r=>r[0]!==null&&r[0]!==''&&r[0]!==undefined))throw Error('Roster exceeds the source model limit of 200 employees (rows 7–206).');
+    let roster=db.Roster.slice(6,206).filter(r=>r[0]!==null&&r[0]!==''&&r[0]!==undefined).map((r,i)=>({
+        id:String(r[0]),name:r[1]||'',flex:r[2]??'',reason:r[3]??'',preferred:n(r[4]),proximity:n(r[5]),random:n(r[6]),attendance:n(r[7]),allow:r.slice(8,12).map(n),days:r.slice(12,19).map(n),previous:n(r[19])??-1,location:r[22]||'',role:r[23]||'',index:i
+    }
+    )),locations=db.META.slice(1).filter(r=>typeof r[0]==='string'&&r[0]).map(r=>({
+        name:r[0],intensity:Array.from({
+            length:7
+        }
+        ,(_,i)=>n(r[i+1])),open:Array.from({
+            length:7
+        }
+        ,(_,i)=>n(r[i+9]))
+    }
+    )),pools=db['Location Roles'].slice(6,46).filter(r=>typeof r[0]==='string'&&typeof r[1]==='string').map((r,i)=>({
+        id:key(r[0],r[1]),location:r[0],role:r[1],shares:Array.from({
+            length:4
+        }
+        ,(_,j)=>n(r[j+3])),enabled:false,row:i+7
+    }
+    )),b=i=>db.Controls[i-1]?.[1];
+    let c={
+        weeks:1,week:isoDate(b(5)),shifts:n(b(7))??5,hours:n(b(8))??8,rest:n(b(9))??11,preference:n(b(10))??2,proximity:n(b(11))??3,random:n(b(12))??1,attendanceEnabled:n(b(13))??1,bonus:n(b(14))??100000,span:9,makeup:1,seed:1,shuffle:true,location:String(b(4)||pools[0]?.location||''),role:String(b(15)||pools[0]?.role||'')
+    }
+    ;
+    let model={
+        sourceName:name,sourceImported:new Date().toISOString(),db,roster,locations,pools,controls:c,locked:false,revision:1,lockedAt:null,results:[],selectedRun:'',theme:'light'
+    }
+    ;
+    for(let p of pools){
+        let rs=roster.filter(e=>key(e.location,e.role)===p.id);
+        p.enabled=rs.length>0&&p.shares.every(isNum)&&Math.abs(p.shares.reduce((a,x)=>a+x,0)-1)<.0001&&rs.every(e=>!rosterErrors(e).length)
+    }
+    return model
+}
+function rosterErrors(e){
+    let errs=[];
+    if(!e.id||!e.name||!e.location||!e.role)errs.push('Identity / pool missing');
+    if(!['Yes','No'].includes(e.flex))errs.push('Flexible must be Yes or No');
+    if(e.flex==='No'&&!String(e.reason).trim())errs.push('Reason required when not flexible');
+    if(!STARTS.includes(e.preferred))errs.push('Preferred start missing / invalid');
+    if(![1,2,3].includes(e.proximity))errs.push('Proximity must be 1–3');
+    if(![1,2,3].includes(e.random))errs.push('Random factor must be 1–3');
+    if(e.attendance!==null&&(!isNum(e.attendance)||e.attendance<0||e.attendance>100))errs.push('Attendance must be 0–100 or blank');
+    if(e.allow.length!==4||e.allow.some(v=>v!==0&&v!==1))errs.push('Shift permissions must be 0 or 1');
+    if(e.days.length!==7||e.days.some(v=>v!==0&&v!==1))errs.push('Availability must be 0 or 1');
+    if(e.flex==='No'&&STARTS.includes(e.preferred)&&e.allow[STARTS.indexOf(e.preferred)]!==1)errs.push('Fixed preference is disallowed');
+    return errs
+}
+function poolRoster(m,p){
+    return m.roster.filter(e=>key(e.location,e.role)===p.id)
+}
+function modelIssues(m){
+    let errors=[],warnings=[],c=m.controls;
+    if(!Number.isInteger(scheduleWeeks(m))||scheduleWeeks(m)<1||scheduleWeeks(m)>52)errors.push('Controls: weeks must be a whole number from 1 to 52');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(c.week)||isNaN(Date.parse(c.week)))errors.push('Select a valid week commencing date');
+    else if(new Date(c.week+'T00:00:00Z').getUTCDay()!==1)errors.push('Week commencing must be a Monday');
+    for(let [k,min,max,int] of [['shifts',1,7,true],['hours',.5,24,false],['span',.5,24,false],['rest',0,48,false],['preference',0,1e6,false],['proximity',0,1e6,false],['random',0,1e6,false],['bonus',0,1e7,false],['seed',0,999999,true]])if(!isNum(c[k])||c[k]<min||c[k]>max||int&&!Number.isInteger(c[k]))errors.push('Controls: invalid '+k);
+    if(c.span<c.hours)errors.push('Elapsed shift span must not be less than paid hours');
+    if(![0,1].includes(c.attendanceEnabled)||![0,1].includes(c.makeup))errors.push('Priority and make-up switches must be 0 or 1');
+    let defined=new Set(m.pools.map(p=>p.id));
+    for(let e of m.roster)if(!defined.has(key(e.location,e.role)))warnings.push(e.location+' | '+e.role+': roster employee '+e.name+' has no Location Roles row and will not be scheduled');
+    let enabled=m.pools.filter(p=>p.enabled);
+    if(!enabled.length)errors.push('Enable at least one location-role pool');
+    let seen=new Set();
+    for(let e of m.roster){
+        if(seen.has(e.id))errors.push('Duplicate employee ID: '+e.id);
+        seen.add(e.id)
+    }
+    for(let p of enabled){
+        let rs=poolRoster(m,p),l=m.locations.find(x=>x.name===p.location),prefix=p.id+': ';
+        if(rs.length===0||rs.length>21)errors.push(prefix+'roster headcount must be 1–21');
+        if(p.shares.some(x=>!isNum(x)||x<0||x>1)||Math.abs(p.shares.reduce((a,v)=>a+(v||0),0)-1)>.0001)errors.push(prefix+'four shift shares must total 100%');
+        if(!l)errors.push(prefix+'location missing from META');
+        else {
+            if(l.open.length!==7||l.open.some(x=>x!==0&&x!==1))errors.push(prefix+'META open flags must be 0/1');
+            if(l.intensity.some(x=>!isNum(x)||x<0||x>1))errors.push(prefix+'all seven META intensity values are required (0–100%)');
+            let total=l.intensity.reduce((a,x,i)=>a+(l.open[i]===1?(x||0):0),0);
+            if(total<=0)errors.push(prefix+'positive intensity on an open day required');
+            if(Math.abs(l.intensity.reduce((a,x)=>a+(x||0),0)-1)>.0001)warnings.push(prefix+'daily intensities are normalized over open days');
+            if(l.open.filter(x=>x===1).length<c.shifts)warnings.push(prefix+'fewer operating days than weekly shift target');
+            if(l.intensity.some((x,i)=>x>0&&!l.open[i]))warnings.push(prefix+'closed-day intensity is excluded from demand');
+
+        }
+        for(let e of rs){
+            let es=rosterErrors(e);
+            if(es.length)errors.push(prefix+e.name+' — '+es.join('; '));
+            if(!rs.some(x=>x.attendance!==null)&&c.attendanceEnabled)warnings.push(prefix+'attendance priority has no scored employees')
+        }
+
+    }
+
+    if(typeof overtimeIssues==='function')errors.push(...overtimeIssues(m));
+    return {
+        errors:[...new Set(errors)],warnings:[...new Set(warnings)]
+    }
+
+}
+function splitDemand(headcount,shares,c,loc){
+    let total=headcount*c.shifts,w=loc.intensity.map((x,i)=>loc.open[i]===1?x:0),den=w.reduce((a,x)=>a+x,0),cum=0,prev=0;
+    return w.map((x,i)=>{
+        cum+=x;let count=Math.round(total*cum/den)-Math.round(total*prev/den);prev=cum;if(!loc.open[i])count=0;let raw=shares.map(x=>x*count),req=raw.map(Math.floor),remaining=count-req.reduce((a,x)=>a+x,0),order=raw.map((x,i)=>({
+            i,f:x-Math.floor(x)
+        }
+        )).sort((a,b)=>b.f-a.f||a.i-b.i);for(let j=0;j<remaining;j++)req[order[j].i]++;return req
+    }
+    )
+}
+function randomShuffleSeed(previous){
+    let v;
+    if(globalThis.crypto?.getRandomValues){
+        let b=new Uint32Array(1);
+        globalThis.crypto.getRandomValues(b);
+        v=b[0]%1000000
+    }
+    else v=Math.floor(Math.random()*1000000);
+    return v===previous?(v+1)%1000000:v
+}
+function shuffleRank(seed,text){
+    let h=(2166136261^(Number(seed)>>>0))>>>0;
+    for(let i=0;i<text.length;i++){
+        h^=text.charCodeAt(i);
+        h=Math.imul(h,16777619)>>>0
+    }
+    h^=h>>>16;
+    h=Math.imul(h,0x7feb352d);
+    h^=h>>>15;
+    h=Math.imul(h,0x846ca68b);
+    return (h^(h>>>16))>>>0
+}
+function generatePool(m,p,start,history=new Map()){
+    let c=clone(m.controls),rs=poolRoster(m,p).map(clone),location=m.locations.find(l=>l.name===p.location),req=m.requirementsOverride?clone(m.requirementsOverride):splitDemand(rs.length,p.shares,c,location),weekAbs=Date.parse(start+'T00:00:00Z')/36e5,assignment=rs.map(e=>({
+        ...e,slots:Array(7).fill(null),types:Array(7).fill(null),rank:0,timeOff:typeof timeOffDays==='function'?timeOffDays(m,e,start):Array(8).fill(false),rotationRandom:1+shuffleRank(c.seed,p.id+'|'+start+'|rotation|'+e.id)%3
+    }
+    )),priority=[...assignment].filter(e=>e.attendance!==null).sort((a,b)=>b.attendance-a.attendance||a.index-b.index);
+    priority.forEach((e,i)=>e.rank=i+1);
+    let uncovered=[],audit=[],staff=Array(7).fill(0);
+
+    const count=e=>e.slots.filter(s=>s!==null).length;
+
+    function eligible(e,d,s){
+        if(e.timeOff?.[d]||s+c.span>24&&e.timeOff?.[d+1]||!location.open[d]||e.days[d]!==1||e.slots[d]!==null||count(e)>=c.shifts||e.allow[STARTS.indexOf(s)]!==1||e.flex==='No'&&s!==e.preferred)return false;
+        let st=weekAbs+d*24+s,en=st+c.span;
+        for(let j=0;j<7;j++)if(e.slots[j]!==null){
+            let a=weekAbs+j*24+e.slots[j],b=a+c.span;
+            if(st>=b?st-b<c.rest:a>=en?a-en<c.rest:true)return false
+        }
+        let previous=history.get(e.id);
+        if(previous!==undefined&&st-previous<c.rest)return false;
+        if(previous===undefined&&e.previous!==-1&&e.previous!==null&&st-(weekAbs-24+e.previous+c.span)<c.rest)return false;
+        return true
+    }
+
+    function score(e,s,primary){
+        return (primary?(c.shifts-count(e))*10000+(e.flex==='No'?1000:0):0)+(s===e.preferred?c.preference:0)+e.proximity*c.proximity+(c.shuffle?e.rotationRandom:e.random)*c.random+(c.attendanceEnabled===1&&e.rank>0&&e.rank<=3&&s===e.preferred?c.bonus:0)
+    }
+
+    for(let d=0;d<7;d++){
+        let used=[0,0,0,0],total=req[d].reduce((a,x)=>a+x,0);
+        for(let slot=0;slot<total;slot++){
+            let choices=STARTS.map((s,i)=>({
+                s,i,left:req[d][i]-used[i],priority:req[d][i]?(req[d][i]-used[i])/req[d][i]:-1
+            }
+            )).filter(x=>x.left>0).sort((a,b)=>b.priority-a.priority||b.left-a.left||(c.shuffle?shuffleRank(c.seed,p.id+'|'+start+'|'+d+'|slot'+slot+'|'+a.s)-shuffleRank(c.seed,p.id+'|'+start+'|'+d+'|slot'+slot+'|'+b.s):0)||a.s-b.s);
+            let {
+                s,i
+            }
+            =choices[0];
+            used[i]++;
+            let candidates=assignment.filter(e=>eligible(e,d,s)).sort((a,b)=>score(b,s,true)-score(a,s,true)||(c.shuffle?shuffleRank(c.seed,p.id+'|'+start+'|'+d+'|'+s+'|'+a.id)-shuffleRank(c.seed,p.id+'|'+start+'|'+d+'|'+s+'|'+b.id):0)||a.index-b.index);
+            if(!candidates.length){
+                uncovered.push({
+                    day:d,start:s,reason:'No eligible employee'
+                }
+                );
+                continue
+            }
+            let e=candidates[0];
+            audit.push({
+                id:e.id,day:d,start:s,type:'Demand',score:score(e,s,true)
+            }
+            );
+            e.slots[d]=s;
+            e.types[d]='Demand';
+            staff[d]++
+        }
+
+    }
+
+    if(c.makeup===1)for(let e of assignment)while(count(e)<c.shifts){
+        let options=[];
+        for(let d=0;d<7;d++)for(let s of STARTS)if(eligible(e,d,s))options.push({
+            d,s,score:score(e,s,false),staff:staff[d]
+        }
+        );
+        options.sort((a,b)=>b.score-a.score||a.staff-b.staff||(c.shuffle?shuffleRank(c.seed,p.id+'|'+start+'|'+e.id+'|'+a.d+'|'+a.s)-shuffleRank(c.seed,p.id+'|'+start+'|'+e.id+'|'+b.d+'|'+b.s):0)||a.d-b.d||a.s-b.s);
+        if(!options.length)break;
+        let o=options[0];
+        e.slots[o.d]=o.s;
+        e.types[o.d]='Make-up';
+        staff[o.d]++;
+        audit.push({
+            id:e.id,day:o.d,start:o.s,type:'Make-up',score:o.score
+        }
+        )
+    }
+
+    for(let e of assignment){
+        let last=-Infinity;
+        e.slots.forEach((s,d)=>{
+            if(s!==null)last=Math.max(last,weekAbs+d*24+s+c.span)
+        }
+        );
+        if(Number.isFinite(last))history.set(e.id,last)
+    }
+
+    let controls={
+        location:p.location,role:p.role,week:start,headcount:rs.length,...c
+    }
+    ;
+    controls.location=p.location;
+    controls.role=p.role;
+    controls.week=start;
+
+    return {
+        id:key(p.location,p.role)+'|'+start+'|r'+m.revision,location:p.location,role:p.role,start,end:addDays(start,6),revision:m.revision,createdAt:new Date().toISOString(),timeOffCheck:typeof timeOffCheckSnapshot==='function'?timeOffCheckSnapshot(m):null,controls,shares:clone(p.shares),overtime:typeof overtimeSnapshot==='function'?overtimeSnapshot(m,p,start):null,locationPattern:clone(location),roster:rs,employees:assignment,requirements:req,uncovered,audit,shortages:assignment.filter(e=>count(e)<c.shifts).map(e=>({
+            id:e.id,name:e.name,missing:c.shifts-count(e)
+        }
+        )),makeup:audit.filter(a=>a.type==='Make-up').length,primary:audit.filter(a=>a.type==='Demand').length
+    }
+
+}
+function generateAll(m,seed=randomShuffleSeed(m.controls.seed)){
+    m={
+        ...m,controls:{
+            ...m.controls,shuffle:true,seed
+        }
+
+    }
+    ;
+    let issues=modelIssues(m);
+    if(!m.locked)throw Error('Lock configuration before creating schedules');
+    if(issues.errors.length)throw Error(issues.errors.join('\n'));
+    let results=[];
+    for(let p of m.pools.filter(p=>p.enabled)){
+        let history=new Map();
+        for(let w=0;w<scheduleWeeks(m);w++)results.push(generatePool(m,p,addDays(m.controls.week,w*7),history))
+    }
+    return results
+}
+function validateRun(run){
+    let errors=[],c=run.controls;
+    for(let e of run.employees){
+        if(e.slots.filter(s=>s!==null).length>c.shifts)errors.push('Weekly cap '+e.id);
+        let prev=null;
+        for(let d=0;d<7;d++){
+            let s=e.slots[d];
+            if(s===null)continue;
+            if(e.timeOff?.[d]||s+c.span>24&&e.timeOff?.[d+1])errors.push('Time-off '+e.id);
+            if(!run.locationPattern.open[d]||!e.days[d])errors.push('Closed/unavailable '+e.id);
+            if(e.allow[STARTS.indexOf(s)]!==1)errors.push('Permission '+e.id);
+            if(e.flex==='No'&&s!==e.preferred)errors.push('Fixed shift '+e.id);
+            let st=d*24+s;
+            if(prev!==null&&st-prev<c.rest-1e-8)errors.push('Rest '+e.id);
+            prev=st+c.span
+        }
+
+    }
+    for(let d=0;d<7;d++)for(let j=0;j<4;j++){
+        let filled=run.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Demand').length,missing=run.uncovered.filter(x=>x.day===d&&x.start===STARTS[j]).length;
+        if(filled+missing!==run.requirements[d][j])errors.push('Coverage reconciliation')
+    }
+    return errors
+}
+async function inflate(bytes,format){
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format))).arrayBuffer())
+}
+async function zipEntries(buffer){
+    let u=new Uint8Array(buffer),dv=new DataView(buffer),end=u.length-22;
+    while(end>=Math.max(0,u.length-65557)&&dv.getUint32(end,true)!==0x06054b50)end--;
+    if(end<0)throw Error('Not a valid XLSX ZIP file.');
+    let count=dv.getUint16(end+10,true),off=dv.getUint32(end+16,true),files={
+
+    }
+    ;
+    if(count===65535)throw Error('ZIP64 workbooks are not supported.');
+    for(let i=0;i<count;i++){
+        if(dv.getUint32(off,true)!==0x02014b50)throw Error('Invalid ZIP directory.');
+        let method=dv.getUint16(off+10,true),size=dv.getUint32(off+20,true),nl=dv.getUint16(off+28,true),xl=dv.getUint16(off+30,true),cl=dv.getUint16(off+32,true),local=dv.getUint32(off+42,true),name=new TextDecoder().decode(u.slice(off+46,off+46+nl));
+        if(dv.getUint16(off+8,true)&1)throw Error('Encrypted workbooks are not supported.');
+        let start=local+30+dv.getUint16(local+26,true)+dv.getUint16(local+28,true);
+        files[name]={
+            method,bytes:u.slice(start,start+size)
+        }
+        ;
+        off+=46+nl+xl+cl
+    }
+    return {
+        has:n=>!!files[n],text:async n=>{
+            if(!files[n])throw Error('Missing workbook component: '+n);
+            let f=files[n];
+            if(f.method!==0&&f.method!==8)throw Error('Unsupported ZIP compression.');
+            return new TextDecoder().decode(f.method===0?f.bytes:await inflate(f.bytes,'deflate-raw'))
+        }
+
+    }
+
+}
+async function parseXlsx(buffer){
+    let z=await zipEntries(buffer),parse=s=>{
+        let x=new DOMParser().parseFromString(s,'application/xml');
+        if(x.getElementsByTagName('parsererror').length)throw Error('Invalid workbook XML');
+        return x
+    }
+    ,els=(x,n)=>Array.from(x.getElementsByTagNameNS('*',n)),ss=z.has('xl/sharedStrings.xml')?els(parse(await z.text('xl/sharedStrings.xml')),'si').map(si=>els(si,'t').map(t=>t.textContent).join('')):[],styles=z.has('xl/styles.xml')?parse(await z.text('xl/styles.xml')):null,numF={
+
+    }
+    ;
+    if(styles)els(styles,'numFmt').forEach(x=>numF[x.getAttribute('numFmtId')]=x.getAttribute('formatCode'));
+    let dateStyles=styles?els(styles,'cellXfs').flatMap(x=>els(x,'xf')).map(x=>{
+        let id=+x.getAttribute('numFmtId'),f=(numF[id]||'').replace(/"[^"]*"|\[[^\]]*\]/g,'');return id>=14&&id<=22||id>=45&&id<=47||/[ymdhis]/i.test(f)
+    }
+    ):[],wb=parse(await z.text('xl/workbook.xml')),rel=parse(await z.text('xl/_rels/workbook.xml.rels')),rels={
+
+    }
+    ;
+    els(rel,'Relationship').forEach(x=>rels[x.getAttribute('Id')]=x.getAttribute('Target'));
+    let out={
+
+    }
+    ,epoch=els(wb,'workbookPr')[0]?.getAttribute('date1904')==='1'?Date.UTC(1904,0,1):Date.UTC(1899,11,30);
+    for(let sheet of els(wb,'sheet')){
+        let target=rels[sheet.getAttribute('r:id')],path=target.startsWith('/')?target.slice(1):'xl/'+target;
+        let xml=parse(await z.text(path)),a=[];
+        for(let row of els(xml,'row')){
+            let rn=+row.getAttribute('r')-1;
+            if(rn>200000)throw Error('Worksheet exceeds supported 200,000 row limit.');
+            let r=[];
+            for(let c of els(row,'c')){
+                let ref=c.getAttribute('r')||'',letters=(ref.match(/^[A-Z]+/)||['A'])[0],j=[...letters].reduce((s,ch)=>s*26+ch.charCodeAt(0)-64,0)-1,t=c.getAttribute('t'),v=els(c,'v')[0]?.textContent,value=null;
+                if(t==='s')value=ss[+v]??null;
+                else if(t==='inlineStr')value=els(c,'t').map(t=>t.textContent).join('');
+                else if(t==='b')value=v==='1';
+                else if(t==='str'||t==='e'||t==='d')value=v??null;
+                else if(v!==undefined&&v!==''){
+                    value=+v;
+                    if(dateStyles[+c.getAttribute('s')]){
+                        let d=new Date(epoch+value*86400000);
+                        value=value>=0&&value<1?d.toISOString().slice(11,19):d.toISOString()
+                    }
+
+                }
+                r[j]=value
+            }
+            a[rn]=r
+        }
+        for(let i=0;i<a.length;i++)a[i]=a[i]||[];
+        out[sheet.getAttribute('name')]=a
+    }
+    return out
+}
+function allScheduleRows(runs=model.results){
+    let h=['Week commencing','Week ending','Location','Role','Revision','Employee ID','Employee','Date','Day','Start','End','End date','Assignment type','Paid hours','Weekly shift target'];
+    let a=[h];
+    for(let r of runs)for(let e of r.employees)for(let d=0;d<7;d++){
+        let s=e.slots[d],date=addDays(r.start,d);
+        a.push([r.start,r.end,r.location,r.role,r.revision,e.id,e.name,date,DAYS[d],s===null?(e.timeOff?.[d]?'time-off':'OFF'):timeLabel(s),s===null?'':timeLabel(s+r.controls.span),s===null?'':addDays(date,Math.floor((s+r.controls.span)/24)),s===null?(e.timeOff?.[d]?'Time-off':'OFF'):e.types[d],s===null?0:r.controls.hours,r.controls.shifts])
+    }
+    return a
+}
+function safeCSV(a){
+    return '\ufeff'+a.map(r=>r.map(x=>{
+        let t=String(x??'');if(typeof x!=='number'&&/^[=+@\-]/.test(t))t="'"+t;return '"'+t.replace(/"/g,'""')+'"'
+    }
+    ).join(',')).join('\r\n')
+}
+function downloadCSV(){
+    downloadFile('CBL-All-Location-Role-Schedules.csv',new Blob([safeCSV(allScheduleRows())],{
+        type:'text/csv;charset=utf-8'
+    }
+    ))
+}
+function xml(v){
+    return String(v??'').replace(/[<>&"']/g,x=>({
+        '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'
+    }
+    [x])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'')
+}
+function columnName(i){
+    let s='';
+    for(i++;i;i=Math.floor((i-1)/26))s=String.fromCharCode(65+(i-1)%26)+s;
+    return s
+}
+function sheetXML(a){
+    let cols=Math.max(1,...a.map(r=>r.length));
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>'+Array.from({
+        length:cols
+    }
+    ,(_,i)=>`<col min="${i+1}" max="${i+1}" width="${i<4?22:18}" customWidth="1"/>`).join('')+'</cols><sheetData>'+a.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>{
+        let c=columnName(j)+(i+1);return typeof v==='number'&&Number.isFinite(v)?`<c r="${c}" s="${i===0?1:0}"><v>${v}</v></c>`:`<c r="${c}" t="inlineStr" s="${i===0?1:0}"><is><t xml:space="preserve">${xml(v)}</t></is></c>`
+    }
+    ).join('')}</row>`).join('')+'</sheetData><autoFilter ref="A1:'+columnName(cols-1)+Math.max(1,a.length)+'"/></worksheet>'
+}
+const CRC_TABLE=Array.from({
+    length:256
+}
+,(_,n)=>{
+    let c=n;for(let i=0;i<8;i++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0
+}
+);
+function crc32(b){
+    let c=0xffffffff;
+    for(let x of b)c=CRC_TABLE[(c^x)&255]^(c>>>8);
+    return (c^0xffffffff)>>>0
+}
+function zipStore(files,type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'){
+    let out=[],central=[],offset=0;
+    const enc=new TextEncoder();
+    for(let [name,input] of Object.entries(files)){
+        let nb=enc.encode(name),data=typeof input==='string'?enc.encode(input):input,crc=crc32(data),head=new Uint8Array(30+nb.length),v=new DataView(head.buffer);
+        v.setUint32(0,0x04034b50,true);
+        v.setUint16(4,20,true);
+        v.setUint16(6,0x800,true);
+        v.setUint32(14,crc,true);
+        v.setUint32(18,data.length,true);
+        v.setUint32(22,data.length,true);
+        v.setUint16(26,nb.length,true);
+        head.set(nb,30);
+        out.push(head,data);
+        let ch=new Uint8Array(46+nb.length),cv=new DataView(ch.buffer);
+        cv.setUint32(0,0x02014b50,true);
+        cv.setUint16(4,20,true);
+        cv.setUint16(6,20,true);
+        cv.setUint16(8,0x800,true);
+        cv.setUint32(16,crc,true);
+        cv.setUint32(20,data.length,true);
+        cv.setUint32(24,data.length,true);
+        cv.setUint16(28,nb.length,true);
+        cv.setUint32(42,offset,true);
+        ch.set(nb,46);
+        central.push(ch);
+        offset+=head.length+data.length
+    }
+    let size=central.reduce((s,x)=>s+x.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);
+    ev.setUint32(0,0x06054b50,true);
+    ev.setUint16(8,central.length,true);
+    ev.setUint16(10,central.length,true);
+    ev.setUint32(12,size,true);
+    ev.setUint32(16,offset,true);
+    return new Blob([...out,...central,end],{type})
+}
+function workbookBlob(sheets){
+    let names=Object.keys(sheets),files={
+
+    }
+    ;
+    files['[Content_Types].xml']='<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+names.map((n,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>';
+    files['_rels/.rels']='<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    files['xl/workbook.xml']='<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+names.map((n,i)=>`<sheet name="${xml(n.slice(0,31))}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')+'</sheets></workbook>';
+    files['xl/_rels/workbook.xml.rels']='<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+names.map((n,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="rId${names.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+    files['xl/styles.xml']='<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF153746"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    names.forEach((n,i)=>files[`xl/worksheets/sheet${i+1}.xml`]=sheetXML(sheets[n]));
+    return zipStore(files)
+}
+function exportTables(runs=model.results){
+    let sheets={
+        'All Schedules':allScheduleRows(runs),Coverage:[['Week commencing','Week ending','Location','Role','Revision','Date','Shift','Required','Demand filled','Unfilled','Make-up']],Controls:[['Week commencing','Week ending','Location','Role','Revision','Headcount','Shifts target','Paid hours','Elapsed span','Rest hours','Preference weight','Proximity weight','Random weight','Attendance enabled','Attendance bonus','Make-up enabled','6 AM share','8:30 AM share','2 PM share','10 PM share','Randomized','Shuffle seed']],Shortfalls:[['Week commencing','Location','Role','Employee ID','Employee','Missing shifts']],Notes:[['Topic','Details'],['Source',model.sourceName],['Engine','Browser implementation of scheduling model; generated values, not Excel recalculation.'],['Make-up','Supplemental shifts are additional to primary demand.'],['Dates','Week periods and employee shift dates included.'],['Rest','Rest uses elapsed shift span, including generated consecutive weeks.'],['Revision','Every run has its own saved controls, roster and operating pattern.']]
+    }
+    ;
+    for(let r of runs){
+        let c=r.controls;
+        sheets.Controls.push([r.start,r.end,r.location,r.role,r.revision,r.employees.length,c.shifts,c.hours,c.span,c.rest,c.preference,c.proximity,c.random,c.attendanceEnabled,c.bonus,c.makeup,...r.shares,c.shuffle?'Yes':'No',c.seed]);
+        for(let d=0;d<7;d++)for(let j=0;j<4;j++){
+            let got=r.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Demand').length;
+            sheets.Coverage.push([r.start,r.end,r.location,r.role,r.revision,addDays(r.start,d),timeLabel(STARTS[j]),r.requirements[d][j],got,r.requirements[d][j]-got,r.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Make-up').length])
+        }
+        for(let e of r.shortages)sheets.Shortfalls.push([r.start,r.location,r.role,e.id,e.name,e.missing])
+    }
+    let weekly=[['Week commencing','Week ending','Location','Role','Revision','ID','Employee',...DAYS,'Shifts','Paid hours','Missing shifts']];
+    for(let r of runs)for(let e of r.employees)weekly.push([r.start,r.end,r.location,r.role,r.revision,e.id,e.name,...e.slots.map((s,i)=>s===null?(e.timeOff?.[i]?'time-off':'OFF'):shiftLabel(s,r.controls.span)+(e.types[i]==='Make-up'?' +':'')),e.slots.filter(s=>s!==null).length,e.slots.filter(s=>s!==null).length*r.controls.hours,Math.max(0,r.controls.shifts-e.slots.filter(s=>s!==null).length)]);
+    return {
+        'Weekly Schedules':weekly,...sheets,...(typeof overtimeRows==='function'?{
+            'Overtime Estimates':overtimeRows(runs)
+        }
+        :{
+
+        }
+        ),...(typeof tradeLogRows==='function'?{
+            'Shift Trades':tradeLogRows(runs)
+        }
+        :{
+
+        }
+        ),...(typeof timeOffExportRows==='function'?{
+            'Time-offs':timeOffExportRows(runs)
+        }
+        :{
+
+        }
+        )
+    }
+
+}
+function downloadSchedules(){
+    if(!model.results.length)throw Error('Generate schedules first');
+    downloadFile('CBL-All-Location-Role-Schedules.xlsx',workbookBlob(exportTables()))
+}
+function inputTables(){
+    let roster=[['ID','Employee',...ROSTER_FIELDS.map(x=>x[1]),'Previous start','Attendance rank','Input check','Location','Role']],meta=[['Location',...DAYS.map(d=>d+' I'),'Total I',...DAYS,'Shift Total']],pools=[['Location','Role','Headcount','6 AM share','8:30 AM share','2 PM share','10 PM share','Enabled']],controls=[['Setting','Value'],...Object.entries(model.controls)],names=model.roster.map(e=>[e.id,e.name,e.flex,e.reason,e.preferred,e.proximity,e.random,e.attendance,...e.allow,...e.days,e.previous,'',rosterErrors(e).length?'CHECK':'OK',e.location,e.role]);
+    roster.push(...names);
+    for(let l of model.locations)meta.push([l.name,...l.intensity,sum(l.intensity.map(x=>x||0)),...l.open,sum(l.open)]);
+    for(let p of model.pools)pools.push([p.location,p.role,poolRoster(model,p).length,...p.shares,p.enabled?1:0]);
+    return {
+        ...(typeof overtimeInputTables==='function'?overtimeInputTables():{
+
+        }
+        ),Roster:roster,'Location Roles':pools,META:meta,Controls:controls,'Read me':[['Description','Value'],['Export type','Input values snapshot. Original Excel engine formulas are not included.'],['Reimport','Use workspace JSON backup for exact reimport. Upload original-layout source workbooks through Upload source.'],['Source',model.sourceName]]
+    }
+
+}
+function downloadInputs(){
+    downloadFile('CBL-Scheduling-Configured-Inputs.xlsx',workbookBlob(inputTables()))
+}
+const PAGE_OPTIONS=[['home','Overview'],['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['meta','META · operating days'],['schedules','Weekly schedules'],['source','Source & backups'],['links','Workforce Links']];
+function appSettings(){
+    if(!model.settings||typeof model.settings!=='object')model.settings={
+
+    }
+    ;
+    let s=model.settings;
+    if(!s.menus||typeof s.menus!=='object')s.menus={
+
+    }
+    ;
+    if(typeof s.workforceCc!=='boolean')s.workforceCc=true;
+    if(typeof s.holidays!=='string')s.holidays='';
+    return s
+}
+function pageAllowed(p){
+    return p==='settings'||['controls','schedules'].includes(p)||PAGE_OPTIONS.some(([id])=>id===p&&appSettings().menus[id]!==false)
+}
+function settingsPage(){
+    let s=appSettings();
+    return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+panel('Sidebar menu',`<div class="settingschecks">${PAGE_OPTIONS.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div><p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
+}
+function applyMenuSettings(){
+    if(!pageAllowed(page))page='controls';
+    document.querySelectorAll('[data-page]').forEach(e=>{
+        e.hidden=!pageAllowed(e.dataset.page)
+    }
+    );
+    let upload=$('sourcePickerButton');
+    if(upload)upload.hidden=!pageAllowed('source');
+
+}
+function jamaicaDate(now=new Date()){
+    let p=new Intl.DateTimeFormat('en-CA',{
+        timeZone:'America/Jamaica',year:'numeric',month:'2-digit',day:'2-digit'
+    }
+    ).formatToParts(now);
+    return ['year','month','day'].map(k=>p.find(x=>x.type===k).value).join('-')
+}
+function businessDeadline(sent,holidays=''){
+    let excluded=new Set(holidays.split(/[\s,;]+/).filter(Boolean)),d=sent,n=0;
+    while(n<5){
+        d=addDays(d,1);
+        let day=new Date(d+'T12:00:00Z').getUTCDay();
+        if(day!==0&&day!==6&&!excluded.has(d))n++
+    }
+    return d
+}
+function prettyDate(d){
+    return new Intl.DateTimeFormat('en-JM',{
+        timeZone:'UTC',weekday:'long',day:'numeric',month:'long',year:'numeric'
+    }
+    ).format(new Date(d+'T12:00:00Z'))
+}
+function titleName(name){
+    return name.trim().replace(/\s+/g,' ').toLocaleLowerCase().replace(/(^|[\s\-'’])\p{L}/gu,c=>c.toLocaleUpperCase())
+}
+function validEmail(v){
+    return /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v)&&!/[\r\n]/.test(v)
+}
+function emailPackage(recipients,ids,sent=jamaicaDate()){
+
+     if(!recipients.length)throw Error('Add at least one recipient.');
+    let people=recipients.map(p=>({
+        name:titleName(p.name),email:p.email.trim()
+    }
+    ));
+    if(people.some(p=>!p.name||/[\r\n<>]/.test(p.name)||!validEmail(p.email)))throw Error('Enter a name and valid email address for every recipient.');
+    if(new Set(people.map(p=>p.email.toLowerCase())).size!==people.length)throw Error('Remove duplicate recipient email addresses.');
+    let wanted=new Set(ids),runs=model.results.filter(r=>wanted.has(r.id));
+    if(!runs.length)throw Error('Select at least one generated schedule.');
+    let cc=appSettings().workforceCc?'workforce@cbljm.co':'',deadline=businessDeadline(sent,appSettings().holidays),periods=[...new Set(runs.map(r=>r.start+' to '+r.end))],subject='Schedule review and confirmation — '+(periods.length===1?periods[0]:periods.length+' weekly periods'),body='Dear '+people.map(p=>p.name).join(', ')+',\n\nPlease review the attached workbook containing the following proposed schedules:\n\n'+runs.map(r=>'• '+r.location+' — '+r.role+' | '+r.start+' to '+r.end+' | revision '+r.revision).join('\n')+'\n\nPlease confirm the schedules or provide any required changes no later than '+prettyDate(deadline)+' (five business days from '+prettyDate(sent)+'). Please check employee availability, shift coverage and any scheduling conflicts, and reply to all with your confirmation or requested changes.\n\nThank you,\nWorkforce Management\nPeople & Culture\nCelebration Brands Limited';
+    return {
+        people,runs,cc,subject,body,sent,deadline,filename:'CBL-Schedules-for-Review-'+sent+'.xlsx'
+    }
+    ;
+
+
+}
+function recipientFields(){
+    return '<div class="recipientrow"><label>Recipient name<input data-recipient-name required maxlength="120" autocomplete="name" placeholder="Full name"></label><label>Email address<input type="email" data-recipient-email required maxlength="254" autocomplete="email" placeholder="name@example.com"></label><button type="button" data-email-command="remove" aria-label="Remove recipient">Remove</button></div>'
+}
+function openEmail(){
+    if(!model.results.length){
+        message('Generate schedules before preparing an email.',true);
+        return
+    }
+    let dlg=$('emailDialog');
+    dlg.innerHTML=`<div id="emailForm"><div class="dialoghead"><div><div class="eyebrow">SCHEDULE REVIEW</div><h2>Prepare schedule email</h2></div><button type="button" data-email-command="close" aria-label="Close">✕</button></div><p>Select the saved weeks and location roles to include in one workbook. All To recipients will receive every selected schedule.</p><fieldset><legend>1 · Select generated schedules</legend><div class="actions"><button type="button" data-email-command="selectAll">Select all</button><button type="button" data-email-command="selectNone">Clear</button></div><div class="schedulechoices">${model.results.map(r=>`<label><input type="checkbox" data-email-run value="${esc(r.id)}" ${r.id===model.selectedRun?'checked':''}> <span><b>${esc(r.location)} · ${esc(r.role)}</b><small>${r.start} to ${r.end} · revision ${r.revision}</small></span></label>`).join('')}</div></fieldset><fieldset><legend>2 · Recipients</legend><div id="emailRecipients">${recipientFields()}</div><button type="button" data-email-command="add">Add recipient</button><p>Cc: <strong>${appSettings().workforceCc?'workforce@cbljm.co · fixed in Settings':'Disabled in Settings'}</strong></p></fieldset><div class="callout">The default mail client receives the To, Cc, subject and wording. Browser email links cannot attach files: download the single workbook below and attach it manually. Outlook opens if it is your default email application. Outlook online automation requires a configured Microsoft connection.</div><div class="actions"><button type="button" data-email-command="preview" class="primary">Preview email & workbook</button></div><p id="emailError" class="badtext" role="alert"></p><section id="emailPreview" hidden><h3>Email preview</h3><p id="emailDeadline"></p><label>Subject<input id="emailSubject" readonly></label><label>Message<textarea id="emailBody" rows="12" readonly></textarea></label><div class="actions"><button type="button" data-email-command="workbook">1 · Download selected schedules · XLSX</button><button type="button" data-email-command="client">2 · Open default mail client</button><button type="button" data-email-command="copy">Copy full email template</button><button type="button" data-email-command="template">Download email template · TXT</button></div><p class="note">Attach the downloaded XLSX before sending. The app prepares a draft; it does not send the message. Refresh the preview if the sending date changes.</p></section></div>`;
+    dlg.showModal();
+
+}
+let preparedEmail=null;
+function prepareEmail(){
+    try{
+        preparedEmail=emailPackage([...$('emailRecipients').querySelectorAll('.recipientrow')].map(e=>({
+            name:e.querySelector('[data-recipient-name]').value,email:e.querySelector('[data-recipient-email]').value
+        }
+        )),[...$('emailDialog').querySelectorAll('[data-email-run]:checked')].map(e=>e.value));
+        $('emailSubject').value=preparedEmail.subject;
+        $('emailBody').value=preparedEmail.body;
+        $('emailDeadline').textContent='Prepared: '+prettyDate(preparedEmail.sent)+' · Confirmation due: '+prettyDate(preparedEmail.deadline);
+        $('emailPreview').hidden=false;
+        $('emailError').textContent='';
+        return preparedEmail
+    }
+    catch(e){
+        preparedEmail=null;
+        $('emailPreview').hidden=true;
+        $('emailError').textContent=e.message;
+        return null
+    }
+
+}
+function emailTemplate(p){
+    return 'To: '+p.people.map(x=>x.name+' <'+x.email+'>').join('; ')+'\nCc: '+p.cc+'\nSubject: '+p.subject+'\nAttachment: '+p.filename+'\n\n'+p.body
+}
+function mailtoUrl(p){
+    return 'mailto:'+p.people.map(x=>encodeURIComponent(x.email)).join(',')+'?'+new URLSearchParams({
+        cc:p.cc,subject:p.subject,body:p.body
+    }
+    ).toString().replace(/\+/g,'%20')
+}
+document.addEventListener('change',e=>{
+    if(!model)return;let t=e.target;if(t.dataset.menuSetting){
+        let id=t.dataset.menuSetting;if(!['controls','schedules'].includes(id))appSettings().menus[id]=t.checked;render();queueSave()
+    }
+    if(t.id==='workforceCcSetting'){
+        appSettings().workforceCc=t.checked;queueSave()
+    }
+    if(t.id==='holidaySetting'){
+        let dates=t.value.trim().split(/\s+/).filter(Boolean);if(dates.some(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d)||Number.isNaN(Date.parse(d+'T12:00:00Z'))||new Date(d+'T12:00:00Z').toISOString().slice(0,10)!==d)){
+            message('Enter valid non-working dates, one YYYY-MM-DD per line.',true);t.value=appSettings().holidays;return
+        }
+        appSettings().holidays=dates.join('\n');queueSave()
+    }
+
+}
+);
+document.addEventListener('input',e=>{
+    if(e.target.closest?.('#emailForm')&&$('emailPreview')){
+        preparedEmail=null;$('emailPreview').hidden=true
+    }
+
+}
+);
+document.addEventListener('click',async e=>{
+    let b=e.target.closest('[data-email-command]');if(!b)return;let cmd=b.dataset.emailCommand;if(cmd==='close'){
+        $('emailDialog').close();preparedEmail=null;return
+    }
+    if(cmd==='add'){
+        $('emailRecipients').insertAdjacentHTML('beforeend',recipientFields());$('emailPreview').hidden=true;return
+    }
+    if(cmd==='remove'){
+        if($('emailRecipients').children.length>1)b.closest('.recipientrow').remove();$('emailPreview').hidden=true;return
+    }
+    if(cmd==='selectAll'||cmd==='selectNone'){
+        $('emailDialog').querySelectorAll('[data-email-run]').forEach(x=>x.checked=cmd==='selectAll');$('emailPreview').hidden=true;return
+    }
+    let p=prepareEmail();if(!p)return;try{
+        if(cmd==='workbook')downloadFile(p.filename,workbookBlob(exportTables(p.runs)));if(cmd==='client'){
+            let url=mailtoUrl(p);if(url.length>7000)throw Error('This message is too long for a reliable email link. Use Copy full email template instead.');window.location.href=url;$('emailError').textContent='Mail client requested. Download and attach '+p.filename+' before sending.'
+        }
+        if(cmd==='template')downloadFile('CBL-Schedule-Email-'+p.sent+'.txt',new Blob([emailTemplate(p)],{
+            type:'text/plain;charset=utf-8'
+        }
+        ));if(cmd==='copy'){
+            try{
+                await navigator.clipboard.writeText(emailTemplate(p));$('emailError').textContent='Email template copied, including To, Cc and subject.'
+            }
+            catch{
+                downloadFile('CBL-Schedule-Email-'+p.sent+'.txt',new Blob([emailTemplate(p)],{
+                    type:'text/plain;charset=utf-8'
+                }
+                ));$('emailError').textContent='Clipboard unavailable. Email template downloaded as text instead.'
+            }
+
+        }
+
+    }
+    catch(err){
+        $('emailError').textContent=err.message
+    }
+
+}
+);
+const WORKFORCE_LINKS=[["Workforce Command Centre", "https://cbljm.sharepoint.com/:x:/r/sites/TeamHR/_layouts/15/Doc.aspx?sourcedoc=%7B9D205D8A-E2A3-45FF-95B6-5897231A5306%7D&file=Workforce%20Command%20Centre%20%26%20SDG.xlsx&action=default&mobileredirect=true&wdwpf=doclib-t"], ["Workforce Time Tracking", "https://cbljm.sharepoint.com/:x:/r/sites/TeamHR/_layouts/15/Doc.aspx?sourcedoc=%7BE98BAF89-E458-444F-839A-371EAC8C2503%7D&file=Workforce%20-%20Time%20Tracking.xlsx&action=default&mobileredirect=true&wdwpf=doclib-t"], ["Shifts Log", "https://cbljm.sharepoint.com/:x:/r/sites/TeamHR/_layouts/15/Doc.aspx?sourcedoc=%7B6D2C4B79-5C53-45B2-9807-851579FB556D%7D&file=Shifts.xlsx&action=default&mobileredirect=true&wdwpf=doclib-t"], ["Scheduling Matrix", "https://cbljm.sharepoint.com/:x:/r/sites/TeamHR/_layouts/15/Doc.aspx?sourcedoc=%7BBC4F3586-9271-49FB-A802-9CE9247CB8CD%7D&file=Weekly_Scheduling_Matrix_by_Role.xlsx&action=default&mobileredirect=true&wdwpf=doclib-t"], ["BambooHR API Documentation", "https://documentation.bamboohr.com/reference/"], ["BambooHR", "https://cbljm.bamboohr.com/"], ["TeamHR Sharepoint site", "https://cbljm.sharepoint.com/sites/TeamHR/SitePages/CollabHome.aspx"]];
+function workforceLinksPage(){
+    return heading("WORKFORCE / RESOURCES","Workforce Links","Open the shared workbooks, HR tools and documentation in a new tab.")+panel("Workforce resources",`<div class="workforce-links">${WORKFORCE_LINKS.map(([label,url],i)=>`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer"><span class="resource-number">${String(i+1).padStart(2,"0")}</span><span><b>${esc(label)}</b><small>${url.includes("sharepoint")?"Microsoft SharePoint":url.includes("documentation")?"Developer reference":"Employee platform"} · opens in a new tab</small></span><span aria-hidden="true">↗</span></a>`).join("")}</div>`)
+}
+function warehouseRole(role){
+    return String(role).trim().toLowerCase()==='warehouse'
+}
+function overtimeConfig(m=model){
+    if(!m.overtime||typeof m.overtime!=='object')m.overtime={
+
+    }
+    ;
+    let o=m.overtime;
+    for(let k of ['capacity','minimum','volumes'])if(!o[k]||typeof o[k]!=='object'||Array.isArray(o[k]))o[k]={
+
+    }
+    ;
+    if(typeof o.unit!=='string'||!o.unit.trim())o.unit='units';
+    return o
+}
+function positiveNumber(v){
+    return isNum(v)&&Number(v)>0?Number(v):null
+}
+function validShares(s){
+    return Array.isArray(s)&&s.length===4&&s.every(x=>isNum(x)&&x>=0&&x<=1)&&Math.abs(s.reduce((a,x)=>a+Number(x),0)-1)<.0001
+}
+function allocateMinimum(total,shares){
+    let raw=shares.map(x=>x*total),counts=raw.map(Math.floor),left=total-counts.reduce((a,x)=>a+x,0),order=raw.map((x,i)=>({
+        i,f:x-Math.floor(x)
+    }
+    )).sort((a,b)=>b.f-a.f||a.i-b.i);
+    for(let i=0;i<left;i++)counts[order[i].i]++;
+    return counts
+}
+function overtimeSnapshot(m,p,start){
+    let o=overtimeConfig(m);
+    return {
+        version:1,unit:o.unit,capacity:positiveNumber(o.capacity[p.location]),minimum:positiveNumber(o.minimum[p.id]),volumes:Array.from({
+            length:7
+        }
+        ,(_,d)=>{
+            let v=o.volumes[p.location]?.[addDays(start,d)];return isNum(v)&&Number(v)>=0?Number(v):null
+        }
+        )
+    }
+
+}
+function overtimeEstimate(run){
+    let o=run.overtime,warehouse=warehouseRole(run.role),basis=warehouse?'Warehouse volume':'Minimum daily headcount',rows=[];
+    for(let d=0;d<7;d++){
+        let volume=warehouse?o?.volumes?.[d]??null:null,capacity=warehouse?positiveNumber(o?.capacity):null,minimum=warehouse?null:positiveNumber(o?.minimum),open=run.locationPattern.open[d]===1,status=!o?'No overtime configuration saved':warehouse?!capacity?'No FTE capacity set':volume===null?'No daily volume entered':!open&&volume>0?'Closed day — review operating calendar':'Ready':!minimum?'No minimum headcount set':!open?'Closed day — no minimum demand':'Ready';
+        if(!validShares(run.shares))status='Shift shares incomplete';
+        let ready=status==='Ready',needed=ready?(warehouse?run.shares.map(s=>volume*s/capacity):allocateMinimum(minimum,run.shares)):null;
+        for(let j=0;j<4;j++){
+            let staff=run.employees.filter(e=>e.slots[d]===STARTS[j]).length,required=needed?.[j]??null,short=required===null?null:Math.max(0,required-staff),hours=short===null?null:Math.ceil(Math.max(0,short*run.controls.hours-1e-9)*100)/100;
+            rows.push({
+                date:addDays(run.start,d),day:DAYS[d],start:STARTS[j],basis,status,open,volume:warehouse&&volume!==null?volume*run.shares[j]:null,capacity,minimum,required,staff,short,hours
+            }
+            )
+        }
+
+    }
+    return rows
+}
+function overtimePanel(run){
+    let rows=overtimeEstimate(run),known=rows.filter(r=>r.hours!==null),total=known.reduce((n,r)=>n+r.hours,0),days=Array.from({
+        length:7
+    }
+    ,(_,d)=>rows.slice(d*4,d*4+4));
+    return panel('Overtime planning · daily and shift estimates',`<p>${warehouseRole(run.role)?'Warehouse demand uses saved daily volume ÷ volume per FTE per paid shift, distributed by shift shares.':'Minimum daily headcount is distributed across shifts using whole-person rounding.'} Scheduled demand and make-up staff both count toward capacity.</p><div class="actions">${badge(known.length?f(total,2)+' suggested staff-hours':'No overtime suggested',known.length&&total>0?'warn':'')}${badge('Volume unit: '+(run.overtime?.unit||'units'))}</div><div class="tablewrap"><table><thead><tr><th>Date / day</th><th>Basis / input status</th>${STARTS.map(s=>'<th>'+timeLabel(s)+'<small>Scheduled / required · OT hours</small></th>').join('')}<th>Daily OT hours</th></tr></thead><tbody>${days.map(rs=>`<tr><td>${rs[0].date}<small>${rs[0].day}</small></td><td>${esc(rs[0].status)}<small>${warehouseRole(run.role)?'Daily volume: '+(run.overtime?.volumes?.[DAYS.indexOf(rs[0].day)]??'Not entered')+' · capacity/FTE: '+(run.overtime?.capacity??'Not set'):'Min daily HC: '+(run.overtime?.minimum??'Not set')}</small></td>${rs.map(r=>`<td class="${r.hours>0?'gap':''}">${r.staff} / ${r.required===null?'—':f(r.required,2)}<small>${r.hours===null?'No suggestion':f(r.hours,2)+'h suggested'}</small></td>`).join('')}<td>${rs.some(r=>r.hours!==null)?f(rs.reduce((n,r)=>n+(r.hours||0),0),2)+'h':'—'}</td></tr>`).join('')}</tbody></table></div><p class="note">Additional staff-hours = max(required FTE − scheduled staff, 0) × paid hours per shift; totals sum shift deficits, without offsetting surplus staff on another shift. Figures are rounded up to 0.01 hour per shift. These are coverage estimates, not employee overtime assignments or approvals. Existing schedule and rest constraints are unchanged. Missing configuration or volume suppresses suggestions; a closed day with volume requires calendar review. Saved estimates use the configuration captured when generated.</p>`)
+}
+function overtimeSettingsPanel(){
+    let o=overtimeConfig(),locations=[...new Set(model.pools.filter(p=>warehouseRole(p.role)).map(p=>p.location))];
+    return panel('Warehouse FTE volume capacity',`<p>Set the average volume one warehouse FTE handles during one normal paid shift. Leave blank or enter 0 to disable volume-based overtime suggestions for that location. This applies only to the Warehouse role, not warehouse supervisors.</p><label>Volume unit · use the same unit for capacity and daily volumes<input type="text" maxlength="40" value="${esc(o.unit)}" data-ot-unit ${disabled()}></label><div class="tablewrap"><table><thead><tr><th>Location</th><th>Average volume / FTE / paid shift</th><th>Overtime basis</th></tr></thead><tbody>${locations.map(loc=>`<tr><td>${esc(loc)}</td><td><input type="number" min="0" max="1000000000000" step="any" value="${esc(o.capacity[loc]??'')}" data-ot-capacity="${esc(loc)}" ${disabled()} aria-label="Average warehouse volume per FTE for ${esc(loc)}"></td><td>${positiveNumber(o.capacity[loc])?'Volume-based enabled':'Disabled · capacity not set'}</td></tr>`).join('')}</tbody></table></div><p class="note">Unlock in Controls & lock to edit. For other roles, set Min daily HC in Location roles. Capacity settings and weekly volumes are captured with newly generated schedules.</p>`)
+}
+function volumeConfiguration(){
+    let o=overtimeConfig(),pools=model.pools.filter(p=>p.enabled&&warehouseRole(p.role)&&(filterLoc==='All'||p.location===filterLoc)),valid=/^\d{4}-\d{2}-\d{2}$/.test(model.controls.week)&&!Number.isNaN(Date.parse(model.controls.week))&&new Date(model.controls.week+'T00:00:00Z').getUTCDay()===1;
+    if(!valid)return panel('Daily warehouse volume · by configured week','<p>Select a valid Monday in Controls & lock to map dated weekly volumes.</p>');
+    let rows=[];
+    for(let p of pools)for(let w=0;w<scheduleWeeks(model);w++){
+        let start=addDays(model.controls.week,w*7),l=model.locations.find(l=>l.name===p.location),r=[...model.results].reverse().find(r=>r.location===p.location&&r.role===p.role&&r.start===start&&r.revision===model.revision),est=r?overtimeEstimate({
+            ...r,overtime:overtimeSnapshot(model,p,start),shares:p.shares
+        }
+        ):null;
+        rows.push(`<tr><td>${esc(p.location)}<small>${esc(p.role)}</small><small>${positiveNumber(o.capacity[p.location])?f(o.capacity[p.location],2)+' '+esc(o.unit)+'/FTE':'No FTE capacity · no OT suggestion'}</small></td><td>${start}<small>to ${addDays(start,6)}</small></td>${DAYS.map((day,d)=>{
+            let date=addDays(start,d),value=o.volumes[p.location]?.[date]??'',rs=est?.slice(d*4,d*4+4),known=rs?.some(x=>x.hours!==null),hours=known?rs.reduce((s,x)=>s+(x.hours||0),0):null;return `<td><small>${date}${l?.open[d]===0?' · Closed':''}</small><input type="number" min="0" max="1000000000000" step="any" value="${esc(value)}" data-ot-volume="${esc(p.location)}" data-ot-date="${date}" ${disabled()} aria-label="${esc(p.location)} ${date} warehouse volume"><small>${!positiveNumber(o.capacity[p.location])?'Capacity not set':value===''?'Volume not entered':l?.open[d]===0&&Number(value)>0?'Closed day · review META':!r?'Generate schedule for OT estimate':hours===null?'No suggestion':f(hours,2)+'h estimated OT'}</small></td>`
+        }
+        ).join('')}</tr>`)
+    }
+    return panel('Daily warehouse volume · by configured week',`<p>Enter volume for each day of every selected Warehouse week. Dates follow Week commencing in Controls. The four shift shares above split each day’s volume; META controls operating days. Volume is used only for Warehouse overtime estimates.</p>${rows.length?`<div class="tablewrap volumetable"><table><thead><tr><th>Location / capacity</th><th>Week period</th>${DAYS.map(d=>'<th>'+d+' volume</th>').join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p>Enable a Warehouse location-role pool above to map its weekly daily volumes.</p>'}<p class="note">Leave a day blank for no volume estimate. Enter 0 for an explicitly zero-volume day. Settings → Warehouse FTE volume capacity sets the per-location denominator. Suggestions compare each shift’s required FTE with actual scheduled staff; generate again after updating configuration to save the new estimates.</p>`)
+}
+function overtimeRows(runs){
+    let a=[['Week commencing','Week ending','Location','Role','Revision','Date','Day','Shift','Basis','Status','Volume unit','Shift volume','Volume per FTE per paid shift','Minimum daily headcount','Required FTE / HC','Scheduled staff','Additional FTE / HC','Suggested OT staff-hours','Paid hours per shift']];
+    for(let r of runs)for(let x of overtimeEstimate(r))a.push([r.start,r.end,r.location,r.role,r.revision,x.date,x.day,timeLabel(x.start),x.basis,x.status,r.overtime?.unit??'',x.volume,x.capacity,x.minimum,x.required,x.staff,x.short,x.hours,r.controls.hours]);
+    return a
+}
+function overtimeInputTables(){
+    let o=overtimeConfig(),capacity=[['Location','Warehouse volume per FTE per paid shift','Volume unit']],minimum=[['Location','Role','Minimum daily headcount']],volumes=[['Location','Date','Daily warehouse volume','Volume unit']];
+    for(let l of [...new Set(model.pools.filter(p=>warehouseRole(p.role)).map(p=>p.location))])capacity.push([l,o.capacity[l]??null,o.unit]);
+    for(let p of model.pools.filter(p=>!warehouseRole(p.role)))minimum.push([p.location,p.role,o.minimum[p.id]??null]);
+    for(let [l,dates] of Object.entries(o.volumes))for(let [date,value] of Object.entries(dates))volumes.push([l,date,value,o.unit]);
+    return {
+        'OT FTE Capacity':capacity,'OT Minimum HC':minimum,'OT Daily Volumes':volumes
+    }
+
+}
+function overtimeInputChange(event){
+    let e=event.target;
+    if(!model||!e.dataset)return;
+    let field=e.hasAttribute?.('data-ot-unit')?'unit':e.dataset.otCapacity!==undefined?'capacity':e.dataset.otMinimum!==undefined?'minimum':e.dataset.otVolume!==undefined?'volume':null;
+    if(!field)return;
+    if(model.locked){
+        message('Unlock settings in Controls before changing overtime configuration.',true);
+        render();
+        return
+    }
+    let o=overtimeConfig();
+    if(field==='unit'){
+        let v=e.value.trim();
+        if(!v){
+            message('Enter a volume unit label.',true);
+            render();
+            return
+        }
+        o.unit=v.slice(0,40)
+    }
+    else{
+        let v=e.value===''?null:Number(e.value);
+        if(v!==null&&(!Number.isFinite(v)||v<0||v>1e12||field==='minimum'&&!Number.isInteger(v))){
+            message('Enter a non-negative '+(field==='minimum'?'whole headcount':'volume')+' within the allowed range.',true);
+            render();
+            return
+        }
+        if(field==='capacity')o.capacity[e.dataset.otCapacity]=v;
+        if(field==='minimum')o.minimum[e.dataset.otMinimum]=v;
+        if(field==='volume'){
+            let loc=e.dataset.otVolume,date=e.dataset.otDate;
+            if(!o.volumes[loc])o.volumes[loc]={
+
+            }
+            ;
+            if(v===null)delete o.volumes[loc][date];
+            else o.volumes[loc][date]=v
+        }
+
+    }
+    model.previousScheduleSet=null;
+    queueSave();
+    render()
+}
+document.addEventListener('change',overtimeInputChange);
+function overtimeIssues(m){
+    let o=m.overtime;
+    if(o===undefined||o===null)return [];
+    if(typeof o!=='object'||Array.isArray(o))return ['Overtime configuration must be an object'];
+    let errors=[];
+    function validValue(v,integer=false){
+        return v===null||v===''||isNum(v)&&Number(v)>=0&&Number(v)<=1e12&&(!integer||Number.isInteger(Number(v)))
+    }
+    for(let k of ['capacity','minimum','volumes']){
+        let map=o[k];
+        if(map===undefined)continue;
+        if(!map||typeof map!=='object'||Array.isArray(map)){
+            errors.push('Overtime '+k+' mapping is invalid');
+            continue
+        }
+        for(let [id,value] of Object.entries(map)){
+            if(k!=='volumes'){
+                if(!validValue(value,k==='minimum'))errors.push('Overtime '+k+': invalid value for '+id)
+            }
+            else if(!value||typeof value!=='object'||Array.isArray(value))errors.push('Overtime daily volumes: invalid mapping for '+id);
+            else for(let [date,v] of Object.entries(value)){
+                let dateValid=/^\d{4}-\d{2}-\d{2}$/.test(date)&&!Number.isNaN(Date.parse(date+'T00:00:00Z'))&&new Date(date+'T00:00:00Z').toISOString().slice(0,10)===date;
+                if(!dateValid||!validValue(v))errors.push('Overtime daily volume: invalid date or value for '+id+' '+date)
+            }
+
+        }
+
+    }
+    return errors
+}
+function scheduleFingerprint(r){
+    return JSON.stringify(r.employees.map(e=>[e.id,e.slots]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))))
+}
+function refreshBaseline(m){
+    if(!m.locked)throw Error('Lock the configuration before refreshing schedules.');
+    if(!m.results.length)throw Error('Generate schedules before refreshing.');
+    return m.results
+}
+function noWorseSchedule(r,b){
+    return !validateRun(r).length&&r.uncovered.length<=b.uncovered.length&&r.shortages.reduce((n,e)=>n+e.missing,0)<=b.shortages.reduce((n,e)=>n+e.missing,0)
+}
+function addRunHistory(history,r){
+    let abs=Date.parse(r.start+'T00:00:00Z')/36e5;
+    for(let e of r.employees){
+        let last=history.get(e.id)??-Infinity;
+        e.slots.forEach((s,d)=>{
+            if(s!==null)last=Math.max(last,abs+d*24+s+r.controls.span)
+        }
+        );
+        if(Number.isFinite(last))history.set(e.id,last)
+    }
+
+}
+function boundaryValid(r,next){
+    if(!next)return true;
+    let ends=new Map();
+    addRunHistory(ends,r);
+    let abs=Date.parse(next.start+'T00:00:00Z')/36e5;
+    for(let e of next.employees)for(let d=0;d<7;d++){
+        if(e.timeOff?.[d]&&ends.has(e.id)&&ends.get(e.id)>abs+d*24)return false;
+        if(e.slots[d]!==null&&ends.has(e.id)&&abs+d*24+e.slots[d]-ends.get(e.id)<next.controls.rest)return false
+    }
+    return true
+}
+function validateScheduleSequence(runs){
+    let issues=[];
+    for(let i=0;i<runs.length;i++){
+        issues.push(...validateRun(runs[i]));
+        if(!boundaryValid(runs[i],runs[i+1]))issues.push('Rest across saved weeks')
+    }
+    return issues
+}
+async function refreshSchedules(){
+    let originalResults=refreshBaseline(model);
+    busy=true;
+    await prepareSchedulingTimeOff([...originalResults.map(r=>r.start),model.controls.week].sort()[0],originalResults.map(r=>r.end).sort().at(-1));
+    let baseline=originalResults.map(refreshedTimeOffRun);
+    message('Shuffling every saved schedule using its saved configuration and cross-week constraints…');
+    let groups=new Map();
+    for(let r of baseline){
+        let k=r.revision+'|'+key(r.location,r.role)+'|'+(r.importBatch||'generated');
+        if(!groups.has(k))groups.set(k,[]);
+        groups.get(k).push(r)
+    }
+    let replacements=new Map(),changed=0,master=randomShuffleSeed(model.controls.seed),processed=0;
+
+    for(let group of groups.values()){
+        group.sort((a,b)=>a.start.localeCompare(b.start));
+        let history=new Map(),revised=[];
+        for(let i=0;i<group.length;i++){
+            let b=group[i],chosen=b,context={
+                controls:{
+                    ...b.controls,shuffle:true
+                }
+                ,roster:clone(b.roster),locations:[clone(b.locationPattern)],revision:b.revision,requirementsOverride:b.requirements,bambooTimeOff:model.bambooTimeOff,timeOffOverride:Object.fromEntries(b.employees.map(e=>[e.id,e.timeOff||Array(8).fill(false)]))
+            }
+            ,pool={
+                id:key(b.location,b.role),location:b.location,role:b.role,shares:clone(b.shares)
+            }
+            ;
+            for(let attempt=0;attempt<32;attempt++){
+                if(attempt%8===0)await new Promise(resolve=>setTimeout(resolve,0));
+                context.controls.seed=shuffleRank(master,b.id+'|'+attempt)%1000000;
+                let trialHistory=new Map(history),candidate=generatePool(context,pool,b.start,trialHistory);
+                if(noWorseSchedule(candidate,b)&&boundaryValid(candidate,group[i+1])&&scheduleFingerprint(candidate)!==scheduleFingerprint(b)){
+                    chosen={
+                        ...candidate,imported:b.imported,importBatch:b.importBatch,sourceName:b.sourceName,importWarnings:b.importWarnings,tradeHistory:b.tradeHistory,overtime:clone(b.overtime??null),id:b.id,refreshedAt:new Date().toISOString(),shuffleCount:(b.shuffleCount||0)+1
+                    }
+                    ;
+                    break
+                }
+
+            }
+            if(chosen!==b)changed++;
+            revised.push(chosen);
+            replacements.set(b.id,chosen);
+            addRunHistory(history,chosen);
+            processed++;
+            if(processed%8===0)message('Shuffling all saved schedules: '+processed+' of '+baseline.length+' checked…')
+        }
+        let failures=validateScheduleSequence(revised);
+        if(failures.length)throw Error('Shuffle validation failed; previous schedules retained: '+failures.join('; '))
+    }
+
+    let timeOffChanged=JSON.stringify(baseline.map(r=>r.employees.map(e=>[e.timeOff,e.slots])))!==JSON.stringify(originalResults.map(r=>r.employees.map(e=>[e.timeOff,e.slots])));
+    if(!changed&&!timeOffChanged){
+        message('All '+baseline.length+' saved schedules checked. No different allocation meeting the saved constraints and coverage/shortfall levels was found in 32 attempts per schedule. Existing schedules retained.'+timeOffSummary(),(model.bambooTimeOff?.status==='error'||model.bambooTimeOff?.apiStatus==='error'));
+        return
+    }
+
+    let original=model;
+    model={
+        ...model,controls:{
+            ...model.controls,shuffle:true,seed:master
+        }
+        ,previousScheduleSet:{
+            results:originalResults,controls:original.controls,at:new Date().toISOString()
+        }
+        ,results:baseline.map(r=>replacements.get(r.id))
+    }
+    ;
+    try{
+        await saveState()
+    }
+    catch(e){
+        model=original;
+        throw e
+    }
+    page='schedules';
+    render();
+    message('All '+baseline.length+' saved schedules processed: '+changed+' shuffled; '+(baseline.length-changed)+' retained where no different acceptable allocation was found. Saved configuration constraints, cross-week rest, coverage and employee targets preserved. Undo last shuffle is available.'+(storageMode==='session'?' Session only: download the portable ZIP bundle when hosted or a workspace backup.':'')+timeOffSummary(),(model.bambooTimeOff?.status==='error'||model.bambooTimeOff?.apiStatus==='error'))
+}
+async function undoShuffle(){
+    if(!model.previousScheduleSet)throw Error('No previous shuffle to undo.');
+    let original=model;
+    model={
+        ...model,results:model.previousScheduleSet.results,controls:model.previousScheduleSet.controls,previousScheduleSet:null
+    }
+    ;
+    try{
+        await saveState()
+    }
+    catch(e){
+        model=original;
+        throw e
+    }
+    render();
+    message('Previous schedules restored. The last shuffle was undone.')
+}
+let scheduleLocation='All',scheduleRole='All',scheduleWeek='All',scheduleOrigin='All';
+function runSeriesKey(r){
+    return key(r.location,r.role)+'|'+r.revision+'|'+(r.importBatch||'generated')
+}
+function visibleScheduleRuns(){
+    return model.results.filter(r=>(scheduleLocation==='All'||r.location===scheduleLocation)&&(scheduleRole==='All'||r.role===scheduleRole)&&(scheduleWeek==='All'||r.start===scheduleWeek)&&(scheduleOrigin==='All'||(r.imported?'Uploaded':'Generated')===scheduleOrigin))
+}
+function scheduleFilters(){
+    let all=model.results;
+    return `<div class="toolbar"><label>Location ${select([['All','All locations'],...[...new Set(all.map(r=>r.location))].sort().map(v=>[v,v])],scheduleLocation,'id="scheduleLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(all.map(r=>r.role))].sort().map(v=>[v,v])],scheduleRole,'id="scheduleRole"')}</label><label>Week ${select([['All','All weeks'],...[...new Set(all.map(r=>r.start))].sort().map(v=>[v,v+' to '+addDays(v,6)])],scheduleWeek,'id="scheduleWeek"')}</label><label>Source ${select([['All','All sources'],['Generated','Generated'],['Uploaded','Uploaded']],scheduleOrigin,'id="scheduleOrigin"')}</label></div>`
+}
+function bindScheduleFilters(){
+    for(let [id,set] of [['scheduleLocation',v=>scheduleLocation=v],['scheduleRole',v=>scheduleRole=v],['scheduleWeek',v=>scheduleWeek=v],['scheduleOrigin',v=>scheduleOrigin=v]])$(id)?.addEventListener('change',e=>{
+        set(e.target.value);render()
+    }
+    )
+}
+function rebuildScheduleAudit(r){
+    let old=new Map((r.audit||[]).map(x=>[x.id+'|'+x.day+'|'+x.start,x]));
+    r.audit=[];
+    for(let e of r.employees)e.slots.forEach((s,d)=>{
+        if(s!==null)r.audit.push(old.get(e.id+'|'+d+'|'+s)||{
+            id:e.id,day:d,start:s,type:e.types[d]||'Demand',score:null
+        }
+        )
+    }
+    );
+    r.primary=r.audit.filter(a=>a.type==='Demand').length;
+    r.makeup=r.audit.filter(a=>a.type==='Make-up').length;
+    r.shortages=r.employees.filter(e=>e.slots.filter(s=>s!==null).length<r.controls.shifts).map(e=>({
+        id:e.id,name:e.name,missing:r.controls.shifts-e.slots.filter(s=>s!==null).length
+    }
+    ));
+    return r
+}
+function tradePlan(runId,firstId,secondId,days){
+    let r=model.results.find(r=>r.id===runId),errors=[];
+    if(!r)return {
+        errors:['Choose a saved location, role and week.']
+    }
+    ;
+    let first=r.employees.find(e=>e.id===firstId),second=r.employees.find(e=>e.id===secondId);
+    if(!first||!second||firstId===secondId)return {
+        errors:['Select two different employees in this location and role.']
+    }
+    ;
+    days=[...new Set(days.map(Number))].sort();
+    if(!days.length||days.some(d=>!Number.isInteger(d)||d<0||d>6))return {
+        errors:['Select one or more days.']
+    }
+    ;
+    let next=clone(r);
+    if(typeof timeOffDays==='function')for(let e of next.employees){
+        let live=timeOffDays(model,e,r.start);
+        e.timeOff=Array.from({
+            length:8
+        }
+        ,(_,d)=>!!e.timeOff?.[d]||live[d])
+    }
+    let a=next.employees.find(e=>e.id===firstId),b=next.employees.find(e=>e.id===secondId);
+    for(let d of days){
+        [a.slots[d],b.slots[d]]=[b.slots[d],a.slots[d]];
+        [a.types[d],b.types[d]]=[b.types[d],a.types[d]]
+    }
+    let ca=a.slots.filter(s=>s!==null).length,cb=b.slots.filter(s=>s!==null).length;
+    if(ca!==5||cb!==5)errors.push('Both employees must finish with exactly 5 working days. Current preview: '+a.name+' '+ca+', '+b.name+' '+cb+'. Include a balancing day where the other employee is OFF.');
+    if(days.every(d=>first.slots[d]===second.slots[d]))errors.push('The selected days do not change either employee’s shifts.');
+    rebuildScheduleAudit(next);
+    errors.push(...validateRun(next));
+    let series=model.results.filter(x=>x.id!==r.id&&runSeriesKey(x)===runSeriesKey(r)).sort((a,b)=>a.start.localeCompare(b.start)),prior=series.filter(x=>x.start<r.start).at(-1),following=series.find(x=>x.start>r.start);
+    if(prior&&!boundaryValid(prior,next))errors.push('The trade breaks minimum rest after the previous saved week.');
+    if(following&&!boundaryValid(next,following))errors.push('The trade breaks minimum rest before the next saved week.');
+    if(!prior){
+        let abs=Date.parse(r.start+'T00:00:00Z')/36e5;
+        for(let e of [a,b]){
+            let d=e.slots.findIndex(s=>s!==null);
+            if(d>=0&&e.previous!==null&&e.previous!==-1&&abs+d*24+e.slots[d]-(abs-24+e.previous+r.controls.span)<r.controls.rest)errors.push('The trade breaks prior-Sunday rest for '+e.name+'.')
+        }
+
+    }
+    return {
+        errors:[...new Set(errors)],original:r,next,first,second,days,counts:[ca,cb]
+    }
+
+}
+function tradeSelection(){
+    return {
+        runId:$('tradeWeek').value,firstId:$('tradeFirst').value,secondId:$('tradeSecond').value,days:[...$('tradeDialog').querySelectorAll('[data-trade-day]:checked')].map(e=>+e.value)
+    }
+
+}
+function updateTradePreview(){
+    let s=tradeSelection(),p=tradePlan(s.runId,s.firstId,s.secondId,s.days);
+    $('confirmTrade').hidden=p.errors.length>0;
+    $('tradeStatus').innerHTML=p.errors.length?'<ul>'+p.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'<p class="goodtext">Both employees retain five working days. Scheduling checks passed. You can confirm the trade.</p>';
+    let r=model.results.find(r=>r.id===s.runId),a=r?.employees.find(e=>e.id===s.firstId),b=r?.employees.find(e=>e.id===s.secondId);
+    if(!a||!b||a===b){
+        $('tradeDays').innerHTML='';
+        return
+    }
+    let fmt=(s,e,d)=>s===null?(e.timeOff?.[d]?'time-off':'OFF'):timeLabel(s);
+    $('tradeDays').innerHTML=`<div class="tablewrap"><table><thead><tr><th>Select</th><th>Day / date</th><th>${esc(a.name)}<small>Before → after</small></th><th>${esc(b.name)}<small>Before → after</small></th></tr></thead><tbody>${DAYS.map((day,d)=>`<tr><td><input type="checkbox" data-trade-day value="${d}" ${s.days.includes(d)?'checked':''} aria-label="Trade ${day}"></td><td>${day}<small>${addDays(r.start,d)}</small></td><td>${fmt(a.slots[d],a,d)} → <b>${fmt(s.days.includes(d)?b.slots[d]:a.slots[d],a,d)}</b></td><td>${fmt(b.slots[d],b,d)} → <b>${fmt(s.days.includes(d)?a.slots[d]:b.slots[d],b,d)}</b></td></tr>`).join('')}</tbody></table></div>`
+}
+function tradeWeekChanged(){
+    let r=model.results.find(r=>r.id===$('tradeWeek').value);
+    $('tradeFirstWrap').innerHTML='Employee 1 '+select([['','Select employee'],...(r?.employees||[]).map(e=>[e.id,e.name+' · '+e.id])],'','id="tradeFirst"');
+    $('tradeSecondWrap').innerHTML='Employee 2 '+select([['','Select employee'],...(r?.employees||[]).map(e=>[e.id,e.name+' · '+e.id])],'','id="tradeSecond"');
+    $('tradeDays').innerHTML='';
+    updateTradePreview()
+}
+function tradePoolChanged(){
+    let rs=model.results.filter(r=>key(r.location,r.role)===$('tradePool').value);
+    $('tradeWeekWrap').innerHTML='Week / saved version '+select(rs.map(r=>[r.id,r.start+' to '+r.end+' · rev '+r.revision+(r.imported?' · Uploaded':'')]),rs.find(r=>r.id===model.selectedRun)?.id||rs[0]?.id,'id="tradeWeek"');
+    tradeWeekChanged()
+}
+function openTrades(){
+    if(!model.results.length)throw Error('Generate or upload schedules first.');
+    let pairs=[...new Set(model.results.map(r=>key(r.location,r.role)))],selected=model.results.find(r=>r.id===model.selectedRun)||visibleScheduleRuns()[0]||model.results[0];
+    $('tradeDialog').innerHTML=`<div class="dialoghead"><div><div class="eyebrow">WEEKLY SCHEDULES</div><h2>Trade shifts</h2></div><button type="button" data-trade-command="close" aria-label="Close trade dialog">✕</button></div><p>Trades stay within one location and role. Shifts swap within each selected day. Work/OFF trades need a balancing day so both employees retain exactly five working days.</p><div class="formgrid"><label>Location × team ${select(pairs.map(k=>[k,k.replace('|',' · ')]),key(selected.location,selected.role),'id="tradePool"')}</label><label id="tradeWeekWrap"></label><label id="tradeFirstWrap"></label><label id="tradeSecondWrap"></label></div><div id="tradeDays"></div><div id="tradeStatus" role="status"></div><p class="note">Known availability, shift permissions, fixed preferences and minimum rest are checked. For uploaded employees without a matching roster profile, only the supplied schedule, five-day balance and configured rest can be checked.</p><button type="button" id="confirmTrade" class="primary" data-trade-command="confirm" hidden>Confirm shift trade</button>`;
+    tradePoolChanged();
+    $('tradeDialog').showModal()
+}
+async function confirmShiftTrade(){
+    let s=tradeSelection(),p=tradePlan(s.runId,s.firstId,s.secondId,s.days);
+    if(p.errors.length){
+        updateTradePreview();
+        return
+    }
+    busy=true;
+    let t={
+        at:new Date().toISOString(),location:p.original.location,role:p.original.role,week:p.original.start,firstId:p.first.id,firstName:p.first.name,secondId:p.second.id,secondName:p.second.name,days:p.days,before:[p.first.slots,p.second.slots],after:[p.next.employees.find(e=>e.id===p.first.id).slots,p.next.employees.find(e=>e.id===p.second.id).slots]
+    }
+    ;
+    p.next.tradeHistory=[...(p.original.tradeHistory||[]),t];
+    p.next.updatedAt=t.at;
+    let old=model;
+    model={
+        ...model,results:model.results.map(r=>r.id===p.next.id?p.next:r),previousScheduleSet:null,selectedRun:p.next.id
+    }
+    ;
+    try{
+        await saveState();
+        $('tradeDialog').close();
+        scheduleLocation=p.next.location;
+        scheduleRole=p.next.role;
+        scheduleWeek=p.next.start;
+        scheduleOrigin='All';
+        page='schedules';
+        render();
+        message('Shift trade confirmed for '+p.first.name+' and '+p.second.name+'. Adjusted schedules are ready to email or download.'+(storageMode==='session'?' Session only: save a backup; hosted apps can also download the portable ZIP bundle.':''))
+    }
+    catch(e){
+        model=old;
+        throw e
+    }
+    finally{
+        busy=false
+    }
+
+}
+function tradeLogRows(runs){
+    let a=[['Confirmed at','Week commencing','Location','Role','Revision','Employee 1 ID','Employee 1','Employee 2 ID','Employee 2','Traded days']];
+    for(let r of runs)for(let t of r.tradeHistory||[])a.push([t.at,t.week,r.location,r.role,r.revision,t.firstId,t.firstName,t.secondId,t.secondName,t.days.map(d=>DAYS[d]).join(', ')]);
+    return a
+}
+document.addEventListener('change',e=>{
+    if(e.target.id==='tradePool')tradePoolChanged();else if(e.target.id==='tradeWeek')tradeWeekChanged();else if(['tradeFirst','tradeSecond'].includes(e.target.id)||e.target.dataset?.tradeDay!==undefined)updateTradePreview()
+}
+);
+document.addEventListener('click',async e=>{
+    let cmd=e.target.closest('[data-trade-command]')?.dataset.tradeCommand;if(!cmd||busy)return;try{
+        if(cmd==='close')$('tradeDialog').close();else if(cmd==='confirm')await confirmShiftTrade()
+    }
+    catch(err){
+        $('tradeStatus').textContent=err.message
+    }
+
+}
+);
+function parseScheduleShift(value,span=9){
+    if(value===null||value===undefined||String(value).trim()==='')return null;
+    if(typeof value==='number'){
+        let s=STARTS.includes(value)?value:value>=0&&value<1?Math.round(value*24*100)/100:NaN;
+        if(STARTS.includes(s))return s;
+        throw Error('Unsupported numeric shift '+value)
+    }
+    let text=String(value).trim();
+    if(/^(off|time[ -]off|day\s*off|rest|rdo|-)$/i.test(text))return null;
+    let clean=text.replace(/\s*\(\+1d\)/ig,'').replace(/\s*\+\s*$/,'').trim(),parts=clean.split(/\s*[–—-]\s*/);
+    function hour(t){
+        let m=t.trim().match(/^(\d{1,2})(?::(\d{2})(?::\d{2})?)?\s*(AM|PM)?$/i);
+        if(!m)return NaN;
+        let h=+m[1],minute=+(m[2]||0),amp=m[3]?.toUpperCase();
+        if(minute>59||amp&&(h<1||h>12)||!amp&&h>23)return NaN;
+        if(amp)h=h%12+(amp==='PM'?12:0);
+        return h+minute/60
+    }
+    let start=hour(parts[0]);
+    if(!STARTS.includes(start))throw Error('Unsupported shift "'+text+'". Use OFF, 6 AM, 8:30 AM, 2 PM or 10 PM.');
+    if(parts.length>1){
+        let end=hour(parts[1]);
+        if(!Number.isFinite(end)||Math.abs(((end-start+24)%24||24)-span)>1e-6)throw Error('Shift end time does not match the configured elapsed span: '+text)
+    }
+    return start
+}
+function scheduleImportRows(db,defaults){
+    let sheet=db['Weekly Schedules']||db.Schedule||Object.values(db).find(a=>a.some(r=>r.some(c=>String(c).trim().toLowerCase()==='mon')));
+    if(!sheet)throw Error('No weekly schedule table found. Download and use the schedule template.');
+    let norm=v=>String(v??'').trim().toLowerCase().replace(/[._]/g,' ').replace(/\s+/g,' '),headerIndex=sheet.findIndex(r=>r.some(v=>norm(v)==='mon')&&r.some(v=>['employee','employee name','name'].includes(norm(v))));
+    if(headerIndex<0)throw Error('Expected Employee and Mon–Sun column headers.');
+    let h=sheet[headerIndex].map(norm),col=(...names)=>names.map(n=>h.indexOf(n)).find(i=>i>=0)??-1,index={
+        week:col('week commencing','week commencing date','week start'),location:col('location'),role:col('role','team'),id:col('employee id','id'),name:col('employee','employee name','name'),hours:col('paid hours per shift'),span:col('shift span hours','elapsed span'),rest:col('minimum rest hours','rest hours')
+    }
+    ,dayCols=DAYS.map(d=>col(d.toLowerCase()));
+    if(dayCols.some(i=>i<0))throw Error('All seven Mon–Sun columns are required.');
+    let fallback=model.pools.find(p=>p.id===defaults.pool),groups=new Map(),seen=new Set(),warnings=[];
+
+    for(let i=headerIndex+1;i<sheet.length;i++){
+        let row=sheet[i];
+        if(!row||row.every(v=>v===null||v===undefined||v===''))continue;
+        let get=k=>index[k]>=0?row[index[k]]:null,rawName=String(get('name')??'').trim(),rawId=String(get('id')??'').trim();
+        if(!rawName&&!rawId)continue;
+        let location=String(get('location')??'').trim()||fallback?.location,role=String(get('role')??'').trim()||fallback?.role,week=isoDate(get('week')||defaults.week);
+        if(!location||!role)throw Error('Row '+(i+1)+': provide Location and Role, or choose a fallback location/team.');
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(week)||Number.isNaN(Date.parse(week+'T00:00:00Z'))||new Date(week+'T00:00:00Z').toISOString().slice(0,10)!==week||new Date(week+'T00:00:00Z').getUTCDay()!==1)throw Error('Row '+(i+1)+': Week commencing must be a valid Monday.');
+        let profile=rawId?model.roster.find(e=>e.id===rawId):null;
+        if(!rawId){
+            let matches=model.roster.filter(e=>e.name.trim().toLowerCase()===rawName.toLowerCase()&&e.location===location&&e.role===role);
+            if(matches.length>1)throw Error('Row '+(i+1)+': ambiguous employee name; supply Employee ID.');
+            profile=matches[0]
+        }
+
+        if(profile&&(profile.location!==location||profile.role!==role))throw Error('Row '+(i+1)+': employee ID belongs to a different location/team in the roster.');
+        let name=rawName||profile?.name;
+        if(!name)throw Error('Row '+(i+1)+': Employee name is required.');
+        let id=rawId||profile?.id||'upload:'+key(location,role)+':'+name.toLowerCase(),duplicate=week+'|'+id;
+        if(seen.has(duplicate))throw Error('Row '+(i+1)+': duplicate employee/week. Include only one schedule version for each employee/week.');
+        seen.add(duplicate);
+        let supplied=k=>get(k)!==null&&get(k)!==undefined&&get(k)!==''?get(k):undefined,controlRows=db.Controls||[],ch=controlRows[0]||[],saved=controlRows.slice(1).find(r=>String(r[ch.indexOf('Location')])===location&&String(r[ch.indexOf('Role')])===role&&isoDate(r[ch.indexOf('Week commencing')])===week),savedValue=label=>saved?.[ch.indexOf(label)],hours=Number(supplied('hours')??savedValue('Paid hours')??defaults.hours),span=Number(supplied('span')??savedValue('Elapsed span')??defaults.span),rest=Number(supplied('rest')??savedValue('Rest hours')??defaults.rest);
+        if(!(hours>0&&hours<=24&&span>=hours&&span<=24&&rest>=0&&rest<=48))throw Error('Row '+(i+1)+': invalid paid hours, elapsed span or rest hours.');
+        let slots;
+        try{
+            slots=dayCols.map(j=>parseScheduleShift(row[j],span))
+        }
+        catch(e){
+            throw Error('Row '+(i+1)+': '+e.message)
+        }
+        let fullProfile=profile&&profile.allow.every(v=>v===0||v===1)&&profile.days.every(v=>v===0||v===1)&&['Yes','No'].includes(profile.flex)&&STARTS.includes(profile.preferred);
+        if(!fullProfile)warnings.push(name+' ('+location+' / '+role+'): roster availability or shift constraints are incomplete or unavailable.');
+        let e={
+            ...clone(profile||{
+
+            }
+            ),id,name,location,role,index:i,flex:profile?.flex==='No'&&STARTS.includes(profile.preferred)?'No':'Yes',reason:profile?.reason||'',preferred:STARTS.includes(profile?.preferred)?profile.preferred:slots.find(s=>s!==null)??6,proximity:profile?.proximity||1,random:profile?.random||1,attendance:profile?.attendance??null,allow:Array.from({
+                length:4
+            }
+            ,(_,j)=>[0,1].includes(profile?.allow[j])?profile.allow[j]:1),days:Array.from({
+                length:7
+            }
+            ,(_,j)=>[0,1].includes(profile?.days[j])?profile.days[j]:1),previous:week===model.controls.week?profile?.previous??-1:-1,timeOff:dayCols.map(j=>/^time[ -]off$/i.test(String(row[j]??'').trim())),manualTimeOff:dayCols.map(j=>/^time[ -]off$/i.test(String(row[j]??'').trim())),slots,types:slots.map(s=>s===null?null:'Demand'),rank:0,constraintsKnown:!!fullProfile
+        }
+        ;
+        let k=key(location,role)+'|'+week;
+        if(!groups.has(k))groups.set(k,{
+            location,role,week,hours,span,rest,employees:[]
+        }
+        );
+        let g=groups.get(k);
+        if(g.hours!==hours||g.span!==span||g.rest!==rest)throw Error('Row '+(i+1)+': hours and rest must match other employees in this location/team/week.');
+        g.employees.push(e)
+    }
+    if(!groups.size)throw Error('No employee schedule rows found.');
+    return {
+        groups:[...groups.values()],warnings:[...new Set(warnings)]
+    }
+
+}
+function importScheduleModel(db,defaults,filename){
+    let {
+        groups,warnings
+    }
+    =scheduleImportRows(db,defaults),batch='upload-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),revision=Math.max(model.revision,...model.results.map(r=>r.revision))+1,runs=[];
+    for(let g of groups){
+        let requirements=DAYS.map((_,d)=>STARTS.map(s=>g.employees.filter(e=>e.slots[d]===s).length)),counts=STARTS.map((_,j)=>requirements.reduce((n,r)=>n+r[j],0)),total=counts.reduce((a,b)=>a+b,0),p=model.pools.find(p=>p.location===g.location&&p.role===g.role),shares=total?counts.map(n=>n/total):p?.shares?.every(isNum)?p.shares:[1,0,0,0],daily=requirements.map(r=>r.reduce((a,b)=>a+b,0)),sourceLocation=model.locations.find(l=>l.name===g.location),locationPattern=sourceLocation?clone(sourceLocation):{
+            name:g.location,intensity:daily.map(n=>total?n/total:1/7),open:Array(7).fill(1)
+        }
+        ,controls={
+            ...clone(model.controls),location:g.location,role:g.role,week:g.week,headcount:g.employees.length,shifts:5,hours:g.hours,span:g.span,rest:g.rest,shuffle:false
+        }
+        ,r={
+            id:batch+'|'+key(g.location,g.role)+'|'+g.week,imported:true,importBatch:batch,sourceName:filename,importWarnings:warnings.filter(w=>w.includes('('+g.location+' / '+g.role+')')),location:g.location,role:g.role,start:g.week,end:addDays(g.week,6),revision,createdAt:new Date().toISOString(),controls,shares,locationPattern,roster:g.employees.map(e=>{
+                let a=clone(e);delete a.slots;delete a.types;return a
+            }
+            ),employees:g.employees,requirements,uncovered:[],audit:[],overtime:overtimeSnapshot(model,{
+                id:key(g.location,g.role),location:g.location,role:g.role
+            }
+            ,g.week),tradeHistory:[]
+        }
+        ;
+        rebuildScheduleAudit(r);
+        let errors=validateRun(r);
+        if(errors.length)throw Error(g.location+' / '+g.role+' / '+g.week+': '+errors.slice(0,8).join('; '));
+        runs.push(r)
+    }
+    let series=new Map();
+    for(let r of runs){
+        let k=key(r.location,r.role);
+        if(!series.has(k))series.set(k,[]);
+        series.get(k).push(r)
+    }
+    for(let rs of series.values()){
+        rs.sort((a,b)=>a.start.localeCompare(b.start));
+        if(validateScheduleSequence(rs).length)throw Error('Uploaded schedules break rest constraints between weeks.');
+        let first=rs[0],abs=Date.parse(first.start+'T00:00:00Z')/36e5;
+        for(let e of first.employees){
+            let d=e.slots.findIndex(s=>s!==null);
+            if(d>=0&&e.previous!==-1&&abs+d*24+e.slots[d]-(abs-24+e.previous+first.controls.span)<first.controls.rest)throw Error('Prior-Sunday rest is not met for '+e.name)
+        }
+
+    }
+    return {
+        runs,warnings
+    }
+
+}
+function openScheduleImport(){
+    let d=$('scheduleImportDialog');
+    d.innerHTML=`<div class="dialoghead"><h2>Upload weekly schedules</h2><button type="button" data-schedule-import="close" aria-label="Close">✕</button></div><p>Upload the completed schedule template or an app export’s Weekly Schedules sheet. Existing schedules remain saved. Empty shift cells are OFF.</p><label>Schedule workbook · XLSX<input type="file" id="scheduleFile" accept=".xlsx"></label><div class="formgrid"><label>Fallback location × role · blank fields only ${select([['','Use file values'],...model.pools.map(p=>[p.id,p.location+' · '+p.role])],'','id="importDefaultPool"')}</label><label>Fallback Monday · blank dates only<input type="date" id="importDefaultWeek" value="${esc(model.controls.week)}"></label><label>Default paid hours per shift<input type="number" id="importDefaultHours" min="0.5" max="24" step="any" value="${model.controls.hours}"></label><label>Default elapsed span · hours<input type="number" id="importDefaultSpan" min="0.5" max="24" step="any" value="${model.controls.span}"></label><label>Default minimum rest · hours<input type="number" id="importDefaultRest" min="0" max="48" step="any" value="${model.controls.rest}"></label></div><p class="note">Location, Role and Employee fields identify each schedule. Matching employee IDs apply roster restrictions. Unknown or incomplete profiles will be flagged; their unavailable constraints cannot be checked. Uploaded files support all schedule filters, shift trades, email and downloads. Employees may have up to five shifts; trades require exactly five each.</p><p id="scheduleImportStatus" role="status"></p><button type="button" class="primary" data-schedule-import="upload">Validate & import schedules</button>`;
+    d.showModal()
+}
+async function uploadSchedules(){
+    let file=$('scheduleFile').files[0];
+    if(!file)throw Error('Choose an XLSX schedule workbook.');
+    if(file.size>60e6)throw Error('Workbook exceeds 60 MB.');
+    let defaults={
+        pool:$('importDefaultPool').value,week:$('importDefaultWeek').value,hours:Number($('importDefaultHours').value),span:Number($('importDefaultSpan').value),rest:Number($('importDefaultRest').value)
+    }
+    ;
+    busy=true;
+    $('scheduleImportStatus').textContent='Reading and validating schedules…';
+    try{
+        let db=await parseXlsx(await file.arrayBuffer()),{
+            runs,warnings
+        }
+        =importScheduleModel(db,defaults,file.name),old=model;
+        model={
+            ...model,results:[...model.results,...runs],selectedRun:runs[0].id,previousScheduleSet:null
+        }
+        ;
+        try{
+            await saveState()
+        }
+        catch(e){
+            model=old;
+            throw e
+        }
+        scheduleLocation=scheduleRole=scheduleWeek=scheduleOrigin='All';
+        $('scheduleImportDialog').close();
+        page='schedules';
+        render();
+        message(runs.length+' uploaded schedules saved. '+warnings.length+' employee profiles have missing roster constraints; review the notes on each schedule.'+(storageMode==='session'?' Session only: save a backup; hosted apps can also download the portable ZIP bundle.':''))
+    }
+    finally{
+        busy=false
+    }
+
+}
+async function downloadScheduleTemplate(){
+    let raw=Uint8Array.from(atob(SCHEDULE_TEMPLATE_BASE),c=>c.charCodeAt(0)),z=await zipEntries(raw.buffer),files={
+
+    }
+    ;
+    for(let name of SCHEDULE_TEMPLATE_FILES)files[name]=await z.text(name);
+    let pairs=model.pools.map(p=>[p.location,p.role]),locs=[...new Set(pairs.map(p=>p[0]))].sort(),roles=[...new Set(pairs.map(p=>p[1]))].sort(),count=Math.max(locs.length,roles.length,5,pairs.length),listRows=[['Locations','Roles','Shifts','Valid pair location','Valid pair role'],...Array.from({
+        length:count
+    }
+    ,(_,i)=>[locs[i]??'',roles[i]??'',['OFF','6 AM','8:30 AM','2 PM','10 PM'][i]??'',pairs[i]?.[0]??'',pairs[i]?.[1]??''])];
+    files['xl/worksheets/sheet2.xml']=sheetXML(listRows);
+    files['xl/worksheets/sheet1.xml']=files['xl/worksheets/sheet1.xml'].replace(/Lists!\$A\$2:\$A\$\d+/g,'Lists!$A$2:$A$'+(locs.length+1)).replace(/Lists!\$B\$2:\$B\$\d+/g,'Lists!$B$2:$B$'+(roles.length+1));
+    downloadFile('CBL-Weekly-Schedule-Template.xlsx',zipStore(files))
+}
+document.addEventListener('click',async e=>{
+    let cmd=e.target.closest('[data-schedule-import]')?.dataset.scheduleImport;if(!cmd||busy)return;try{
+        if(cmd==='close')$('scheduleImportDialog').close();if(cmd==='upload')await uploadSchedules()
+    }
+    catch(err){
+        $('scheduleImportStatus').textContent='Import failed; existing schedules retained. '+err.message
+    }
+
+}
+);
+let bambooCredentials=null,credentialSessionOnly=false,localConnectorToken='';
+const dismissedHeaderNotices=new Set();
+function dismissHeaderNotice(id){
+    dismissedHeaderNotices.add(id);
+    let wrap=$(id+'Wrap');
+    if(wrap)wrap.hidden=true
+}
+function updateHeaderNotices(){
+    for(let id of ['storageWarning','savedState']){
+        let w=$(id+'Wrap');
+        if(w)w.hidden=dismissedHeaderNotices.has(id)||(id==='storageWarning'&&storageMode!=='session')
+    }
+
+}
+function normalizedEmployeeName(value){
+    return String(value??'').normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim()
+}
+function validTimeOffDate(v){
+    return typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v
+}
+function timeOffDays(m,e,start){
+    let manual=e.manualTimeOff||[],override=m.timeOffOverride?.[e.id];
+    if(override)return override.slice();
+    let entries=m.bambooTimeOff?.status==='success'?m.bambooTimeOff.entries:[];
+    return Array.from({
+        length:8
+    }
+    ,(_,d)=>{
+        let date=addDays(start,d);return !!manual[d]||entries.some(t=>normalizedEmployeeName(t.name)===normalizedEmployeeName(e.name)&&t.start<=date&&t.end>=date)
+    }
+    )
+}
+function timeOffCheckSnapshot(m){
+    let t=m.bambooTimeOff;
+    return t?{
+        status:t.status,start:t.start,end:t.end,checkedAt:t.checkedAt,source:t.source||'api',sourceName:t.sourceName||'',apiStatus:t.apiStatus,apiError:t.apiError,error:t.error||'',count:t.entries.length
+    }
+    :null
+}
+function timeOffLabel(e,d){
+    return e.timeOff?.[d]?'time-off':'OFF'
+}
+function timeOffSummary(){
+    let t=model.bambooTimeOff;
+    if(!t)return '';
+    if(t.source==='workbook')return (t.apiStatus==='error'?' BambooHR API failed; workbook fallback used.':'')+' Uploaded time-offs applied from '+t.sourceName+' for '+t.start+' to '+t.end+' ('+t.entries.length+' matching-period records).';
+    if(t.status==='error')return ' BambooHR error: '+t.error+' Scheduling continued without the API time-off check.';
+    if(t.status==='success')return ' BambooHR time-offs checked for '+t.start+' to '+t.end+'; '+t.entries.length+' employee time-off records received.';
+    return ' BambooHR time-off check not configured.'
+}
+function basicAuthorization(key,password){
+    let bytes=new TextEncoder().encode(key+':'+password),binary='';
+    for(let b of bytes)binary+=String.fromCharCode(b);
+    return 'Basic '+btoa(binary)
+}
+async function prepareTimeOff(start,end){
+    let state={
+        status:'notConfigured',start,end,entries:[],checkedAt:new Date().toISOString(),error:''
+    }
+    ;
+    model.bambooTimeOff=state;
+    if(!bambooCredentials?.apiKey)return state;
+    let controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+    state.status='loading';
+    try{
+        let connection=bambooTransport();
+        if(connection.mode==='localMissing')throw Error('BambooHR local connector session is missing. Reopen the full session URL printed by the launcher.');
+        let url=connection.url+'?'+new URLSearchParams({
+            start,end
+        }
+        ),headers={
+            accept:'application/json',authorization:basicAuthorization(bambooCredentials.apiKey,bambooCredentials.apiPassword)
+        }
+        ;
+        if(connection.mode==='local')headers['X-CBL-Connector-Token']=localConnectorToken;
+        let response=await fetch(url,{
+            method:'GET',headers,signal:controller.signal,credentials:'omit',cache:'no-store',redirect:'error'
+        }
+        );
+        if(!response.ok){
+            if(connection.mode==='local'){
+                let problem;
+                try{
+                    problem=await response.json()
+                }
+                catch{
+
+                }
+                throw Error('BambooHR local connector: '+(typeof problem?.error==='string'?problem.error.slice(0,400):'HTTP '+response.status+'.'))
+            }
+            throw Error('BambooHR returned HTTP '+response.status+'.');
+
+        }
+        let data;
+        try{
+            data=await response.json()
+        }
+        catch{
+            throw Error('BambooHR returned an invalid JSON response.')
+        }
+        if(!Array.isArray(data))throw Error('BambooHR response must be a list of time-off records.');
+        let entries=[];
+        for(let t of data){
+            if(t?.type!=='timeOff')continue;
+            if(t.status&&String(t.status).toLowerCase()!=='approved')continue;
+            if(typeof t.name!=='string'||!t.name.trim()||!validTimeOffDate(t.start)||!validTimeOffDate(t.end)||t.end<t.start)throw Error('BambooHR returned an invalid employee time-off record.');
+            if(t.end>=start&&t.start<=end)entries.push({
+                id:t.id??'',type:'timeOff',employeeId:t.employeeId??'',name:t.name.trim(),start:t.start,end:t.end
+            }
+            )
+        }
+        state.entries=entries;
+        state.status='success'
+    }
+    catch(err){
+        state.status='error';
+        state.entries=[];
+        state.error=controller.signal.aborted?'BambooHR request timed out.':String(err.message).startsWith('BambooHR')?err.message:'BambooHR could not be reached (network or browser cross-origin restrictions).'
+    }
+    finally{
+        clearTimeout(timer);
+        state.checkedAt=new Date().toISOString()
+    }
+    return state
+}
+async function prepareGenerationTimeOff(){
+    if(!model.locked)throw Error('Lock configuration before creating schedules.');
+    let check=modelIssues(model);
+    if(check.errors.length)throw Error(check.errors.join('; '));
+    let weeks=scheduleWeeks(model);
+    return prepareSchedulingTimeOff(model.controls.week,addDays(model.controls.week,weeks*7-1))
+}
+function refreshedTimeOffRun(r){
+    if(model.bambooTimeOff?.status!=='success')return clone(r);
+    let next=clone(r);
+    for(let e of next.employees){
+        e.timeOff=timeOffDays(model,e,next.start);
+        for(let d=0;d<7;d++)if(e.slots[d]!==null&&(e.timeOff[d]||e.slots[d]+next.controls.span>24&&e.timeOff[d+1])){
+            e.slots[d]=null;
+            e.types[d]=null
+        }
+
+    }
+    next.timeOffCheck=timeOffCheckSnapshot(model);
+    next.uncovered=[];
+    for(let d=0;d<7;d++)for(let j=0;j<4;j++){
+        let got=next.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Demand').length;
+        for(let n=got;n<next.requirements[d][j];n++)next.uncovered.push({
+            day:d,start:STARTS[j],reason:'No eligible employee after time-off exclusions'
+        }
+        )
+    }
+    return rebuildScheduleAudit(next)
+}
+async function loadBambooCredentials(){
+    if(storageMode==='session')return;
+    try{
+        let saved=await store('get',undefined,'bambooCredentials');
+        if(saved?.apiKey&&typeof saved.apiKey==='string'&&typeof saved.apiPassword==='string')bambooCredentials=saved
+    }
+    catch{
+        credentialSessionOnly=true
+    }
+
+}
+async function saveBambooCredentials(value){
+    bambooCredentials=value;
+    if(storageMode==='session'){
+        credentialSessionOnly=!!value;
+        return false
+    }
+    try{
+        await store('put',value,'bambooCredentials');
+        credentialSessionOnly=false;
+        return true
+    }
+    catch{
+        credentialSessionOnly=!!value;
+        return false
+    }
+
+}
+function openUserProfile(){
+    let name=model.user?.firstName||'';
+    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">CELEBRATION BRANDS LIMITED</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>Enter your first name to continue. BambooHR API credentials are optional.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><label>BambooHR API key · optional<input id="profileApiKey" type="password" autocomplete="off" placeholder="${bambooCredentials?'Saved · leave blank to keep':'API key'}"></label><label>BambooHR API password · optional<input id="profileApiPassword" type="password" autocomplete="off" placeholder="${bambooCredentials?'Saved · leave blank to keep':'Usually x'}"></label><p class="note">BambooHR normally uses x as the API password; leave it blank to use x when adding a key. These are API credentials, not your BambooHR sign-in password. Credentials are saved only in this browser when storage is permitted and are excluded from portable ZIP bundle, workspace backups and Excel exports. Shared browser users can access saved credentials. If storage is blocked, they remain available only until this app is closed or refreshed.</p>${bambooCredentials?'<button type="button" data-bamboo-action="remove">Remove saved API credentials</button>':''}<section class="connectionpanel"><h3>BambooHR connection</h3><p>${esc(bambooTransport().mode==='local'?'Local connector · same-origin connection active':bambooTransport().mode==='localMissing'?'Local connector session missing · use the full URL printed by the launcher':'Direct browser request · may be blocked by cross-origin restrictions')}</p><div class="actions"><button type="button" data-bamboo-action="testConnection">Test connection</button><button type="button" data-bamboo-action="uploadTimeOffs">Upload time-off workbook</button><button type="button" data-bamboo-action="downloadConnector">Download local connector kit</button></div><p class="note">For the connector: extract the ZIP, then run Start-Windows.cmd (Windows) or sh start.sh (macOS/Linux). Python 3.9+ is required. It opens this workspace in your normal browser. Keep the launcher running. The connector forwards only to CBL’s BambooHR endpoint and does not save API credentials on disk.</p></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
+    $('profileSave').onclick=async ()=>{
+        if(busy)return;
+        let name=$('profileFirstName').value.trim();
+        if(!name){
+            $('profileStatus').textContent='First name is required.';
+            return
+        }
+        let key=$('profileApiKey').value.trim(),password=$('profileApiPassword').value;
+        if(password&&!key&&!bambooCredentials){
+            $('profileStatus').textContent='Enter an API key, or leave both credential fields blank.';
+            return
+        }
+        if(key.includes(':')||/[\r\n]/.test(key)){
+            $('profileStatus').textContent='The API key contains unsupported characters.';
+            return
+        }
+        busy=true;
+        try{
+            if(key||password)await saveBambooCredentials({
+                apiKey:key||bambooCredentials.apiKey,apiPassword:password||'x'
+            }
+            );
+            model.user={
+                firstName:name
+            }
+            ;
+            await saveState();
+            $('profileDialog').close();
+            $('profileDialog').innerHTML='';
+            render();
+            message('Welcome, '+name+'.'+(credentialSessionOnly&&bambooCredentials?' API credentials are available for this session only.':''))
+        }
+        finally{
+            busy=false
+        }
+
+    }
+    ;
+    $('profileForm').onkeydown=e=>{
+        if(e.key==='Enter'&&e.target.tagName==='INPUT'){
+            e.preventDefault();
+            $('profileSave').onclick()
+        }
+
+    }
+    ;
+    $('profileDialog').oncancel=e=>{
+        if(!model.user?.firstName)e.preventDefault()
+    }
+    ;
+    $('profileDialog').showModal()
+}
+function profileHeader(){
+    let b=$('profileButton');
+    if(b)b.textContent=model.user?.firstName?'Hi, '+model.user.firstName+' · Profile':'Your profile'
+}
+function timeOffTable(query=''){
+    let state=model.bambooTimeOff,entries=state?.entries||[],q=normalizedEmployeeName(query),shown=entries.filter(t=>normalizedEmployeeName(t.name+' '+t.employeeId).includes(q));
+    return `<p>${state?.status==='success'?(state.source==='workbook'?'Loaded workbook '+esc(state.sourceName)+' · ':'Fetched ')+esc(state.checkedAt)+' · '+esc(state.start)+' to '+esc(state.end):state?.status==='error'?'Last request failed: '+esc(state.error):'No successful BambooHR time-off check has been made.'}</p><p>${shown.length} of ${entries.length} employee time-off records. Name matching ignores case, accents, punctuation and extra spaces. Company holiday entries are excluded.</p><div class="tablewrap"><table><thead><tr><th>Employee</th><th>BambooHR employee ID</th><th>Start</th><th>End</th><th>Roster match / location × role</th></tr></thead><tbody>${shown.map(t=>{
+        let matches=model.roster.filter(e=>normalizedEmployeeName(e.name)===normalizedEmployeeName(t.name));return `<tr><td>${esc(t.name)}</td><td>${esc(t.employeeId)}</td><td>${t.start}</td><td>${t.end}</td><td>${matches.length?matches.map(e=>esc(e.location+' · '+e.role+' · '+e.id)).join('<br>')+(matches.length>1?'<small>Multiple name matches · all matching employees excluded</small>':''):'No roster name match'}</td></tr>`
+    }
+    ).join('')}</tbody></table></div>`
+}
+function openTimeOffs(){
+    $('timeOffDialog').innerHTML='<div class="dialoghead"><div><div class="eyebrow">BAMBOOHR</div><h2>Employee time-offs</h2></div><button type="button" data-bamboo-action="closeTimeOffs" aria-label="Close time-offs">✕</button></div><label>Find employee<input id="timeOffSearch" placeholder="Name or BambooHR employee ID"></label><div id="timeOffTable">'+timeOffTable()+'</div><div class="actions"><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button><button type="button" data-bamboo-action="closeTimeOffs">Close</button></div>';
+    $('timeOffSearch').oninput=e=>$('timeOffTable').innerHTML=timeOffTable(e.target.value);
+    $('timeOffDialog').showModal()
+}
+function timeOffExportRows(runs){
+    let a=[['Week commencing','Location','Role','Employee ID','Employee','Date','Status','Time-off check','Time-off source','Source workbook']];
+    for(let r of runs)for(let e of r.employees)for(let d=0;d<7;d++)if(e.timeOff?.[d])a.push([r.start,r.location,r.role,e.id,e.name,addDays(r.start,d),'time-off',r.timeOffCheck?.status||'Uploaded',r.timeOffCheck?.source==='workbook'?'Uploaded workbook':r.timeOffCheck?'BambooHR':'Uploaded schedule',r.timeOffCheck?.sourceName||'']);
+    return a
+}
+document.addEventListener('click',async e=>{
+    let dismiss=e.target.closest('[data-dismiss-header]')?.dataset.dismissHeader;if(dismiss){
+        dismissHeaderNotice(dismiss);return
+    }
+    let cmd=e.target.closest('[data-bamboo-action]')?.dataset.bambooAction;if(cmd==='uploadTimeOffs'&&!busy){
+        openTimeOffWorkbook();return
+    }
+    if(cmd==='downloadConnector'&&!busy){
+        try{
+            await downloadConnectorKit();$('profileStatus').textContent='Connector kit downloaded. Extract all files and run the launcher to open the app locally.'
+        }
+        catch(err){
+            $('profileStatus').textContent='Download failed: '+err.message
+        }
+        return
+    }
+    if(cmd==='testConnection'&&!busy){
+        await testBambooConnection();return
+    }
+    if(cmd==='closeTimeOffs')$('timeOffDialog').close();if(cmd==='remove'&&!busy){
+        let removed=await saveBambooCredentials(null);$('profileApiKey').value='';$('profileApiPassword').value='';$('profileStatus').textContent=removed?'API credentials removed from this browser.':'Credentials cleared for this session. Browser storage is unavailable, so any previously saved browser record could not be removed.';e.target.hidden=true
+    }
+
+}
+);
+function initLocalConnector(){
+    let loc=globalThis.location;
+    if(!loc||!['127.0.0.1','localhost'].includes(loc.hostname)||loc.protocol!=='http:')return;
+    try{
+        let hash=new URLSearchParams(String(loc.hash||'').replace(/^#/,'')),token=hash.get('connector');
+        if(token&&/^[A-Za-z0-9_-]{32,100}$/.test(token)){
+            localConnectorToken=token;
+            try{
+                sessionStorage.setItem('cbl-bamboo-connector-token',token)
+            }
+            catch{
+
+            }
+            try{
+                history.replaceState(null,'',loc.pathname+loc.search)
+            }
+            catch{
+
+            }
+
+        }
+        else if(!localConnectorToken){
+            let saved=sessionStorage.getItem('cbl-bamboo-connector-token');
+            if(saved&&/^[A-Za-z0-9_-]{32,100}$/.test(saved))localConnectorToken=saved
+        }
+
+    }
+    catch{
+
+    }
+
+}
+function bambooTransport(){
+    initLocalConnector();
+    let loc=globalThis.location,local=loc&&['127.0.0.1','localhost'].includes(loc.hostname)&&loc.protocol==='http:';
+    return local?{
+        mode:localConnectorToken?'local':'localMissing',url:loc.origin+'/bamboo/time-offs'
+    }
+    :{
+        mode:'direct',url:'https://cbljm.bamboohr.com/api/v1/time_off/whos_out'
+    }
+
+}
+async function testBambooConnection(){
+    let key=$('profileApiKey').value.trim(),password=$('profileApiPassword').value,saved=bambooCredentials;
+    if(!key&&!saved?.apiKey){
+        $('profileStatus').textContent='Enter an API key before testing the BambooHR connection.';
+        return
+    }
+    if(key.includes(':')||/[\r\n]/.test(key)){
+        $('profileStatus').textContent='The API key contains unsupported characters.';
+        return
+    }
+    busy=true;
+    try{
+        bambooCredentials={
+            apiKey:key||saved.apiKey,apiPassword:password||(key?'x':saved.apiPassword)
+        }
+        ;
+        let start=model.controls.week;
+        if(!validTimeOffDate(start)){
+            $('profileStatus').textContent='Select a valid week commencing date in Controls first.';
+            return
+        }
+        let weeks=scheduleWeeks(model);
+        $('profileStatus').textContent='Testing BambooHR access…';
+        let check=await prepareTimeOff(start,addDays(start,weeks*7-1));
+        $('profileStatus').textContent=check.status==='success'?'Connection successful. '+check.entries.length+' employee time-off records received. Save & continue to keep your profile settings.':check.error
+    }
+    finally{
+        bambooCredentials=saved;
+        busy=false
+    }
+
+}
+async function downloadConnectorKit(){
+    let files={
+        ...BAMBOO_CONNECTOR_FILES,
+        ...await portableBundleFiles(),
+    }
+    ;
+    if(files['Start-Windows.cmd'])files['Start-Windows.cmd']=files['Start-Windows.cmd'].replace(/\r?\n/g,'\r\n');
+    downloadFile('CBL-Scheduling-Local-Connector.zip',new Blob([zipStore(files)],{
+        type:'application/zip'
+    }
+    ))
+}
+let pendingTimeOffFallback=null,timeOffWorkbookImporting=false;
+function schedulingTimeOffPeriod(){
+    let start=model.controls.week;
+    if(!validTimeOffDate(start))throw Error('Select a valid week commencing date in Controls first.');
+    let weeks=scheduleWeeks(model);
+    return {
+        start,end:addDays(start,weeks*7-1)
+    }
+
+}
+function parseTimeOffWorkbook(db){
+    let match;
+    for(let [sheet,rows] of Object.entries(db)){
+        let rowIndex=rows.findIndex(r=>r.map(v=>String(v??'').trim().toLowerCase()).includes('employee')&&r.map(v=>String(v??'').trim().toLowerCase()).includes('attribute:type'));
+        if(rowIndex>=0){
+            match={
+                sheet,rows,rowIndex
+            }
+            ;
+            break
+        }
+
+    }
+    if(!match)throw Error('Expected template headers: Employee, start, end, Attribute:type.');
+    let {
+        sheet,rows,rowIndex
+    }
+    =match,h=rows[rowIndex].map(v=>String(v??'').trim().toLowerCase()),nameCol=h.indexOf('employee'),startCol=h.indexOf('start'),endCol=h.indexOf('end'),typeCol=h.indexOf('attribute:type');
+    if(startCol<0||endCol<0)throw Error('Both start and end columns are required.');
+    let entries=[],holidays=0,duplicates=0,seen=new Set();
+    for(let i=rowIndex+1;i<rows.length;i++){
+        let row=rows[i]||[];
+        if(row.every(v=>v===null||v===undefined||v===''))continue;
+        let type=String(row[typeCol]??'').trim().toLowerCase().replace(/[\s_-]/g,'');
+        if(type==='holiday'){
+            holidays++;
+            continue
+        }
+        if(type!=='timeoff')throw Error(sheet+' row '+(i+1)+': Attribute:type must be timeOff or holiday.');
+        let dateValue=v=>{
+            try{
+                return isoDate(v)
+            }
+            catch{
+                return ''
+            }
+
+        }
+        ,name=String(row[nameCol]??'').trim(),start=dateValue(row[startCol]),end=dateValue(row[endCol]);
+        if(!name||!validTimeOffDate(start)||!validTimeOffDate(end)||end<start)throw Error(sheet+' row '+(i+1)+': provide an Employee and valid start/end dates, with end on or after start.');
+        let k=normalizedEmployeeName(name)+'|'+start+'|'+end;
+        if(seen.has(k)){
+            duplicates++;
+            continue
+        }
+        seen.add(k);
+        entries.push({
+            id:'workbook-'+sheet+'-'+(i+1),type:'timeOff',employeeId:'',name,start,end
+        }
+        )
+    }
+    return {
+        entries,holidays,duplicates,sheet
+    }
+
+}
+function workbookCoversPeriod(file,start,end){
+    return !!file&&Array.isArray(file.entries)&&validTimeOffDate(file.coverageStart)&&validTimeOffDate(file.coverageEnd)&&file.coverageStart<=start&&file.coverageEnd>=end
+}
+function applyTimeOffWorkbook(state){
+    let file=model.timeOffWorkbook;
+    if(!workbookCoversPeriod(file,state.start,state.end))throw Error('The saved workbook has not been confirmed for this schedule period.');
+    let active={
+        status:'success',source:'workbook',sourceName:file.name,start:state.start,end:state.end,entries:file.entries.filter(t=>t.end>=state.start&&t.start<=state.end),checkedAt:new Date().toISOString(),uploadedAt:file.uploadedAt,apiStatus:state.status,apiError:state.error||'',error:'',coverageStart:file.coverageStart,coverageEnd:file.coverageEnd
+    }
+    ;
+    model.bambooTimeOff=active;
+    return active
+}
+async function prepareSchedulingTimeOff(start,end){
+    let state=await prepareTimeOff(start,end);
+    if(state.status==='success')return state;
+    if(workbookCoversPeriod(model.timeOffWorkbook,start,end))return applyTimeOffWorkbook(state);
+    if(state.status==='error'||model.timeOffWorkbook)return offerTimeOffFallback(state);
+    return state
+}
+function offerTimeOffFallback(state){
+    return new Promise(resolve=>{
+        pendingTimeOffFallback={
+            state,resolve
+        }
+        ;openTimeOffWorkbook(state)
+    }
+    )
+}
+function openTimeOffWorkbook(state=null){
+    let pending=!!pendingTimeOffFallback,p=state||schedulingTimeOffPeriod(),file=model.timeOffWorkbook;
+    $('timeOffWorkbookDialog').innerHTML=`<div class="dialoghead"><div><div class="eyebrow">TIME-OFF WORKBOOK</div><h2>${pending?'BambooHR unavailable · choose a fallback':'Upload employee time-offs'}</h2></div><button type="button" data-timeoff-workbook="close" aria-label="${pending?'Continue without time-offs':'Close'}">✕</button></div>${state?.error?`<p class="badtext">${esc(state.error)}</p>`:''}<p>Schedule period: <b>${p.start} to ${p.end}</b>. Upload the Time-off template workbook with <b>Employee, start, end, Attribute:type</b> columns. Only employee timeOff entries are applied; holiday rows are ignored.</p>${file?`<p>Saved workbook: <b>${esc(file.name)}</b> · ${file.entries.length} employee time-off records · confirmed ${file.coverageStart} to ${file.coverageEnd}. Leave the file field empty to reuse it after confirming coverage below.</p>`:''}<label>Time-off workbook · XLSX<input type="file" id="timeOffWorkbookFile" accept=".xlsx"></label><div class="formgrid"><label>Workbook coverage starts<input type="date" id="timeOffCoverageStart" value="${p.start}"></label><label>Workbook coverage ends<input type="date" id="timeOffCoverageEnd" value="${p.end}"></label></div><label class="check"><input type="checkbox" id="timeOffCoverageConfirmed"> I confirm this workbook contains the approved employee time-offs for the coverage period above.</label><p class="note">Coverage must include the entire schedule period. A date without a matching workbook entry will be treated as no recorded time-off. A successfully confirmed workbook is saved with the workspace and reused within that coverage period whenever BambooHR is unavailable or API credentials are not configured. A successful API response takes precedence.</p><p id="timeOffWorkbookStatus" role="status"></p><div class="actions"><button type="button" class="primary" data-timeoff-workbook="apply">${pending?'Apply workbook & continue scheduling':'Save time-off workbook'}</button><button type="button" data-timeoff-workbook="close">${pending?'Continue without time-offs':'Cancel'}</button></div>`;
+    $('timeOffWorkbookDialog').oncancel=e=>{
+        e.preventDefault();
+        if(!timeOffWorkbookImporting)closeTimeOffWorkbook()
+    }
+    ;
+    $('timeOffWorkbookDialog').showModal()
+}
+function closeTimeOffWorkbook(){
+    if(timeOffWorkbookImporting)return;
+    $('timeOffWorkbookDialog').close();
+    if(pendingTimeOffFallback){
+        let {
+            state,resolve
+        }
+        =pendingTimeOffFallback;
+        pendingTimeOffFallback=null;
+        resolve(state)
+    }
+
+}
+async function importTimeOffWorkbook(){
+    if(timeOffWorkbookImporting)return;
+    let pending=pendingTimeOffFallback,period=pending?.state||schedulingTimeOffPeriod(),start=$('timeOffCoverageStart').value,end=$('timeOffCoverageEnd').value;
+    if(!$('timeOffCoverageConfirmed').checked)throw Error('Confirm that the workbook includes approved time-offs for the coverage period.');
+    if(!validTimeOffDate(start)||!validTimeOffDate(end)||end<start||start>period.start||end<period.end)throw Error('Confirmed workbook coverage must include '+period.start+' to '+period.end+'.');
+    let file=$('timeOffWorkbookFile').files[0],previous=model.timeOffWorkbook;
+    if(!file&&!previous)throw Error('Select the time-off workbook to upload.');
+    timeOffWorkbookImporting=true;
+    let ownedBusy=!busy;
+    if(ownedBusy)busy=true;
+    try{
+        $('timeOffWorkbookStatus').textContent='Reading and validating employee time-offs…';
+        let parsed;
+        if(file){
+            if(file.size>60e6)throw Error('Workbook exceeds 60 MB.');
+            parsed=parseTimeOffWorkbook(await parseXlsx(await file.arrayBuffer()))
+        }
+        else parsed={
+            entries:previous.entries,holidays:previous.holidays||0,duplicates:previous.duplicates||0,sheet:previous.sheet
+        }
+        ;
+        let next={
+            ...parsed,name:file?.name||previous.name,uploadedAt:file?new Date().toISOString():previous.uploadedAt,coverageStart:start,coverageEnd:end
+        }
+        ;
+        let oldActive=model.bambooTimeOff;
+        model.timeOffWorkbook=next;
+        let state=applyTimeOffWorkbook(pending?.state||{
+            status:model.bambooTimeOff?.status==='error'?'error':'notConfigured',error:model.bambooTimeOff?.error||'',start:period.start,end:period.end
+        }
+        );
+        try{
+            await saveState()
+        }
+        catch(e){
+            model.timeOffWorkbook=previous;
+            model.bambooTimeOff=oldActive;
+            throw e
+        }
+        $('timeOffWorkbookDialog').close();
+        if(pending){
+            pendingTimeOffFallback=null;
+            pending.resolve(state)
+        }
+        else{
+            render();
+            if($('timeOffTable'))$('timeOffTable').innerHTML=timeOffTable($('timeOffSearch')?.value||'');
+            message(parsed.entries.length+' employee time-off records saved from '+next.name+'; '+parsed.holidays+' holiday rows ignored. Generate schedules or Refresh & shuffle all to apply them.'+(storageMode==='session'?' Session only: save a workspace backup or portable ZIP bundle.':''))
+        }
+
+    }
+    finally{
+        timeOffWorkbookImporting=false;
+        if(ownedBusy)busy=false
+    }
+
+}
+document.addEventListener('click',async e=>{
+    let cmd=e.target.closest('[data-timeoff-workbook]')?.dataset.timeoffWorkbook;if(!cmd||timeOffWorkbookImporting)return;if(cmd==='close'){
+        closeTimeOffWorkbook();return
+    }
+    if(cmd==='apply'){
+        try{
+            await importTimeOffWorkbook()
+        }
+        catch(err){
+            $('timeOffWorkbookStatus').textContent='Workbook not applied: '+err.message
+        }
+
+    }
+
+}
+);
+let storageMode='unknown',storageReason='';
+let model=null,page='home',filterLoc='All',filterRole='All',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null;
+const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}
+[c])),f=(v,d=0)=>Number(v||0).toLocaleString('en-US',{
+    maximumFractionDigits:d
+}
+),sum=a=>a.reduce((s,x)=>s+x,0),percent=v=>v===null?'':Math.round(v*1000000)/10000;
+function message(text,error=false){
+    dismissedHeaderNotices.delete('notice');
+    if($('noticeWrap'))$('noticeWrap').hidden=!text;
+    $('notice').textContent=text;
+    $('notice').className=error?'notice error':'notice';
+
+}
+function heading(k,t,p){
+    return `<header class="heading"><div><div class="eyebrow">${k}</div><h2>${t}</h2><p>${p}</p></div></header>`
+}
+function panel(t,body,note=''){
+    return `<section class="panel"><h3>${t}</h3>${body}${note?`<p class="note">${note}</p>`:''}</section>`
+}
+function badge(t,status=''){
+    return `<span class="badge ${status}">${esc(t)}</span>`
+}
+function stats(a){
+    return '<div class="kpis">'+a.map(([l,v,t])=>`<article class="kpi"><small>${l}</small><strong>${v}</strong><span>${t}</span></article>`).join('')+'</div>'
+}
+function select(options,val,attrs=''){
+    return `<select ${attrs}>${options.map(([v,t])=>`<option value="${esc(v)}" ${String(val??'')===String(v)?'selected':''}>${esc(t)}</option>`).join('')}</select>`
+}
+function disabled(){
+    return model.locked?'disabled':''
+}
+function nav(p){
+    if(!pageAllowed(p)){
+        message('This page is disabled. Enable it in Settings.',true);
+        return;
+
+    }
+    page=p;
+    closeAppMenu();
+    render()
+}
+function closeAppMenu(){
+    let menu=$('appMenu'),toggle=$('menuToggle');
+    let wasOpen=menu?.classList.contains('menu-open');
+    menu?.classList.remove('menu-open');
+    toggle?.setAttribute('aria-expanded','false');
+    toggle?.setAttribute('aria-label','Open navigation menu');
+    if(wasOpen)scheduleHeaderCollapse()
+}
+function setAppMenuOpen(open){
+    let menu=$('appMenu'),toggle=$('menuToggle');
+    if(!menu||!toggle)return;
+    if(open){
+        clearTimeout(initialHeaderCollapseTimer);
+        let header=document.querySelector('.top');
+        menu.style.setProperty('--menu-top',(header?Math.ceil(header.getBoundingClientRect().bottom):72)+'px')
+    }
+    menu.classList.toggle('menu-open',open);
+    toggle.setAttribute('aria-expanded',String(open));
+    toggle.setAttribute('aria-label',open?'Close navigation menu':'Open navigation menu')
+}
+document.addEventListener('click',e=>{
+    let toggle=e.target.closest('#menuToggle'),menu=$('appMenu');
+    if(toggle){
+        setAppMenuOpen(toggle.getAttribute('aria-expanded')!=='true');
+        return
+    }
+    if(menu?.classList.contains('menu-open')&&!menu.contains(e.target))closeAppMenu()
+});
+document.addEventListener('keydown',e=>{
+    if(e.key==='Escape')closeAppMenu()
+});
+window.matchMedia('(min-width: 851px)').addEventListener('change',closeAppMenu);
+window.addEventListener('resize',()=>{
+    if(window.innerWidth>850)closeAppMenu()
+});
+let initialHeaderCollapseTimer,lastHeaderScrollY=window.scrollY,lastTouchY=null,lastHeaderInputDirection=null,lastHeaderInputAt=0,ignoreHeaderScrollUntil=0;
+function scheduleHeaderCollapse(){
+    clearTimeout(initialHeaderCollapseTimer);
+    if(!$('appMenu')?.classList.contains('menu-open'))initialHeaderCollapseTimer=setTimeout(()=>setHeaderCollapsed(true),5000)
+}
+function handleHeaderScrollDirection(down,fromInput=false){
+    if(fromInput){
+        lastHeaderInputDirection=down;
+        lastHeaderInputAt=performance.now()
+    }
+    clearTimeout(initialHeaderCollapseTimer);
+    if(down)setHeaderCollapsed(true);
+    else{
+        setHeaderCollapsed(false);
+        scheduleHeaderCollapse()
+    }
+    requestAnimationFrame(()=>lastHeaderScrollY=window.scrollY)
+}
+function setHeaderCollapsed(collapsed){
+    let header=document.querySelector('.top');
+    if(!header)return;
+    if(collapsed&&$('appMenu')?.classList.contains('menu-open'))return;
+    if(header.classList.contains('header-collapsed')===collapsed)return;
+    ignoreHeaderScrollUntil=performance.now()+1500;
+    header.classList.toggle('header-collapsed',collapsed);
+    if(collapsed)closeAppMenu();
+    else if($('appMenu')?.classList.contains('menu-open'))setAppMenuOpen(true)
+}
+function initHeaderCollapse(){
+    scheduleHeaderCollapse();
+    window.addEventListener('wheel',e=>{
+        if(e.deltaY)handleHeaderScrollDirection(e.deltaY>0,true)
+    },{passive:true});
+    window.addEventListener('touchstart',e=>{
+        lastTouchY=e.touches[0]?.clientY??null
+    },{passive:true});
+    window.addEventListener('touchmove',e=>{
+        let currentY=e.touches[0]?.clientY;
+        if(currentY!==undefined&&lastTouchY!==null&&currentY!==lastTouchY)handleHeaderScrollDirection(currentY<lastTouchY,true);
+        if(currentY!==undefined)lastTouchY=currentY
+    },{passive:true});
+    window.addEventListener('scroll',()=>{
+        let currentY=window.scrollY;
+        if(performance.now()<ignoreHeaderScrollUntil){
+            lastHeaderScrollY=currentY;
+            return
+        }
+        if(currentY!==lastHeaderScrollY){
+            let down=currentY>lastHeaderScrollY;
+            if(lastHeaderInputDirection!==null&&down!==lastHeaderInputDirection&&performance.now()-lastHeaderInputAt<1000){
+                lastHeaderScrollY=currentY;
+                return
+            }
+            let header=document.querySelector('.top');
+            if(header?.classList.contains('header-collapsed')===down)handleHeaderScrollDirection(down)
+        }
+        lastHeaderScrollY=currentY
+    },{passive:true})
+}
+function errorsPanel(){
+    let issues=modelIssues(model);
+    return `<div class="validation">${badge(issues.errors.length?issues.errors.length+' blocking issues':'Ready to lock',issues.errors.length?'bad':'good')} ${badge(issues.warnings.length+' warnings','warn')}<details ${issues.errors.length?'open':''}><summary>Review configuration checks</summary><ul>${issues.errors.map(e=>`<li class="badtext">${esc(e)}</li>`).join('')}${issues.warnings.map(e=>`<li>${esc(e)}</li>`).join('')}</ul></details></div>`
+}
+function home(){
+    let p=model.pools.filter(p=>p.enabled),runs=model.results,missing=sum(runs.map(r=>r.uncovered.length)),short=sum(runs.map(r=>sum(r.shortages.map(e=>e.missing))));
+    return heading('WORKFORCE PLANNING','Build the week. Protect the rules.','Configure your pools, validate employee constraints, lock the settings and generate a saved schedule for every selected week.')+stats([['Roster employees',f(model.roster.length),'Across source location-role pools'],['Enabled pools',p.length,'Of '+model.pools.length+' source pools'],['Planned weekly schedules',p.length*scheduleWeeks(model),'All enabled pools × '+scheduleWeeks(model)+' weeks'],['Saved schedules',runs.length,'Saved independently of later edits']])+`<div class="workflow">${[['01','Location roles','Set pools and shares','pools'],['02','Roster & META','Validate constraints','roster'],['03','Controls & lock','Set start, weeks and rules','controls'],['04','Generate & review','Inspect and download','schedules']].map(([n,t,d,g])=>`<button type="button" data-page="${g}"><small>${n}</small><b>${t}</b><span>${d}</span></button>`).join('')}</div>`+errorsPanel()+panel('Configuration status',`<p>${model.locked?'Settings are locked at revision '+model.revision+'. You can generate schedules from this snapshot.':'Settings are editable. Generation is disabled until validation passes and you lock the configuration.'}</p><div class="actions"><button type="button" class="primary" data-action="${model.locked?'generate':'lock'}">${model.locked?'Generate all schedules':'Validate & lock settings'}</button><button type="button" data-page="controls">Review controls</button></div>`)+ (runs.length?panel('Latest saved schedule review',stats([['Unfilled demand',missing,'Primary demand slots without an eligible employee'],['Employee target shortfall',short,'Missing employee shifts across saved weeks'],['Make-up shifts',sum(runs.map(r=>r.makeup)),'Additional to demand; marked separately']])):'')+panel('Model notes','<p>This app implements the workbook’s demand-first scoring and make-up rules in browser code. It uses all four shifts and checks permissions, daily availability, one shift per day, weekly shift limits and rest between actual shift intervals, including consecutive generated weeks.</p><p>Uploaded formula changes are not executed as arbitrary Excel formulas. Source input values drive the documented scheduling model. Missing inputs remain missing; review enabled-pool checks before generation.</p>')
+}
+function poolState(p){
+    let rs=poolRoster(model,p),temp=clone(model);
+    temp.pools.forEach(x=>x.enabled=x.id===p.id);
+    let problems=modelIssues(temp).errors;
+    return {
+        count:rs.length,ready:problems.length===0,issues:problems
+    }
+
+}
+function pools(){
+    return heading('CONFIGURATION / LOCATION ROLES','Choose the pools to schedule.','Workload shares come from Location Roles D–G. Headcount follows the roster. Set the shared number of weeks in Controls & lock.')+`<div class="toolbar"><label>Filter location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="poolLocation"')}</label><span>${model.locked?'Locked · unlock in Controls to edit':'Percentages per pool must total 100%'}</span></div>`+panel('Location × role configuration',`<div class="tablewrap"><table><thead><tr><th>Enabled</th><th>Location</th><th>Role</th><th>HC</th>${STARTS.map(s=>'<th>'+timeLabel(s)+' share %</th>').join('')}<th>Min daily HC<br>Other roles</th><th>Status</th></tr></thead><tbody>${model.pools.map((p,i)=>{
+        if(filterLoc!=='All'&&p.location!==filterLoc)return '';let st=poolState(p);return `<tr><td><input type="checkbox" data-pool="${i}" data-field="enabled" ${p.enabled?'checked':''} ${disabled()} aria-label="Enable ${esc(p.id)}"></td><td>${esc(p.location)}</td><td>${esc(p.role)}</td><td>${st.count}</td>${p.shares.map((x,j)=>`<td><input type="number" min="0" max="100" step="any" value="${percent(x)}" data-pool="${i}" data-share="${j}" ${disabled()} aria-label="${timeLabel(STARTS[j])} share for ${esc(p.id)}"></td>`).join('')}<td>${warehouseRole(p.role)?'<span class="note">Volume-based</span>':`<input type="number" min="0" max="1000000000000" step="1" value="${esc(overtimeConfig().minimum[p.id]??'')}" data-ot-minimum="${esc(p.id)}" ${disabled()} aria-label="Minimum daily headcount for ${esc(p.id)}">`}</td><td title="${esc(st.issues.join('; '))}">${badge(st.count===0?'No roster':st.ready?'Ready':'Incomplete',st.ready?'good':'warn')}</td></tr>`
+    }
+    ).join('')}</tbody></table></div>`,'Min daily HC is a total daily requirement for non-Warehouse roles, split across the four shift shares using whole-person rounding. Blank or 0 disables headcount-based overtime suggestions.')+volumeConfiguration()+errorsPanel()
+}
+const ROSTER_FIELDS=[['flex','Flexible','list'],['reason','Reason if no','text'],['preferred','Preferred start','start'],['proximity','Proximity 1–3','rank'],['random','Random 1–3','rank'],['attendance','Attendance 0–100','number'],...[0,1,2,3].map(i=>['allow'+i,'Allow '+timeLabel(STARTS[i]),'binary']),...DAYS.map((d,i)=>['day'+i,d,'binary'])];
+function rosterInput(e,i,k,type){
+    let val=k.startsWith('allow')?e.allow[+k.slice(5)]:k.startsWith('day')?e.days[+k.slice(3)]:e[k],at=`data-employee="${i}" data-field="${k}" ${disabled()} aria-label="${esc(e.name+' '+k)}"`;
+    if(type==='text')return `<input type="text" value="${esc(val)}" maxlength="240" ${at}>`;
+    if(type==='number')return `<input type="number" min="0" max="100" step="any" value="${val??''}" ${at}>`;
+    let opts=type==='list'?[['','Missing'],['Yes','Yes'],['No','No']]:type==='start'?[['','Missing'],...STARTS.map(s=>[s,timeLabel(s)])]:type==='rank'?[['','Missing'],[1,'1'],[2,'2'],[3,'3']]:[['','Missing'],[1,'1 · Yes'],[0,'0 · No']];
+    return select(opts,val,at)
+}
+function roster(){
+    let shown=model.roster.map((e,i)=>({
+        e,i
+    }
+    )).filter(({
+        e
+    }
+    )=>(filterLoc==='All'||e.location===filterLoc)&&(filterRole==='All'||e.role===filterRole)&&(!search||(e.name+' '+e.id).toLowerCase().includes(search.toLowerCase())));
+    return heading('PEOPLE / ROSTER','Respect employee constraints.','Edit source columns C–S. Blank required fields remain flagged. Proximity: near = 1, mid = 2, far = 3; a higher score receives more source-model weight.')+`<div class="toolbar"><label>Location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="rosterLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(model.roster.map(e=>e.role))].sort().map(x=>[x,x])],filterRole,'id="rosterRole"')}</label><label>Find employee<input id="rosterSearch" placeholder="Name or ID" value="${esc(search)}"></label><span>${shown.length} employees</span></div>`+panel('Employee settings · columns C–S',`<div class="tablewrap rostergrid"><table><thead><tr><th>ID / Employee</th><th>Location / Role</th>${ROSTER_FIELDS.map(([k,l])=>'<th>'+esc(l)+'</th>').join('')}<th>Validation</th></tr></thead><tbody>${shown.map(({
+        e,i
+    }
+    )=>`<tr><td class="sticky"><b>${esc(e.name)}</b><small>${esc(e.id)}</small></td><td>${esc(e.location)}<small>${esc(e.role)}</small></td>${ROSTER_FIELDS.map(([k,l,t])=>'<td>'+rosterInput(e,i,k,t)+'</td>').join('')}<td>${rosterErrors(e).length?'<span class="badtext">'+esc(rosterErrors(e).join('; '))+'</span>':badge('Ready','good')}</td></tr>`).join('')}</tbody></table></div>`,'Source random scores remain editable. Every generation draws a fresh 1–3 rotation factor per employee and week, multiplied by the Random factor weight. Attendance scores are editable snapshots; blank scores receive no top-three preference bonus. Previous Sunday start is read from source column T for the first generated week.')
+}
+const CONTROL_FIELDS=[['shifts','Shifts per employee',1,7,1],['hours','Paid hours per shift',.5,24,.5],['span','Elapsed shift span · hours',.5,24,.5],['rest','Minimum rest hours',0,48,.5],['preference','Preference weight',0,1e6,1],['proximity','Proximity weight',0,1e6,1],['random','Random factor weight',0,1e6,1],['bonus','Attendance priority bonus',0,1e7,1]];
+function selectedPool(){
+    return model.pools.find(p=>p.id===(previewId||key(model.controls.location,model.controls.role)))||model.pools[0]
+}
+function controls(){
+    let c=model.controls,p=selectedPool(),rs=poolRoster(model,p),l=model.locations.find(x=>x.name===p.location);
+    let can=p.shares.every(isNum)&&l&&l.intensity.every(isNum)&&sum(l.intensity.map((x,i)=>l.open[i]?x:0))>0,dem=can?splitDemand(rs.length,p.shares,c,l):null;
+    return heading('ENGINE / CONTROLS','One locked snapshot. Many weeks.','The first week starts on the selected Monday. Generation advances it by seven days and selects Location and Role automatically for each enabled pool.')+panel('Generation controls',`<div class="formgrid"><label>Week commencing · Monday<input type="date" value="${esc(c.week)}" data-control="week" ${disabled()}></label><label>Weeks · all enabled location × roles<input type="number" min="1" max="52" step="1" value="${scheduleWeeks(model)}" data-control="weeks" ${disabled()}></label>${CONTROL_FIELDS.map(([k,t,min,max,step])=>`<label>${t}<input type="number" min="${min}" max="${max}" step="${step}" value="${c[k]}" data-control="${k}" ${disabled()}></label>`).join('')}<label>Attendance priority ${select([[1,'Enabled · top 3 by pool'],[0,'Disabled']],c.attendanceEnabled,`data-control="attendanceEnabled" ${disabled()}`)}</label><label>Make-up pass ${select([[1,'Enabled'],[0,'Disabled']],c.makeup,`data-control="makeup" ${disabled()}`)}</label></div><div class="callout">Paid hours feed weekly hours. Elapsed span feeds displayed end times and rest checks; default 9 hours reflects the workbook’s printed shifts. The source uses 8 paid hours. These can be configured separately.</div>`)+panel('Resolved Controls preview',`<div class="toolbar"><label>Preview location / role ${select(model.pools.map(x=>[x.id,x.location+' · '+x.role]),p.id,'id="previewPool"')}</label><span>Control Location: ${esc(p.location)} · Role: ${esc(p.role)} · HC: ${rs.length}</span></div>${dem?`<div class="tablewrap"><table><thead><tr><th>Day</th><th>Open</th><th>Daily total</th>${STARTS.map(s=>'<th>'+timeLabel(s)+'</th>').join('')}</tr></thead><tbody>${dem.map((r,i)=>`<tr><td>${DAYS[i]}</td><td>${l.open[i]}</td><td>${sum(r)}</td>${r.map(x=>'<td>'+x+'</td>').join('')}</tr>`).join('')}</tbody></table></div>`:'<p>Supply valid shift shares and META intensities to see demand.</p>'}`)+errorsPanel()+panel('Lock configuration',`<p>Locking fixes the roster, operating patterns, controls and enabled pool settings for generation. Unlocking creates a new revision; earlier saved schedules retain their own configuration snapshots.</p><div class="actions"><button type="button" class="primary" data-action="${model.locked?'unlock':'lock'}">${model.locked?'Unlock & revise settings':'Validate & lock settings'}</button><button type="button" data-action="generate" ${model.locked?'':'disabled'}>Generate schedules</button></div>`)
+}
+function metaPage(){
+    return heading('OPERATIONS / META','Define how each location works.','Daily intensities are normalized across open days. A closed day receives no demand or make-up shifts.')+panel('Location calendars & workload intensity',`<div class="tablewrap"><table class="metagrid"><thead><tr><th>Location</th>${DAYS.map(d=>'<th>'+d+' intensity % / open</th>').join('')}<th>Total intensity</th></tr></thead><tbody>${model.locations.map((l,i)=>`<tr><td>${esc(l.name)}</td>${DAYS.map((d,j)=>`<td><input type="number" min="0" max="100" step="any" value="${percent(l.intensity[j])}" data-meta="${i}" data-day="${j}" data-field="intensity" ${disabled()} aria-label="${esc(l.name+' '+d)} intensity"><label class="check"><input type="checkbox" data-meta="${i}" data-day="${j}" data-field="open" ${l.open[j]===1?'checked':''} ${disabled()}> Open</label></td>`).join('')}<td>${f(sum(l.intensity.map(x=>x||0))*100,2)}%</td></tr>`).join('')}</tbody></table></div>`,'Missing intensity cells are not converted to zero. Set all seven values for any enabled location. For closed days you may explicitly enter 0.')+errorsPanel()
+}
+function schedules(){
+    let all=model.results,visible=visibleScheduleRuns(),selected=visible.find(r=>r.id===model.selectedRun)||visible[0];
+    if(selected)model.selectedRun=selected.id;
+    return heading('OUTPUT / WEEKLY SCHEDULE','Every week, saved by pool.','Review demand coverage, supplemental shifts and employee target shortfalls. Schedule times use the elapsed span configured for that run. Every generation uses fresh randomness. Refresh & shuffle all processes every saved schedule, including earlier revisions and pools outside the current horizon, using each schedule’s saved constraints.')+`<div class="toolbar"><button type="button" class="primary" data-action="generate" ${model.locked?'':'disabled'}>${all.length?'Generate / update selected horizon':'Generate schedules'}</button><button type="button" data-action="refresh" ${model.locked&&all.length?'':'disabled'}>↻ Refresh & shuffle all</button>${model.previousScheduleSet?'<button type="button" data-action="undoShuffle">Undo last shuffle</button>':''}<button type="button" data-action="timeOffs">View time-offs</button><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button><button type="button" data-action="trade" ${all.length?'':'disabled'}>Trade shifts</button><button type="button" data-action="scheduleUpload">Upload schedules · XLSX</button><button type="button" data-action="scheduleTemplate">Download schedule template</button><button type="button" data-action="downloadVisible" ${visible.length?'':'disabled'}>Download filtered schedules · XLSX</button><button type="button" data-action="download" ${all.length?'':'disabled'}>Download all schedules · XLSX</button><button type="button" data-action="email" ${all.length?'':'disabled'}>Email schedules</button><button type="button" data-action="csv" ${all.length?'':'disabled'}>Combined CSV</button></div>`+scheduleFilters()+(!all.length?panel('No saved schedules',model.locked?'<p>Generate schedules from the locked configuration.</p>':'<p>Complete the settings and lock them in Controls before generating the first schedule.</p>'):`<div class="toolbar"><label>Saved week & pool ${select(visible.map(r=>[r.id,r.start+' to '+r.end+' · '+r.location+' · '+r.role+' · rev '+r.revision]),selected?.id,'id="runSelect"')}</label></div>`+(selected?runView(selected):panel('No matching schedules','<p>Change the filters to view saved schedules.</p>'))+panel('Saved schedule register',`<div class="tablewrap"><table><thead><tr><th>Week period</th><th>Location / role</th><th>Revision</th><th>Demand filled</th><th>Make-up</th><th>Unfilled demand</th><th>Employee shortfall</th></tr></thead><tbody>${visible.map(r=>`<tr><td><button type="button" data-run="${esc(r.id)}">${r.start} → ${r.end}</button></td><td>${esc(r.location)}<small>${esc(r.role)}</small></td><td>${r.revision}</td><td>${r.primary}</td><td>${r.makeup}</td><td>${r.uncovered.length}</td><td>${sum(r.shortages.map(x=>x.missing))}</td></tr>`).join('')}</tbody></table></div>`))
+}
+function runView(r){
+    if(!r)return '';
+    let c=r.controls;
+    return (r.importWarnings?.length?panel('Uploaded schedule · missing profile information','<ul>'+r.importWarnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>'):'')+overtimePanel(r)+stats([['Week period',r.start,'Through '+r.end],['Primary shifts filled',r.primary,f(sum(r.requirements.flat()))+' demand slots'],['Make-up shifts',r.makeup,'Shown with a + marker'],['Review items',r.uncovered.length+r.shortages.length,'Unfilled demand slots + employees below target']])+panel(esc(r.location+' · '+r.role),`<div class="actions">${badge('Revision '+r.revision)} ${r.timeOffCheck?badge(r.timeOffCheck.status==='success'?(r.timeOffCheck.source==='workbook'?'Workbook time-offs applied':'BambooHR time-offs checked'):r.timeOffCheck.status==='error'?'Time-offs not checked · API error':'Time-offs not configured',r.timeOffCheck.status==='error'?'warn':''):''} ${r.controls.shuffle?badge('Shuffled · seed '+r.controls.seed):''} ${badge(r.uncovered.length||r.shortages.length?'Review required':'Targets met',r.uncovered.length||r.shortages.length?'warn':'good')}<span class="note">${r.imported?'Uploaded schedule · '+esc(r.sourceName):r.revision!==model.revision?'Earlier configuration revision · included in shuffle all':'Current configuration revision'}</span></div><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((d,i)=>`<th>${d}<small>${addDays(r.start,i)}</small></th>`).join('')}<th>Shifts / hours</th><th>Missing</th></tr></thead><tbody>${r.employees.map(e=>`<tr><td class="sticky">${esc(e.name)}<small>${esc(e.id)}</small></td>${e.slots.map((s,d)=>`<td class="${s===null?(e.timeOff?.[d]?'leave':'off'):e.types[d]==='Make-up'?'added':'duty'}">${s===null?(e.timeOff?.[d]?'time-off':'OFF'):esc(shiftLabel(s,c.span))+(e.types[d]==='Make-up'?'<b class="plus"> +</b>':'')}</td>`).join('')}<td>${e.slots.filter(x=>x!==null).length} / ${f(e.slots.filter(x=>x!==null).length*c.hours,1)}h</td><td>${Math.max(0,c.shifts-e.slots.filter(x=>x!==null).length)}</td></tr>`).join('')}</tbody></table></div>`,'+ = supplemental make-up shift; these do not erase unfilled primary demand. time-off marks approved BambooHR absence (or uploaded time-off); OFF means no assignment. Overnight shifts that overlap the next day’s time-off are also excluded.')+(r.tradeHistory?.length?panel('Confirmed shift trades','<ul>'+r.tradeHistory.map(t=>'<li>'+esc(t.firstName)+' ↔ '+esc(t.secondName)+' · '+esc(t.days.map(d=>DAYS[d]).join(', '))+' · '+esc(t.at)+'</li>').join('')+'</ul>'):'')+panel('Demand coverage · assigned / required',`<div class="tablewrap"><table><thead><tr><th>Day</th>${STARTS.map(s=>'<th>'+timeLabel(s)+'</th>').join('')}<th>Make-up total</th></tr></thead><tbody>${r.requirements.map((rq,d)=>`<tr><td>${DAYS[d]}</td>${rq.map((need,j)=>{
+        let got=r.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Demand').length;return `<td class="${got<need?'gap':''}">${got} / ${need}</td>`
+    }
+    ).join('')}<td>${r.employees.filter(e=>e.types[d]==='Make-up').length}</td></tr>`).join('')}</tbody></table></div>`)+(r.shortages.length?panel('Employee target shortfalls','<ul>'+r.shortages.map(e=>'<li>'+esc(e.name)+' · '+e.missing+' missing shifts</li>').join('')+'</ul>'):'')
+}
+function sourcePage(){
+    return heading('DATA / SOURCE & SAVING','Your workbook, your scheduling inputs.','Upload a pre-filled version of the same model to replace the configuration basis. Saved schedules retain their source settings.')+panel('Source workbook',`<p><b>${esc(model.sourceName)}</b><br><span class="note">Imported ${esc(model.sourceImported)}</span></p><div class="actions"><button type="button" class="import" data-action="sourcePicker">Upload updated source</button><button type="button" data-action="backup">Download workspace backup</button><button type="button" data-action="restore">Restore backup</button><button type="button" data-action="sourceInputs">Download configured inputs · XLSX</button></div><p class="note">Import replaces the editable source configuration and unlocks settings. Previously generated schedules retain their configuration snapshots and revision. Refresh & shuffle all can change their allocations using those saved constraints.</p>`)+panel('What is saved',storageMode==='session'?'<p>This context blocks IndexedDB. Your source inputs, settings, lock state and schedule snapshots remain available for the current session. Download the portable ZIP bundle when hosted or download a workspace backup to retain them after refresh or closing. Excel and CSV exports contain schedule output; use JSON backup or portable ZIP bundle to preserve the full workspace.</p>':'<p>The source inputs, settings, lock state and weekly schedule snapshots are saved in this browser using IndexedDB. Download a workspace backup or portable ZIP bundle for a durable copy. Browser storage is not shared with other team members and may be cleared by browser policies.</p>')+panel('Engine interpretation','<ul><li>Location Roles rows 7–46 define available source pools. Headcount is recomputed from the roster, capped at 21 per enabled pool.</li><li>Controls Location and Role are resolved for each generated pool; the date is incremented weekly. A Controls snapshot is saved for every result.</li><li>Daily demand uses cumulative rounding of headcount × weekly shift target, weighted across open-day intensity. Shift demand uses largest-remainder rounding with deterministic shift-order ties, so totals reconcile.</li><li>Primary scoring: remaining weekly shifts × 10,000; fixed-flexibility priority +1,000; preference and proximity weights, a fresh random 1–3 rotation factor per employee/week multiplied by the random weight, and optional top-three attendance preference bonus. A fresh seed also randomizes equal-priority demand ordering and allocation ties.</li><li>Make-up shifts use preference/scoring, then lowest daily staffing, with randomized ties. All four shifts are supported. Added shifts are audited separately.</li><li>Rest uses elapsed shift span and actual time between assigned intervals, including across generated weeks. Explicit shift permissions also apply to fixed-preference employees.</li><li>This browser model corrects stale three-shift references and repeated/no-op dependencies in the uploaded formulas. It does not execute arbitrary Excel formulas. New layouts or formula-rule changes require an app update.</li><li>The original model contains missing roster fields and workload shares. These remain visible and block generation only when their pools are enabled. Attendance blanks receive no bonus.</li></ul>')
+}
+function render(){
+    if(!model)return;
+    profileHeader();
+    applyMenuSettings();
+    document.documentElement.dataset.theme=model.theme;
+    $('sourceName').textContent=model.sourceName;
+    $('lockState').textContent=model.locked?'● Locked · rev '+model.revision:'○ Editable · rev '+model.revision;
+    $('lockState').className=model.locked?'lock locked':'lock';
+    storageStatus();
+    $('content').innerHTML=({
+        home,pools,roster,controls,meta:metaPage,schedules,source:sourcePage,settings:settingsPage,links:workforceLinksPage
+    }
+    [page])();
+    applyMenuSettings();
+    bindScheduleFilters();
+    document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===page));
+    $('poolLocation')?.addEventListener('change',e=>{
+        filterLoc=e.target.value;render()
+    }
+    );
+    $('rosterLocation')?.addEventListener('change',e=>{
+        filterLoc=e.target.value;render()
+    }
+    );
+    $('rosterRole')?.addEventListener('change',e=>{
+        filterRole=e.target.value;render()
+    }
+    );
+    $('rosterSearch')?.addEventListener('change',e=>{
+        search=e.target.value;render()
+    }
+    );
+    $('previewPool')?.addEventListener('change',e=>{
+        previewId=e.target.value;render()
+    }
+    );
+    $('runSelect')?.addEventListener('change',e=>{
+        model.selectedRun=e.target.value;render()
+    }
+    )
+}
+let saveTimer;
+function queueSave(){
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>saveState().catch(e=>message('Changes are not saved in this browser: '+e.message+'. Download a backup.',true)),200)
+}
+function editChange(event){
+    let e=event.target;
+    if(e.matches?.('input[type=number]')&&e.value!==''&&!e.checkValidity()){
+        message('Enter a value within the allowed range and step.',true);
+        render();
+        return
+    }
+    if(model.locked&&(e.dataset.pool!==undefined||e.dataset.employee!==undefined||e.dataset.control||e.dataset.meta!==undefined)){
+        message('Unlock settings in Controls before editing.',true);
+        render();
+        return
+    }
+    let changed=false;
+    if(e.dataset.pool!==undefined){
+        let p=model.pools[+e.dataset.pool];
+        if(e.dataset.share!==undefined)p.shares[+e.dataset.share]=e.value===''?null:Number(e.value)/100;
+        else if(e.dataset.field==='enabled')p.enabled=e.checked;
+        changed=true
+    }
+    if(e.dataset.employee!==undefined){
+        let r=model.roster[+e.dataset.employee],k=e.dataset.field,v=e.value;
+        if(k==='flex'||k==='reason')r[k]=v;
+        else if(k.startsWith('allow'))r.allow[+k.slice(5)]=v===''?null:Number(v);
+        else if(k.startsWith('day'))r.days[+k.slice(3)]=v===''?null:Number(v);
+        else r[k]=v===''?null:Number(v);
+        changed=true
+    }
+    if(e.dataset.control){
+        model.controls[e.dataset.control]=e.dataset.control==='week'?e.value:e.value===''?null:Number(e.value);
+        changed=true
+    }
+    if(e.dataset.meta!==undefined){
+        let l=model.locations[+e.dataset.meta];
+        l[e.dataset.field][+e.dataset.day]=e.dataset.field==='open'?(e.checked?1:0):e.value===''?null:Number(e.value)/100;
+        changed=true
+    }
+    if(changed){
+        queueSave();
+        render()
+    }
+
+}
+document.addEventListener('change',editChange);
+document.addEventListener('click',async e=>{
+    let p=e.target.closest('[data-page]');if(p){
+        nav(p.dataset.page);return
+    }
+    let r=e.target.closest('[data-run]');if(r){
+        model.selectedRun=r.dataset.run;nav('schedules');return
+    }
+    let a=e.target.closest('[data-action]');if(a)await action(a.dataset.action,a)
+}
+);
+async function action(a,element=null){
+    if(busy)return;
+    if(['backup','restore','sourceInputs','sourcePicker','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
+        message('Enable Source & backups in Settings first.',true);
+        return
+    }
+    try{
+        if(a==='sourcePicker'){
+            openSourcePicker();
+            return
+        }
+        if(a==='closeSourcePicker'){
+            $('sourcePickerDialog').close();
+            return
+        }
+        if(a==='sharePointConnect'){
+            await connectMicrosoftAccount();
+            return
+        }
+        if(a==='sharePointDisconnect'){
+            await disconnectMicrosoftAccount();
+            return
+        }
+        if(a==='sharePointSearch'){
+            await searchSharePointSites();
+            return
+        }
+        if(a==='sharePointOpenSite'){
+            await openSharePointSite(element.dataset.id,element.dataset.name);
+            return
+        }
+        if(a==='sharePointOpenDrive'||a==='sharePointOpenSiteDrive'){
+            await openSharePointDrive(element.dataset.id,element.dataset.name,a==='sharePointOpenSiteDrive'?'siteDrive':'drive');
+            return
+        }
+        if(a==='sharePointOpenFolder'){
+            sharePointState.folderStack.push({id:element.dataset.id,name:element.dataset.name});
+            await loadSharePointFolder(element.dataset.id);
+            return
+        }
+        if(a==='sharePointImport'){
+            await importSharePointWorkbook(sharePointState.driveId,element.dataset.id,element.dataset.name);
+            return
+        }
+        if(a==='sharePointNext'){
+            await loadNextSharePointPage();
+            return
+        }
+        if(a==='sharePointBack'){
+            await goBackInSharePoint();
+            return
+        }
+        if(a==='timeOffWorkbook'){
+            openTimeOffWorkbook();
+            return
+        }
+        if(a==='profile'){
+            openUserProfile();
+            return
+        }
+        if(a==='timeOffs'){
+            openTimeOffs();
+            return
+        }
+        if(a==='trade'){
+            openTrades();
+            return
+        }
+        if(a==='scheduleUpload'){
+            openScheduleImport();
+            return
+        }
+        if(a==='scheduleTemplate'){
+            await downloadScheduleTemplate();
+            return
+        }
+        if(a==='downloadVisible'){
+            downloadFile('CBL-Filtered-Schedules.xlsx',workbookBlob(exportTables(visibleScheduleRuns())));
+            return
+        }
+        if(a==='refresh'){
+            await refreshSchedules();
+            return
+        }
+        if(a==='undoShuffle'){
+            await undoShuffle();
+            return
+        }
+        if(a==='email'){
+            openEmail();
+            return
+        }
+        if(a==='lock'){
+            let check=modelIssues(model);
+            if(check.errors.length){
+                page='controls';
+                render();
+                message('Resolve '+check.errors.length+' blocking issues before locking.',true);
+                return
+            }
+            let oldLocked=model.locked,oldTime=model.lockedAt;
+            model.locked=true;
+            model.lockedAt=new Date().toISOString();
+            try{
+                await saveState()
+            }
+            catch(e){
+                model.locked=oldLocked;
+                model.lockedAt=oldTime;
+                throw e
+            }
+            message('Configuration locked. Generate schedules when ready.');
+            render()
+        }
+        else if(a==='unlock'){
+            model.previousScheduleSet=null;
+            model.locked=false;
+            model.revision++;
+            try{
+                await saveState()
+            }
+            catch(e){
+                model.locked=true;
+                model.revision--;
+                throw e
+            }
+            message('Settings unlocked. Existing schedules retain their saved snapshots.');
+            render()
+        }
+        else if(a==='generate'){
+            busy=true;
+            message('Checking BambooHR time-offs and generating all enabled pools…');
+            await prepareGenerationTimeOff();
+            await new Promise(r=>setTimeout(r,10));
+            let runs=generateAll(model);
+            for(let attempt=0;attempt<15;attempt++){
+                let prior=runs.map(r=>model.results.find(b=>b.id===r.id));
+                if(prior.some((b,i)=>!b||scheduleFingerprint(b)!==scheduleFingerprint(runs[i])))break;
+                runs=generateAll(model)
+            }
+            for(let r of runs){
+                let failures=validateRun(r);
+                if(failures.length)throw Error('Schedule validation failed: '+failures.join('; '))
+            }
+            let old=clone(model.results),selected=model.selectedRun;
+            model.previousScheduleSet=null;
+            model.controls={
+                ...model.controls,shuffle:true,seed:runs[0]?.controls.seed??model.controls.seed
+            }
+            ;
+            for(let r of runs){
+                model.db.Controls[3][1]=r.location;
+                model.db.Controls[14][1]=r.role;
+                model.db.Controls[4][1]=r.start;
+                let i=model.results.findIndex(x=>x.id===r.id);
+                if(i>=0)model.results[i]=r;
+                else model.results.push(r)
+            }
+            model.selectedRun=runs[0]?.id||'';
+            try{
+                await saveState()
+            }
+            catch(err){
+                model.results=old;
+                model.selectedRun=selected;
+                throw Error('Schedules generated but could not be saved: '+err.message)
+            }
+            page='schedules';
+            render();
+            message(runs.length+(storageMode==='session'?' weekly schedules generated in this session. Save a workspace backup or portable ZIP bundle before closing.':' weekly schedules generated and saved. Review unfilled demand and employee shortfalls.')+timeOffSummary(),(model.bambooTimeOff?.status==='error'||model.bambooTimeOff?.apiStatus==='error'))
+        }
+        else if(a==='download')downloadSchedules();
+        else if(a==='csv')downloadCSV();
+        else if(a==='backup')downloadFile('CBL-Scheduling-Workspace.json',new Blob([JSON.stringify({
+            version:1,model
+        }
+        )],{
+            type:'application/json'
+        }
+        ));
+        else if(a==='restore')$('restoreUpload').click();
+        else if(a==='portable')await portable();
+        else if(a==='sourceInputs')downloadInputs()
+    }
+    catch(err){
+        if(a.startsWith('sharePoint'))setSharePointStatus(err.message,true);
+        message(err.message,true)
+    }
+    finally{
+        busy=false
+    }
+
+}
+function store(action,value,recordKey='current'){
+    return new Promise((resolve,reject)=>{
+        let db,tx,done=false,timer;function finish(err,out){
+            if(done)return;done=true;clearTimeout(timer);if(db)db.close();err?reject(err):resolve(out)
+        }
+        try{
+            if(typeof indexedDB==='undefined')return finish(Error('Browser storage unavailable'));let request=indexedDB.open('cbl-scheduling-v1:'+location.pathname,1);timer=setTimeout(()=>{
+                try{
+                    tx?.abort()
+                }
+                catch{
+
+                }
+                finish(Error('Storage timed out'))
+            }
+            ,12000);request.onupgradeneeded=()=>{
+                if(!request.result.objectStoreNames.contains('workspace'))request.result.createObjectStore('workspace')
+            }
+            ;request.onblocked=()=>finish(Error('Browser storage is blocked'));request.onerror=()=>finish(request.error||Error('Browser storage denied'));request.onsuccess=()=>{
+                db=request.result;if(done){
+                    db.close();return
+                }
+                try{
+                    tx=db.transaction('workspace',action==='put'?'readwrite':'readonly');let rq=action==='put'?tx.objectStore('workspace').put(value,recordKey):tx.objectStore('workspace').get(recordKey),out;rq.onsuccess=()=>out=rq.result;tx.oncomplete=()=>finish(null,out);tx.onerror=tx.onabort=()=>finish(tx.error||Error('Storage write failed'))
+                }
+                catch(err){
+                    finish(err)
+                }
+
+            }
+
+        }
+        catch(err){
+            finish(err)
+        }
+
+    }
+    )
+}
+function storageStatus(){
+    let warning=$('storageWarning');
+    if(warning){
+        warning.hidden=storageMode!=='session';
+        warning.textContent=storageMode==='session'?'Session mode: this context blocks browser storage. Locking, uploads and scheduling still work. Before closing or refreshing, download the portable ZIP bundle when hosted or download a workspace backup from Source & backups.':''
+    }
+    $('savedState').textContent=storageMode==='session'?'Session only · automatic browser saving unavailable':'Saved in this browser · '+new Date().toLocaleTimeString();
+    updateHeaderNotices()
+}
+async function persistWorkspace(value){
+    if(storageMode==='session'){
+        storageStatus();
+        return false
+    }
+    try{
+        await store('put',value);
+        storageMode='persistent';
+        storageStatus();
+        return true
+    }
+    catch(err){
+        storageMode='session';
+        storageReason=err.message;
+        storageStatus();
+        return false
+    }
+
+}
+async function saveState(){
+    return persistWorkspace(model)
+}
+const microsoftAuthScopes=['Files.Read'];
+const microsoftConsumerTenantId='9188040d-6c67-4c5b-b112-36a304b66dad';
+const microsoftAuthLibraryUrl='https://cdn.jsdelivr.net/npm/@azure/msal-browser@4.7.0/lib/msal-browser.min.js';
+let microsoftAuthClient=null;
+let sharePointAccount=null;
+let sharePointState={
+    view:'drives',
+    items:[],
+    siteResults:[],
+    nextLink:null,
+    driveId:'',
+    driveName:'',
+    siteName:'',
+    driveReturnView:'drives',
+    folderStack:[]
+};
+function microsoftAuthReadiness(){
+    let clientId=String(window.CBL_MICROSOFT_CLIENT_ID||'').trim();
+    if(!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(clientId))return 'Set a valid Entra application client ID in CBL-Scheduler2.config.js to enable sign-in.';
+    let localHost=['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+    if(location.protocol!=='https:'&&!(location.protocol==='http:'&&localHost))return 'Microsoft sign-in requires HTTPS or a localhost web server. It is not available from file://.';
+    let redirectUri;
+    try{
+        redirectUri=new URL(microsoftRedirectUri())
+    }
+    catch{
+        return 'Set a valid Microsoft sign-in redirect URI in CBL-Scheduler2.config.js.'
+    }
+    if(redirectUri.origin!==location.origin||redirectUri.search||redirectUri.hash)return 'The redirect URI must use this app’s origin and must not include a query or fragment.';
+    return ''
+}
+function microsoftRedirectUri(){
+    return String(window.CBL_MICROSOFT_REDIRECT_URI||'').trim()||new URL('CBL-MicrosoftAuth.html',location.href).href
+}
+function updateMicrosoftConfigNotice(){
+    let notice=$('sharePointConfigNotice'),button=$('sharePointConnect'),redirect=$('sharePointRedirectUri');
+    let readiness=microsoftAuthReadiness();
+    if(notice)notice.textContent=readiness||'Ready to connect. Sign-in tokens stay in memory and are not included in workspace backups.';
+    if(button)button.disabled=!!readiness;
+    if(redirect)redirect.textContent=microsoftRedirectUri();
+    return readiness
+}
+function openSourcePicker(){
+    if(!pageAllowed('source')){
+        message('Enable Source & backups in Settings before uploading.',true);
+        return
+    }
+    updateMicrosoftConfigNotice();
+    $('sourcePickerDialog').showModal()
+}
+function setSharePointStatus(text,error=false){
+    let status=$('sharePointStatus');
+    if(status){
+        status.textContent=text;
+        status.classList.toggle('error',error)
+    }
+}
+function renderSharePointItems(){
+    let list=$('sharePointItems'),title=$('sharePointListingTitle'),back=$('sharePointBack'),next=$('sharePointNext');
+    if(!list)return;
+    if(sharePointState.view==='sites'){
+        list.replaceChildren();
+        title.textContent='SharePoint site search results';
+        back.hidden=true;
+        next.hidden=true;
+        return
+    }
+    list.innerHTML=sharePointState.items.map(item=>{
+        let action=item.kind==='drive'?'sharePointOpenDrive':item.kind==='siteDrive'?'sharePointOpenSiteDrive':item.kind==='folder'?'sharePointOpenFolder':'sharePointImport';
+        let detail=item.kind==='drive'?item.driveType||'Drive':item.kind==='siteDrive'?'Document library':item.kind==='folder'?'Folder':Math.ceil((item.size||0)/1024)+' KB';
+        return `<button type="button" data-action="${action}" data-id="${esc(item.id)}" data-name="${esc(item.name)}"><span>${esc(item.kind==='folder'?'📁':item.kind==='file'?'📄':'▸')} ${esc(item.name)}</span><small>${esc(detail)}</small></button>`
+    }).join('')||`<p class="note">${sharePointState.view==='files'?'No folders or .xlsx workbooks found here.':'No drives or document libraries are available.'}</p>`;
+    title.textContent=sharePointState.view==='files'?(sharePointState.folderStack.map(x=>x.name).join(' / ')||sharePointState.driveName):sharePointState.view==='siteDrives'?(sharePointState.siteName+' · document libraries'):'Your files';
+    back.hidden=!['files','siteDrives'].includes(sharePointState.view);
+    next.hidden=!sharePointState.nextLink
+}
+function renderSharePointSites(){
+    $('sharePointSiteResults').innerHTML=sharePointState.siteResults.map(site=>`<button type="button" data-action="sharePointOpenSite" data-id="${esc(site.id)}" data-name="${esc(site.displayName||site.name)}"><span>▣ ${esc(site.displayName||site.name)}</span><small>SharePoint site</small></button>`).join('');
+    if(sharePointState.siteResults.length)$('sharePointListingTitle').textContent='Search results · select a site';
+}
+async function loadMicrosoftIdentityLibrary(){
+    if(window.msal?.PublicClientApplication)return window.msal;
+    await new Promise((resolve,reject)=>{
+        let script=document.createElement('script');
+        script.src=microsoftAuthLibraryUrl;
+        script.crossOrigin='anonymous';
+        script.onload=resolve;
+        script.onerror=()=>reject(Error('Microsoft sign-in library could not be loaded. Check your internet connection and content security policy.'));
+        document.head.appendChild(script)
+    });
+    if(!window.msal?.PublicClientApplication)throw Error('Microsoft sign-in library loaded without the expected API.');
+    return window.msal
+}
+async function getMicrosoftAuthClient(){
+    if(microsoftAuthClient)return microsoftAuthClient;
+    let msal=await loadMicrosoftIdentityLibrary(),clientId=String(window.CBL_MICROSOFT_CLIENT_ID||'').trim();
+    let redirectUri=microsoftRedirectUri();
+    microsoftAuthClient=new msal.PublicClientApplication({
+        auth:{
+            clientId,
+            authority:'https://login.microsoftonline.com/common',
+            redirectUri
+        },
+        cache:{
+            cacheLocation:'memoryStorage'
+        }
+    });
+    await microsoftAuthClient.initialize();
+    await microsoftAuthClient.handleRedirectPromise();
+    return microsoftAuthClient
+}
+async function getMicrosoftAccessToken(scopes=microsoftAuthScopes){
+    let client=await getMicrosoftAuthClient(),msal=window.msal,account=sharePointAccount||client.getActiveAccount();
+    if(!account){
+        let result=await client.loginPopup({scopes:microsoftAuthScopes});
+        account=result.account;
+        sharePointAccount=account;
+        client.setActiveAccount(account)
+    }
+    try{
+        let result=await client.acquireTokenSilent({scopes,account});
+        return result.accessToken
+    }
+    catch(error){
+        if(!(error instanceof msal.InteractionRequiredAuthError))throw error;
+        let result=await client.acquireTokenPopup({scopes,account});
+        return result.accessToken
+    }
+}
+function microsoftGraphUrl(path){
+    let url=new URL(path,'https://graph.microsoft.com/v1.0/');
+    if(url.origin!=='https://graph.microsoft.com'||!url.pathname.startsWith('/v1.0/'))throw Error('Unexpected Microsoft Graph URL.');
+    return url
+}
+async function microsoftGraphRequest(path,scopes=microsoftAuthScopes){
+    let token=await getMicrosoftAccessToken(scopes),response;
+    try{
+        response=await fetch(microsoftGraphUrl(path),{
+            headers:{Authorization:'Bearer '+token}
+        })
+    }
+    catch(error){
+        if(error instanceof TypeError)throw Error('Microsoft Graph could not be reached. Check connectivity, browser network restrictions, and CORS policy.');
+        throw error
+    }
+    if(!response.ok){
+        let result=await response.json();
+        throw Error(result.error?.message||`Microsoft Graph request failed (HTTP ${response.status}).`)
+    }
+    return response
+}
+async function microsoftGraphJson(path,scopes=microsoftAuthScopes){
+    return (await microsoftGraphRequest(path,scopes)).json()
+}
+async function connectMicrosoftAccount(){
+    let readiness=updateMicrosoftConfigNotice();
+    if(readiness)throw Error(readiness);
+    setSharePointStatus('Opening Microsoft sign-in…');
+    let client=await getMicrosoftAuthClient(),result=await client.loginPopup({scopes:microsoftAuthScopes});
+    sharePointAccount=result.account;
+    client.setActiveAccount(sharePointAccount);
+    $('sharePointAccount').textContent='Connected as '+(sharePointAccount.username||sharePointAccount.name||'Microsoft account');
+    $('sharePointAccount').hidden=false;
+    $('sharePointConnect').hidden=true;
+    $('sharePointDisconnect').hidden=false;
+    $('sharePointBrowser').hidden=false;
+    let isPersonal=sharePointAccount.tenantId===microsoftConsumerTenantId;
+    $('sharePointSiteSearch').closest('.sharepoint-search').hidden=isPersonal;
+    $('sharePointSiteResults').replaceChildren();
+    sharePointState.siteResults=[];
+    setSharePointStatus(isPersonal?'Personal account connected. Loading your available files…':'Work or school account connected. Loading your available drives…');
+    await loadSharePointDrives()
+}
+async function loadSharePointDrives(){
+    sharePointState.view='drives';
+    sharePointState.driveId='';
+    sharePointState.siteName='';
+    sharePointState.folderStack=[];
+    sharePointState.returnListing=null;
+    let result=await microsoftGraphJson('me/drives?$select=id,name,driveType,webUrl&$top=100');
+    sharePointState.items=(result.value||[]).map(drive=>({
+        kind:'drive',id:drive.id,name:drive.name,driveType:drive.driveType
+    }));
+    sharePointState.nextLink=result['@odata.nextLink']||null;
+    renderSharePointItems();
+    setSharePointStatus('Select a drive, library, folder, or .xlsx workbook.')
+}
+async function searchSharePointSites(){
+    if(!sharePointAccount||sharePointAccount.tenantId===microsoftConsumerTenantId)throw Error('SharePoint site search is available for work or school accounts only.');
+    let query=$('sharePointSiteSearch').value.trim();
+    if(!query)throw Error('Enter a site name to search.');
+    setSharePointStatus('Searching SharePoint sites…');
+    let result=await microsoftGraphJson('sites?search='+encodeURIComponent(query)+'&$select=id,name,displayName,webUrl&$top=25',['Sites.Read.All']);
+    sharePointState.siteResults=result.value||[];
+    sharePointState.view='sites';
+    renderSharePointSites();
+    renderSharePointItems();
+    setSharePointStatus(sharePointState.siteResults.length?'Select a site to browse its document libraries.':'No accessible SharePoint sites matched that search.')
+}
+async function openSharePointSite(siteId,siteName){
+    setSharePointStatus('Loading document libraries…');
+    let result=await microsoftGraphJson('sites/'+encodeURIComponent(siteId)+'/drives?$select=id,name,driveType,webUrl&$top=100',['Sites.Read.All']);
+    sharePointState.view='siteDrives';
+    sharePointState.siteName=siteName;
+    sharePointState.driveReturnView='siteDrives';
+    sharePointState.items=(result.value||[]).map(drive=>({
+        kind:'siteDrive',id:drive.id,name:drive.name,driveType:drive.driveType
+    }));
+    sharePointState.nextLink=result['@odata.nextLink']||null;
+    renderSharePointItems();
+    setSharePointStatus(sharePointState.items.length?'Select a document library.':'No document libraries are available for this site.')
+}
+async function openSharePointDrive(driveId,driveName,kind='drive'){
+    sharePointState.driveReturnView=kind==='siteDrive'?'siteDrives':'drives';
+    sharePointState.returnListing={
+        view:sharePointState.view,
+        items:sharePointState.items,
+        nextLink:sharePointState.nextLink
+    };
+    sharePointState.driveId=driveId;
+    sharePointState.driveName=driveName;
+    sharePointState.folderStack=[];
+    await loadSharePointFolder(null)
+}
+async function loadSharePointFolder(folderId,append=false,nextLink=''){
+    let path=nextLink||('drives/'+encodeURIComponent(sharePointState.driveId)+(folderId?'/items/'+encodeURIComponent(folderId)+'/children':'/root/children')+'?$select=id,name,folder,file,size&$top=100');
+    setSharePointStatus('Loading folders and workbooks…');
+    let result=await microsoftGraphJson(path);
+    let items=(result.value||[]).filter(item=>item.folder||item.file&&/\.xlsx$/i.test(item.name||'')).map(item=>({
+        kind:item.folder?'folder':'file',id:item.id,name:item.name,size:item.size
+    })).sort((a,b)=>Number(b.kind==='folder')-Number(a.kind==='folder')||a.name.localeCompare(b.name));
+    sharePointState.view='files';
+    sharePointState.items=append?sharePointState.items.concat(items):items;
+    sharePointState.nextLink=result['@odata.nextLink']||null;
+    renderSharePointItems();
+    setSharePointStatus(items.length?'Choose a folder or an .xlsx workbook.':'No folders or .xlsx workbooks found here.')
+}
+async function loadNextSharePointPage(){
+    if(!sharePointState.nextLink)return;
+    if(sharePointState.view==='files'){
+        await loadSharePointFolder(sharePointState.folderStack.at(-1)?.id||null,true,sharePointState.nextLink);
+        return
+    }
+    let result=await microsoftGraphJson(sharePointState.nextLink,sharePointState.view==='siteDrives'?['Sites.Read.All']:microsoftAuthScopes);
+    let kind=sharePointState.view==='siteDrives'?'siteDrive':'drive';
+    sharePointState.items=sharePointState.items.concat((result.value||[]).map(item=>({
+        kind,id:item.id,name:item.name,driveType:item.driveType
+    })));
+    sharePointState.nextLink=result['@odata.nextLink']||null;
+    renderSharePointItems()
+}
+async function goBackInSharePoint(){
+    if(sharePointState.view==='siteDrives'){
+        sharePointState.view='sites';
+        sharePointState.items=[];
+        renderSharePointItems();
+        setSharePointStatus('Select a SharePoint site from the search results.')
+    }
+    else if(sharePointState.folderStack.length){
+        sharePointState.folderStack.pop();
+        await loadSharePointFolder(sharePointState.folderStack.at(-1)?.id||null)
+    }
+    else{
+        let listing=sharePointState.returnListing;
+        sharePointState.view=listing?.view||sharePointState.driveReturnView;
+        sharePointState.items=listing?.items||[];
+        sharePointState.nextLink=listing?.nextLink||null;
+        sharePointState.returnListing=null;
+        renderSharePointItems();
+        setSharePointStatus(sharePointState.view==='siteDrives'?'Select a document library.':'Select a drive.')
+    }
+}
+async function importSharePointWorkbook(driveId,itemId,fileName){
+    setSharePointStatus('Downloading the selected workbook…');
+    let response=await microsoftGraphRequest('drives/'+encodeURIComponent(driveId)+'/items/'+encodeURIComponent(itemId)+'/content');
+    let blob=await response.blob();
+    if(blob.size>60e6)throw Error('Workbook exceeds 60 MB.');
+    let file=new File([blob],fileName,{type:blob.type||'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    if(await importSourceFile(file))$('sourcePickerDialog').close();
+    else setSharePointStatus('Workbook was not imported. Review the error message and try again.',true)
+}
+async function disconnectMicrosoftAccount(){
+    let clearError=null;
+    try{
+        if(microsoftAuthClient)await microsoftAuthClient.clearCache()
+    }
+    catch(error){
+        clearError=error
+    }
+    finally{
+        sharePointAccount=null;
+        microsoftAuthClient?.setActiveAccount(null);
+        sharePointState={
+            view:'drives',items:[],siteResults:[],nextLink:null,driveId:'',driveName:'',siteName:'',driveReturnView:'drives',folderStack:[]
+        };
+        $('sharePointAccount').hidden=true;
+        $('sharePointConnect').hidden=false;
+        $('sharePointDisconnect').hidden=true;
+        $('sharePointBrowser').hidden=true;
+        $('sharePointSiteResults').replaceChildren();
+        $('sharePointItems').replaceChildren();
+        updateMicrosoftConfigNotice();
+        setSharePointStatus(clearError?'Sign-out could not clear Microsoft’s in-memory cache: '+clearError.message:'Disconnected. Microsoft sign-in data was cleared from memory.',!!clearError)
+    }
+    if(clearError)throw clearError
+}
+async function importSource(e){
+    let file=e.target.files[0];
+    e.target.value='';
+    await importSourceFile(file)
+}
+async function importSourceFile(file){
+    if(!pageAllowed('source')){
+        message('Enable Source & backups in Settings before uploading.',true);
+        return false
+    }
+    if(!file)return false;
+    if(busy){
+        return false
+    }
+    busy=true;
+    try{
+        message('Reading and validating source workbook…');
+        let bytes=await file.arrayBuffer();
+        if(bytes.byteLength>60e6)throw Error('Workbook exceeds 60 MB');
+        let db=await parseXlsx(bytes),next=fromWorkbook(db,file.name);
+        next.controls.weeks=scheduleWeeks(model);
+        next.results=model?.results||[];
+        next.revision=(model?.revision||0)+1;
+        next.theme=model?.theme||'light';
+        next.settings=clone(appSettings());
+        next.overtime=clone(overtimeConfig());
+        next.user=clone(model.user||{
+
+        }
+        );
+        next.bambooTimeOff=clone(model.bambooTimeOff||null);
+        next.timeOffWorkbook=clone(model.timeOffWorkbook||null);
+        await persistWorkspace(next);
+        model=next;
+        page='home';
+        filterLoc=filterRole='All';
+        search='';
+        render();
+        message(storageMode==='session'?'Updated source imported for this session. Review settings, then download the portable ZIP bundle when hosted or a workspace backup.':'Updated source imported and saved. Review inputs, choose the first Monday and lock settings.')
+        return true
+    }
+    catch(err){
+        message('Import failed; previous workspace retained. '+err.message,true);
+        return false
+    }
+    finally{
+        busy=false
+    }
+
+}
+async function restoreWorkspace(e){
+    if(!pageAllowed('source')){
+        e.target.value='';
+        message('Enable Source & backups in Settings before restoring.',true);
+        return
+    }
+    let file=e.target.files[0];
+    if(!file)return;
+    try{
+        let backup=JSON.parse(await file.text()),m=backup.model;
+        if(backup.version!==1||!m||!Array.isArray(m.roster)||!Array.isArray(m.pools)||!m.controls||!Array.isArray(m.results))throw Error('Invalid workspace backup');
+        migrateScheduleWeeks(m);
+        let otErrors=overtimeIssues(m);
+        if(otErrors.length)throw Error(otErrors.join('; '));
+        for(let r of m.results)if(validateRun(r).length)throw Error('Backup contains a schedule that fails constraint checks');
+        await persistWorkspace(m);
+        model=m;
+        filterLoc=filterRole='All';
+        render();
+        message(storageMode==='session'?'Workspace restored for this session. Save a backup; hosted apps can also download the portable ZIP bundle before closing.':'Workspace restored and saved.')
+    }
+    catch(err){
+        message('Restore failed: '+err.message,true)
+    }
+    finally{
+        e.target.value=''
+    }
+
+}
+async function portableHtmlBlob(){
+    let bytes=new TextEncoder().encode(JSON.stringify(model)),gzip=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()),base='';
+    for(let b of gzip)base+=String.fromCharCode(b);
+    let doc=document.documentElement.cloneNode(true);
+    doc.querySelectorAll('[data-export-dialog]').forEach(d=>d.remove());
+    doc.querySelector('#payload').textContent=btoa(base);
+    doc.querySelector('#content').innerHTML='<div class="empty">Loading scheduling workspace…</div>';
+    doc.querySelector('#notice').textContent='';
+    let dialog=doc.querySelector('#emailDialog');
+    dialog.innerHTML='';
+    dialog.removeAttribute('open');
+    for(let id of ['tradeDialog','scheduleImportDialog','profileDialog','timeOffDialog','timeOffWorkbookDialog']){
+        let d=doc.querySelector('#'+id);
+        d.innerHTML='';
+        d.removeAttribute('open')
+    }
+    return new Blob(['<!doctype html>\n'+doc.outerHTML],{
+        type:'text/html'
+    }
+    )
+}
+async function portableBundleFiles(){
+    if(location.protocol==='file:')throw Error('Portable bundle export requires a hosted app. Browsers block access to local CSS and JavaScript files.');
+    let names=['CBL-Scheduler2.css','CBL-Scheduler2.js','CBL-Scheduler2.config.js','CBL-MicrosoftAuth.html'],assets=await Promise.all(names.map(async name=>{
+        let response=await fetch(new URL(name,document.baseURI));
+        if(!response.ok)throw Error('Unable to load '+name+' for export (HTTP '+response.status+').');
+        return response.text()
+    }
+    )),html=await portableHtmlBlob();
+    return {
+        ...Object.fromEntries(names.map((name,index)=>[name,assets[index]])),
+        'CBL-Scheduling-Command-Centre.html':await html.text()
+    }
+}
+async function portable(){
+    downloadFile('CBL-Scheduling-Command-Centre.zip',zipStore(await portableBundleFiles(),'application/zip'));
+    message('Portable ZIP bundle prepared with this configuration and saved schedules. Extract all files before opening the included HTML.')
+}
+function embeddedDownloadContext(){
+    try{
+        return window.self!==window.top
+    }
+    catch{
+        return true
+    }
+
+}
+function downloadFile(name,blob){
+
+     let url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;
+    a.download=name;
+    a.style.display='none';
+    document.body.appendChild(a);
+
+     if(!embeddedDownloadContext()){
+        try{
+            a.click()
+        }
+        finally{
+            a.remove();
+            setTimeout(()=>URL.revokeObjectURL(url),60000)
+        }
+        return
+    }
+
+     a.remove();
+    let dlg=document.createElement('dialog');
+    dlg.dataset.exportDialog='true';
+
+     dlg.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">EXPORT READY</div><h2>Save your file</h2></div><button type="button" data-export-close aria-label="Close">✕</button></div><p><b>${esc(name)}</b> · ${Math.ceil(blob.size/1024)} KB</p><p>This app is running inside an embedded viewer. SharePoint or your browser may block file downloads here.</p><div class="actions"><a class="primary" data-export-link>Download file</a><button type="button" data-export-save>Save as…</button></div><p data-export-status role="status">Click Download file, then check your browser’s downloads.</p><div class="callout">If nothing downloads, open the app outside the SharePoint preview. Use the SharePoint library’s Download command for the HTML file, open it from your computer, and generate or upload your schedules there. For team use entirely online, the app needs approved web hosting or a SharePoint app deployment that permits downloads. This file cannot override SharePoint’s restrictions.</div><p>Keep this workspace open until your file is saved. Changes may be session-only in the SharePoint viewer.</p>`;
+
+     let link=dlg.querySelector('[data-export-link]');
+    link.href=url;
+    link.download=name;
+
+     let save=dlg.querySelector('[data-export-save]'),status=dlg.querySelector('[data-export-status]');
+    save.hidden=typeof window.showSaveFilePicker!=='function';
+
+     save.onclick=async()=>{
+        let handle;
+        try{
+            handle=await window.showSaveFilePicker({
+                suggestedName:name
+            }
+            )
+        }
+        catch(err){
+            status.textContent=err.name==='AbortError'?'Save cancelled. Your file is still ready.':'Save as is blocked in this viewer. Try Download file or open the app outside the SharePoint preview.';
+            return
+        }
+        try{
+            let stream=await handle.createWritable();
+            await stream.write(blob);
+            await stream.close();
+            status.textContent='File saved: '+name
+        }
+        catch(err){
+            status.textContent='File could not be saved: '+err.message
+        }
+
+    }
+    ;
+
+     dlg.querySelector('[data-export-close]').onclick=()=>dlg.close();
+    dlg.addEventListener('close',()=>{
+        URL.revokeObjectURL(url);dlg.remove()
+    }
+    ,{
+        once:true
+    }
+    );
+    document.body.appendChild(dlg);
+    dlg.showModal();
+
+
+}
+$('sourceUpload').onchange=importSource;
+$('restoreUpload').onchange=restoreWorkspace;
+$('themeButton').onclick=()=>{
+    model.theme=model.theme==='dark'?'light':'dark';
+    render();
+    queueSave()
+}
+;
+$('print').onclick=()=>window.print();
+async function init(){
+    try{
+        let encoded=atob($('payload').textContent.trim()),data=JSON.parse(new TextDecoder().decode(await inflate(Uint8Array.from(encoded,c=>c.charCodeAt(0)),'gzip')));
+        model=migrateScheduleWeeks(data);
+        try{
+            let saved=await store('get');
+            storageMode='persistent';
+            if(saved)model=migrateScheduleWeeks(saved);
+            storageStatus()
+        }
+        catch(e){
+            storageMode='session';
+            storageReason=e.message;
+            storageStatus()
+        }
+        initLocalConnector();
+        await loadBambooCredentials();
+        render();
+        openUserProfile()
+    }
+    catch(err){
+        $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'
+    }
+
+}
+if(!globalThis.TEST_MODE){
+    if(typeof globalThis.CBL_STORAGE_BRIDGE==='function')globalThis.CBL_STORAGE_BRIDGE();
+    init().finally(initHeaderCollapse)
+}
+else initHeaderCollapse();
