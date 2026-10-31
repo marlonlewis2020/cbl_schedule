@@ -640,12 +640,38 @@ function appSettings(){
     if(typeof s.holidays!=='string')s.holidays='';
     return s
 }
+let businessConfig={
+    businessName:'Celebration Brands Limited',teamName:'Schedule Management',logoDataUrl:'',
+    primaryColor:'#159bd5',accentColor:'#74bf16',tenantId:'cbljm',apiKeyConfigured:'false'
+},bambooPromotionToken='',defaultBusinessLogos=new WeakMap();
+async function loadBusinessConfig(){
+    businessConfig=await directoryRequest('/app-config');
+}
+function applyBranding(){
+    let business=businessConfig.businessName||'Celebration Brands Limited';
+    let team=businessConfig.teamName||'Schedule Management';
+    document.title=business+' | Scheduling Command Centre';
+    document.querySelector('meta[name="description"]')?.setAttribute('content',business+' scheduling command centre');
+    document.querySelectorAll('[data-brand-business]').forEach(element=>element.textContent=business);
+    document.querySelectorAll('[data-brand-team]').forEach(element=>element.textContent=team);
+    document.querySelectorAll('.brandblock img,.products img').forEach(image=>{
+        if(!defaultBusinessLogos.has(image))defaultBusinessLogos.set(image,image.src);
+        image.src=businessConfig.logoDataUrl||defaultBusinessLogos.get(image);
+        image.alt=businessConfig.logoDataUrl?business:'CBL'
+    });
+    document.documentElement.style.setProperty('--blue',businessConfig.primaryColor||'#159bd5');
+    document.documentElement.style.setProperty('--green',businessConfig.accentColor||'#74bf16');
+}
+function businessSettingsPanel(){
+    let c=businessConfig;
+    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs a read-only request to the tenant’s time-off endpoint. Only after a successful test can you explicitly promote the key; promotion updates the app server’s ignored .env file and the running process.</p>`)
+}
 function pageAllowed(p){
     return p==='settings'||['controls','schedules'].includes(p)||PAGE_OPTIONS.some(([id])=>id===p&&appSettings().menus[id]!==false)
 }
 function settingsPage(){
     let s=appSettings();
-    return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
+    return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
 }
 function applyMenuSettings(){
     if(!pageAllowed(page))page='controls';
@@ -688,27 +714,36 @@ function titleName(name){
 function validEmail(v){
     return /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v)&&!/[\r\n]/.test(v)
 }
-function emailPackage(recipients,ids,sent=jamaicaDate()){
-
-     if(!recipients.length)throw Error('Add at least one recipient.');
-    let people=recipients.map(p=>({
-        name:titleName(p.name),email:p.email.trim()
-    }
-    ));
-    if(people.some(p=>!p.name||/[\r\n<>]/.test(p.name)||!validEmail(p.email)))throw Error('Enter a name and valid email address for every recipient.');
-    if(new Set(people.map(p=>p.email.toLowerCase())).size!==people.length)throw Error('Remove duplicate recipient email addresses.');
-    let wanted=new Set(ids),runs=model.results.filter(r=>wanted.has(r.id));
+function emailManagerGroups(ids){
+    let runs=model.results.filter(run=>ids.includes(run.id)),groups=new Map();
     if(!runs.length)throw Error('Select at least one generated schedule.');
-    let cc=appSettings().workforceCc?'workforce@cbljm.co':'',deadline=businessDeadline(sent,appSettings().holidays),periods=[...new Set(runs.map(r=>r.start+' to '+r.end))],subject='Schedule review and confirmation — '+(periods.length===1?periods[0]:periods.length+' weekly periods'),body='Dear '+people.map(p=>p.name).join(', ')+',\n\nPlease review the attached workbook containing the following proposed schedules:\n\n'+runs.map(r=>'• '+r.location+' — '+r.role+' | '+r.start+' to '+r.end+' | revision '+r.revision).join('\n')+'\n\nPlease confirm the schedules or provide any required changes no later than '+prettyDate(deadline)+' (five business days from '+prettyDate(sent)+'). Please check employee availability, shift coverage and any scheduling conflicts, and reply to all with your confirmation or requested changes.\n\nThank you,\nWorkforce Management\nPeople & Culture\nCelebration Brands Limited';
-    return {
-        people,runs,cc,subject,body,sent,deadline,filename:'CBL-Schedules-for-Review-'+sent+'.xlsx'
+    for(let run of runs){
+        let assigned=run.employees.filter(employee=>employee.slots.some(start=>start!==null));
+        let locationIds=new Set(assigned.map(employee=>employeeDirectory.find(item=>item.id===String(employee.id))?.scheduleLocationId).filter(Boolean));
+        if(assigned.some(employee=>!employeeDirectory.find(item=>item.id===String(employee.id))?.scheduleLocationId)){
+            throw Error('Assign every scheduled employee to a schedule location before preparing manager confirmation emails.')
+        }
+        if(!locationIds.size){
+            let matches=scheduleLocations.filter(location=>location.location===run.location&&roleFitsScheduleGroup(run.role,location));
+            if(matches.length!==1)throw Error('Could not identify one schedule location for '+run.location+' · '+run.role+'. Assign employees or review the schedule location role groups.');
+            locationIds.add(matches[0].id)
+        }
+        if(locationIds.size!==1)throw Error('The schedule for '+run.location+' · '+run.role+' contains employees from multiple schedule locations. Prepare separate site schedules before emailing managers.');
+        let location=scheduleLocations.find(item=>item.id===[...locationIds][0]);
+        if(!location)throw Error('The schedule location for '+run.location+' · '+run.role+' is no longer available.');
+        if(!location.managerName?.trim()||!validEmail(location.managerEmail||'')){
+            throw Error('Add a valid manager name and email for '+location.name+' in Schedule Locations before preparing the confirmation email.')
+        }
+        if(!groups.has(location.id))groups.set(location.id,{location,manager:{name:location.managerName,email:location.managerEmail},runs:[]});
+        groups.get(location.id).runs.push(run)
     }
-    ;
-
-
+    return [...groups.values()]
 }
-function recipientFields(){
-    return '<div class="recipientrow"><label>Recipient name<input data-recipient-name required maxlength="120" autocomplete="name" placeholder="Full name"></label><label>Email address<input type="email" data-recipient-email required maxlength="254" autocomplete="email" placeholder="name@example.com"></label><button type="button" data-email-command="remove" aria-label="Remove recipient">Remove</button></div>'
+function managerEmailPackage(group,sent=jamaicaDate()){
+    let people=[{name:group.manager.name.trim(),email:group.manager.email.trim()}];
+    let cc=appSettings().workforceCc?'workforce@cbljm.co':'',deadline=businessDeadline(sent,appSettings().holidays),periods=[...new Set(group.runs.map(run=>run.start+' to '+run.end))],subject='Schedule review and confirmation — '+group.location.name+' — '+(periods.length===1?periods[0]:periods.length+' weekly periods'),body='Dear '+people[0].name+',\n\nPlease review the attached workbook containing the following proposed schedules for '+group.location.name+':\n\n'+group.runs.map(run=>'• '+run.location+' — '+run.role+' | '+run.start+' to '+run.end+' | revision '+run.revision).join('\n')+'\n\nPlease confirm the schedules or provide any required changes no later than '+prettyDate(deadline)+' (five business days from '+prettyDate(sent)+'). Please check employee availability, shift coverage and any scheduling conflicts, and reply to all with your confirmation or requested changes.\n\nThank you,\n'+(businessConfig.teamName||'Schedule Management')+'\n'+(businessConfig.businessName||'Celebration Brands Limited');
+    let businessFileName=(businessConfig.businessName||'Business').trim().replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    return {people,runs:group.runs,location:group.location,cc,subject,body,sent,deadline,filename:businessFileName+'-Schedules-for-Review-'+group.location.name.replace(/[^A-Za-z0-9]+/g,'-')+'-'+sent+'.xlsx'}
 }
 function openEmail(){
     if(!model.results.length){
@@ -716,17 +751,21 @@ function openEmail(){
         return
     }
     let dlg=$('emailDialog');
-    dlg.innerHTML=`<div id="emailForm"><div class="dialoghead"><div><div class="eyebrow">SCHEDULE REVIEW</div><h2>Prepare schedule email</h2></div><button type="button" data-email-command="close" aria-label="Close">✕</button></div><p>Select the saved weeks and location roles to include in one workbook. All To recipients will receive every selected schedule.</p><fieldset><legend>1 · Select generated schedules</legend><div class="actions"><button type="button" data-email-command="selectAll">Select all</button><button type="button" data-email-command="selectNone">Clear</button></div><div class="schedulechoices">${model.results.map(r=>`<label><input type="checkbox" data-email-run value="${esc(r.id)}" ${r.id===model.selectedRun?'checked':''}> <span><b>${esc(r.location)} · ${esc(r.role)}</b><small>${r.start} to ${r.end} · revision ${r.revision}</small></span></label>`).join('')}</div></fieldset><fieldset><legend>2 · Recipients</legend><div id="emailRecipients">${recipientFields()}</div><button type="button" data-email-command="add">Add recipient</button><p>Cc: <strong>${appSettings().workforceCc?'workforce@cbljm.co · fixed in Settings':'Disabled in Settings'}</strong></p></fieldset><div class="callout">The default mail client receives the To, Cc, subject and wording. Browser email links cannot attach files: download the single workbook below and attach it manually. Outlook opens if it is your default email application. Outlook online automation requires a configured Microsoft connection.</div><div class="actions"><button type="button" data-email-command="preview" class="primary">Preview email & workbook</button></div><p id="emailError" class="badtext" role="alert"></p><section id="emailPreview" hidden><h3>Email preview</h3><p id="emailDeadline"></p><label>Subject<input id="emailSubject" readonly></label><label>Message<textarea id="emailBody" rows="12" readonly></textarea></label><div class="actions"><button type="button" data-email-command="workbook">1 · Download selected schedules · XLSX</button><button type="button" data-email-command="client">2 · Open default mail client</button><button type="button" data-email-command="copy">Copy full email template</button><button type="button" data-email-command="template">Download email template · TXT</button></div><p class="note">Attach the downloaded XLSX before sending. The app prepares a draft; it does not send the message. Refresh the preview if the sending date changes.</p></section></div>`;
+    dlg.innerHTML=`<div id="emailForm"><div class="dialoghead"><div><div class="eyebrow">SCHEDULE REVIEW</div><h2>Prepare manager confirmation email</h2></div><button type="button" data-email-command="close" aria-label="Close">✕</button></div><p>Select schedules to include. The app groups them by schedule location and sends each manager only schedules for their site.</p><fieldset><legend>1 · Select generated schedules</legend><div class="actions"><button type="button" data-email-command="selectAll">Select all</button><button type="button" data-email-command="selectNone">Clear</button></div><div class="schedulechoices">${model.results.map(r=>`<label><input type="checkbox" data-email-run value="${esc(r.id)}" ${r.id===model.selectedRun?'checked':''}> <span><b>${esc(r.location)} · ${esc(r.role)}</b><small>${r.start} to ${r.end} · revision ${r.revision}</small></span></label>`).join('')}</div></fieldset><fieldset><legend>2 · Manager email</legend><label>Schedule location ${select([],'','id="emailManagerGroup"')}</label><p id="emailManagerDetails">Preview the selection to identify the schedule-location managers.</p><p>Cc: <strong>${appSettings().workforceCc?'workforce@cbljm.co · fixed in Settings':'Disabled in Settings'}</strong></p></fieldset><div class="callout">The default mail client receives one manager-specific draft at a time. Download that location’s workbook and attach it before sending. The app prepares drafts; it does not send messages automatically.</div><div class="actions"><button type="button" data-email-command="preview" class="primary">Preview manager email & workbook</button></div><p id="emailError" class="badtext" role="alert"></p><section id="emailPreview" hidden><h3>Email preview</h3><p id="emailDeadline"></p><label>Subject<input id="emailSubject" readonly></label><label>Message<textarea id="emailBody" rows="12" readonly></textarea></label><div class="actions"><button type="button" data-email-command="workbook">1 · Download this manager’s schedules · XLSX</button><button type="button" data-email-command="client">2 · Open manager email draft</button><button type="button" data-email-command="copy">Copy full email template</button><button type="button" data-email-command="template">Download email template · TXT</button></div><p class="note">Repeat for each schedule location in the selector. Attach the downloaded XLSX before sending.</p></section></div>`;
     dlg.showModal();
 
 }
 let preparedEmail=null;
+let preparedManagerGroups=[];
 function prepareEmail(){
     try{
-        preparedEmail=emailPackage([...$('emailRecipients').querySelectorAll('.recipientrow')].map(e=>({
-            name:e.querySelector('[data-recipient-name]').value,email:e.querySelector('[data-recipient-email]').value
-        }
-        )),[...$('emailDialog').querySelectorAll('[data-email-run]:checked')].map(e=>e.value));
+        let ids=[...$('emailDialog').querySelectorAll('[data-email-run]:checked')].map(e=>e.value),selectedGroup=$('emailManagerGroup').value;
+        preparedManagerGroups=emailManagerGroups(ids);
+        $('emailManagerGroup').innerHTML=preparedManagerGroups.map((group,index)=>`<option value="${esc(group.location.id)}">${esc(group.location.name)} · ${esc(group.manager.name)} · ${esc(group.manager.email)} · ${group.runs.length} schedules</option>`).join('');
+        $('emailManagerGroup').value=preparedManagerGroups.some(group=>group.location.id===selectedGroup)?selectedGroup:preparedManagerGroups[0].location.id;
+        let group=preparedManagerGroups.find(item=>item.location.id===$('emailManagerGroup').value);
+        $('emailManagerDetails').textContent='To: '+group.manager.name+' <'+group.manager.email+'> · '+group.runs.length+' selected schedule(s) for '+group.location.name+'.';
+        preparedEmail=managerEmailPackage(group);
         $('emailSubject').value=preparedEmail.subject;
         $('emailBody').value=preparedEmail.body;
         $('emailDeadline').textContent='Prepared: '+prettyDate(preparedEmail.sent)+' · Confirmation due: '+prettyDate(preparedEmail.deadline);
@@ -758,6 +797,7 @@ document.addEventListener('change',e=>{
     if(t.id==='workforceCcSetting'){
         appSettings().workforceCc=t.checked;queueSave()
     }
+    if(t.id==='emailManagerGroup'&&$('emailPreview')&&!$('emailPreview').hidden)prepareEmail();
     if(t.id==='holidaySetting'){
         let dates=t.value.trim().split(/\s+/).filter(Boolean);if(dates.some(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d)||Number.isNaN(Date.parse(d+'T12:00:00Z'))||new Date(d+'T12:00:00Z').toISOString().slice(0,10)!==d)){
             message('Enter valid non-working dates, one YYYY-MM-DD per line.',true);t.value=appSettings().holidays;return
@@ -777,12 +817,6 @@ document.addEventListener('input',e=>{
 document.addEventListener('click',async e=>{
     let b=e.target.closest('[data-email-command]');if(!b)return;let cmd=b.dataset.emailCommand;if(cmd==='close'){
         $('emailDialog').close();preparedEmail=null;return
-    }
-    if(cmd==='add'){
-        $('emailRecipients').insertAdjacentHTML('beforeend',recipientFields());$('emailPreview').hidden=true;return
-    }
-    if(cmd==='remove'){
-        if($('emailRecipients').children.length>1)b.closest('.recipientrow').remove();$('emailPreview').hidden=true;return
     }
     if(cmd==='selectAll'||cmd==='selectNone'){
         $('emailDialog').querySelectorAll('[data-email-run]').forEach(x=>x.checked=cmd==='selectAll');$('emailPreview').hidden=true;return
@@ -1701,7 +1735,7 @@ async function saveBambooCredentials(value){
 }
 function openUserProfile(){
     let name=model.user?.firstName||'';
-    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">CELEBRATION BRANDS LIMITED</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>Enter your first name to continue. BambooHR credentials are configured on the Flask server and are never entered or stored in this browser.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><input id="profileApiKey" type="hidden"><input id="profileApiPassword" type="hidden"><section class="connectionpanel"><h3>BambooHR time-off connection</h3><p>${publishConfigured?'Server API key is configured.':'BAMBOOHR_API_KEY is not configured in the app server .env file.'}</p><p class="note">Time-offs are fetched automatically when schedules are generated or refreshed. If BambooHR is unavailable, scheduling continues and the schedule must be reviewed.</p><button type="button" data-bamboo-action="checkTimeOff">Test time-off connection</button></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
+    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">${esc(businessConfig.businessName)}</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>The operational BambooHR API key is configured on the Flask server. Test a new key in Business Settings; keys are not saved to browser storage.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><input id="profileApiKey" type="hidden"><input id="profileApiPassword" type="hidden"><section class="connectionpanel"><h3>BambooHR time-off connection</h3><p>${publishConfigured?'Server API key is configured.':'BAMBOOHR_API_KEY is not configured in the app server .env file.'}</p><p class="note">Time-offs are fetched automatically when schedules are generated or refreshed. If BambooHR is unavailable, scheduling continues and the schedule must be reviewed.</p><button type="button" data-bamboo-action="checkTimeOff">Test time-off connection</button></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
     $('profileSave').onclick=async ()=>{
         if(busy)return;
         let name=$('profileFirstName').value.trim();
@@ -2105,8 +2139,8 @@ document.addEventListener('click',async e=>{
 }
 );
 let storageMode='unknown',storageReason='';
-let model=null,page='home',filterLoc='All',filterRole='All',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null;
-let employeeDirectory=[],scheduleLocations=[],directoryError='',assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[];
+let model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null;
+let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[];
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }
@@ -2136,7 +2170,7 @@ function blankRosterProfile(employee,index){
         id:employee.id,name:employee.name,flex:'',reason:'',preferred:null,proximity:null,random:null,attendance:null,
         allow:Array(4).fill(0),days:Array(7).fill(null),previous:-1,location:employee.location,role:employee.role,index,
         shiftAvailability:Object.fromEntries(starts.map(start=>[String(start),0])),
-        bamboohrId:employee.bamboohrId,scheduleLocationId:employee.scheduleLocationId,active:employee.active
+        bamboohrId:employee.bamboohrId,scheduleLocationId:employee.scheduleLocationId,active:employee.active,sourceType:employee.source
     }
 }
 function roleFitsScheduleGroup(role,scheduleLocation){
@@ -2155,22 +2189,26 @@ async function loadDirectoryData(){
         employeeDirectory=employeeResult.employees;
         scheduleLocations=locationResult.scheduleLocations;
         let rosterById=new Map(model.roster.map(employee=>[String(employee.id),employee]));
+        let rosterByBambooId=new Map(model.roster.filter(employee=>employee.bamboohrId).map(employee=>[String(employee.bamboohrId),employee]));
         for(let employee of employeeDirectory){
-            let existing=rosterById.get(employee.id);
+            let existing=rosterById.get(employee.id)||(employee.source==='bamboohr'?rosterByBambooId.get(String(employee.bamboohrId)):null);
             if(existing){
+                existing.id=employee.id;
                 existing.name=employee.name;
                 existing.location=employee.location;
                 existing.role=employee.role;
                 existing.bamboohrId=employee.bamboohrId;
                 existing.scheduleLocationId=employee.scheduleLocationId;
                 existing.active=employee.active
+                existing.sourceType=employee.source;
+                rosterById.set(employee.id,existing)
             }
             else{
                 model.roster.push(blankRosterProfile(employee,model.roster.length))
             }
         }
         for(let employee of model.roster){
-            if(!employeeDirectory.some(record=>record.id===String(employee.id)))employee.active=false
+            if(!employeeDirectory.some(record=>record.id===String(employee.id)||(employee.bamboohrId&&record.bamboohrId===employee.bamboohrId)))employee.active=false
         }
         model.roster.forEach((employee,index)=>employee.index=index);
         migrateScheduleWeeks(model);
@@ -2379,50 +2417,240 @@ function allEmployeeRecords(){
     let known=new Set(employeeDirectory.map(employee=>employee.id));
     for(let employee of model.roster)if(!known.has(String(employee.id)))records.push({
         id:String(employee.id),bamboohrId:employee.bamboohrId||'',name:employee.name,location:employee.location,role:employee.role,
-        active:false,scheduleLocationId:employee.scheduleLocationId||null,roster:employee,unregistered:true
+        active:false,scheduleLocationId:employee.scheduleLocationId||null,roster:employee,source:'unregistered',unregistered:true
     });
     return records.sort((a,b)=>a.name.localeCompare(b.name))
+}
+function employeeDirectoryLocation(employee){
+    return employee.location||employee.bamboohrLocation||''
 }
 function employeeProfileReady(employee){
     let pool=model.pools.find(item=>item.location===employee?.location&&item.role===employee?.role);
     return !!employee&&!!pool&&rosterErrors(employee).length===0&&poolStarts(pool).every(start=>[0,1].includes(employee.shiftAvailability?.[String(start)]))
 }
+function employeeRoleOptions(employee){
+    let roles=[...new Set(model.pools.filter(pool=>pool.location===employee.location).map(pool=>pool.role))];
+    if(employee.role&&!roles.includes(employee.role))roles.push(employee.role);
+    return [['','Assign role'],...roles.sort().map(role=>[role,role])]
+}
 function employeesPage(){
-    let employees=allEmployeeRecords();
-    let registeredEmployees=employees.filter(employee=>!employee.unregistered);
+    let allEmployees=allEmployeeRecords();
+    let locations=[...new Set(allEmployees.map(employeeDirectoryLocation).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    let directoryRoles=[...new Set(allEmployees.map(employee=>employee.role).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    let unmappedLocation='__employee_unmapped__',unassignedRole='__employee_unassigned__';
+    if(employeeLocationFilter!=='All'&&employeeLocationFilter!==unmappedLocation&&!locations.includes(employeeLocationFilter))employeeLocationFilter='All';
+    if(employeeRoleFilter!=='All'&&employeeRoleFilter!==unassignedRole&&!directoryRoles.includes(employeeRoleFilter))employeeRoleFilter='All';
+    let employees=allEmployees.filter(employee=>
+        (employeeLocationFilter==='All'||(employeeLocationFilter===unmappedLocation?!employeeDirectoryLocation(employee):employeeDirectoryLocation(employee)===employeeLocationFilter))&&
+        (employeeRoleFilter==='All'||(employeeRoleFilter===unassignedRole?!employee.role:employee.role===employeeRoleFilter))
+    );
+    let registeredEmployees=allEmployees.filter(employee=>!employee.unregistered);
     selectedEmployeeIds=new Set([...selectedEmployeeIds].filter(id=>registeredEmployees.some(employee=>employee.id===id)));
-    return heading('PEOPLE / EMPLOYEES','Manage employee records and availability.','Each employee needs a unique Employee ID and BambooHR ID, name, location, and role. Inactive employees are excluded from schedule generation and assignment.')+
+    let roles=[...new Set(model.pools.map(pool=>pool.role))].sort();
+    return heading('PEOPLE / EMPLOYEES','BambooHR and manual employee directory.','Refresh imports active BambooHR employees without changing mapped roles or app locations. App active status is local to scheduling. Manually added employees are marked and never published to BambooHR.')+
         (directoryError?panel('Employee directory unavailable',`<p class="badtext">${esc(directoryError)}</p><button type="button" data-action="reloadDirectory">Retry</button>`):'')+
-        `<div class="toolbar"><span>${employees.length} employees · ${employees.filter(employee=>employee.active).length} active</span><button type="button" class="primary" data-action="addEmployee" ${model.locked?'disabled':''}>Add employee</button></div>`+
-        panel('Employee directory',`<div class="toolbar"><span id="selectedEmployeeCount">${selectedEmployeeIds.size} selected</span><button type="button" data-action="batchEmployeeStatus" data-active="true" ${model.locked||!selectedEmployeeIds.size?'disabled':''}>Make active</button><button type="button" data-action="batchEmployeeStatus" data-active="false" ${model.locked||!selectedEmployeeIds.size?'disabled':''}>Make inactive</button></div><div class="tablewrap"><table><thead><tr><th><input type="checkbox" data-employee-select-all aria-label="Select all employees"></th><th>Status</th><th>Employee ID</th><th>BambooHR ID</th><th>Name</th><th>Location</th><th>Role</th><th>Schedule location</th><th>Roster profile</th><th>Actions</th></tr></thead><tbody>${employees.map(employee=>{
+        `<div class="toolbar"><span>${allEmployees.length} employees · ${allEmployees.filter(employee=>employee.active).length} active for scheduling</span><button type="button" class="primary" data-action="syncBambooEmployees" ${publishConfigured?'':'disabled'}>Refresh BambooHR employees</button><button type="button" data-action="addEmployee" ${model.locked?'disabled':''}>Add manual employee</button></div>`+
+        (employeeSyncStatus?`<p class="${employeeSyncStatus.startsWith('BambooHR sync failed')?'badtext':'note'}" role="status">${esc(employeeSyncStatus)}</p>`:'')+
+        panel('Employee directory',`<div class="toolbar"><label>Location ${select([['All','All locations'],...locations.map(location=>[location,location]),...(allEmployees.some(employee=>!employeeDirectoryLocation(employee))?[[unmappedLocation,'Unmapped']]:[])],employeeLocationFilter,'id="employeeLocationFilter"')}</label><label>Role ${select([['All','All roles'],...directoryRoles.map(role=>[role,role]),...(allEmployees.some(employee=>!employee.role)?[[unassignedRole,'Unassigned']]:[])],employeeRoleFilter,'id="employeeRoleFilter"')}</label><span>${employees.length} of ${allEmployees.length} employees</span><span id="selectedEmployeeCount">${selectedEmployeeIds.size} selected</span><button type="button" data-action="batchEmployeeStatus" data-active="true" ${model.locked||!selectedEmployeeIds.size?'disabled':''}>Make active</button><button type="button" data-action="batchEmployeeStatus" data-active="false" ${model.locked||!selectedEmployeeIds.size?'disabled':''}>Make inactive</button><label>Assign role ${select([['','Choose role'],...roles.map(role=>[role,role])],'','id="batchEmployeeRole"')}</label><button type="button" data-action="batchEmployeeRole" ${model.locked||!selectedEmployeeIds.size?'disabled':''}>Assign to selected</button></div><div class="tablewrap"><table><thead><tr><th><input type="checkbox" data-employee-select-all aria-label="Select all visible employees"></th><th>App status</th><th>Source</th><th>Employee ID</th><th>BambooHR ID</th><th>Name</th><th>Location</th><th>Role</th><th>Schedule location</th><th>Roster profile</th><th>Actions</th></tr></thead><tbody>${employees.map(employee=>{
             let roster=employee.roster,ready=employeeProfileReady(roster),assigned=scheduleLocations.find(location=>location.id===employee.scheduleLocationId);
-            return `<tr><td><input type="checkbox" data-employee-select="${esc(employee.id)}" aria-label="Select ${esc(employee.name)}" ${selectedEmployeeIds.has(employee.id)?'checked':''} ${model.locked||employee.unregistered?'disabled':''}></td><td>${badge(employee.active?'Active':'Inactive',employee.active?'good':'warn')}</td><td>${esc(employee.id)}</td><td>${esc(employee.bamboohrId||'Required')}</td><td>${esc(employee.name)}</td><td>${esc(employee.location)}</td><td>${esc(employee.role||'Required')}</td><td>${esc(assigned?.name||'Not assigned')}</td><td>${ready?badge('Ready','good'):badge(employee.unregistered?'Directory setup required':'Needs setup','warn')}</td><td><div class="actions"><button type="button" data-action="editEmployee" data-employee-id="${esc(employee.id)}">Edit</button><button type="button" data-action="editEmployeeProfile" data-employee-id="${esc(employee.id)}">${ready?'Roster settings':'Complete profile'}</button><button type="button" data-action="toggleEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>${employee.active?'Make inactive':'Make active'}</button><button type="button" class="danger" data-action="deleteEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>Delete</button></div></td></tr>`
+            let sourceBadge=employee.source==='manual'?badge('Manual','warn'):employee.source==='bamboohr'?badge('BambooHR','good'):badge('Not registered','warn');
+            let bambooStatus=employee.source==='bamboohr'&&employee.bamboohrActive===false?'<small>BambooHR inactive · app scheduling disabled</small>':'';
+            return `<tr><td><input type="checkbox" data-employee-select="${esc(employee.id)}" aria-label="Select ${esc(employee.name)}" ${selectedEmployeeIds.has(employee.id)?'checked':''} ${model.locked||employee.unregistered?'disabled':''}></td><td>${badge(employee.active?'Active':'Inactive',employee.active?'good':'warn')}${bambooStatus}</td><td>${sourceBadge}</td><td>${esc(employee.id)}</td><td>${esc(employee.bamboohrId||'Missing')}</td><td>${esc(employee.name)}</td><td>${esc(employee.location||employee.bamboohrLocation||'Unmapped')}</td><td>${select(employeeRoleOptions(employee),employee.role,`data-employee-role="${esc(employee.id)}" data-current-role="${esc(employee.role)}" ${model.locked||employee.unregistered?'disabled':''}`)}</td><td>${esc(assigned?.name||'Not assigned')}</td><td>${ready?badge('Ready','good'):badge(employee.unregistered?'Directory setup required':'Needs setup','warn')}</td><td><div class="actions">${!employee.unregistered?`<button type="button" data-action="editEmployee" data-employee-id="${esc(employee.id)}">Edit</button><button type="button" data-action="editEmployeeProfile" data-employee-id="${esc(employee.id)}">${ready?'Roster settings':'Complete profile'}</button><button type="button" data-action="toggleEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>${employee.active?'Make inactive':'Make active'}</button>${employee.source==='manual'?`<button type="button" class="danger" data-action="deleteEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>Delete</button>`:''}`:'Not in directory'}</div></td></tr>`
         }).join('')}</tbody></table></div>`,'Profile settings are edited in Roster settings. New or imported employees should remain inactive until their roster profile is complete.')
 }
 function updateEmployeeSelectionUI(){
-    let registeredEmployees=employeeDirectory;
     let selectAll=$('#content [data-employee-select-all]'),count=$('selectedEmployeeCount');
     let selectedCount=selectedEmployeeIds.size;
     if(count)count.textContent=selectedCount+' selected';
     for(let button of document.querySelectorAll('#content [data-action="batchEmployeeStatus"]'))button.disabled=model.locked||!selectedCount;
     if(selectAll){
-        let selectedVisible=[...document.querySelectorAll('#content [data-employee-select]')].filter(input=>input.checked).length;
-        selectAll.checked=registeredEmployees.length>0&&selectedVisible===registeredEmployees.length;
-        selectAll.indeterminate=selectedVisible>0&&selectedVisible<registeredEmployees.length
+        let visibleInputs=[...document.querySelectorAll('#content [data-employee-select]')].filter(input=>!input.disabled);
+        let selectedVisible=visibleInputs.filter(input=>input.checked).length;
+        selectAll.checked=visibleInputs.length>0&&selectedVisible===visibleInputs.length;
+        selectAll.indeterminate=selectedVisible>0&&selectedVisible<visibleInputs.length
     }
+    let roleButton=$('#content [data-action="batchEmployeeRole"]');
+    if(roleButton)roleButton.disabled=model.locked||!selectedCount
+}
+function normalizedEmployeeKey(value){
+    return String(value||'').trim().toLowerCase()
+}
+async function saveEmployeeRoleChanges(employeeIds,role){
+    if(model.locked)throw Error('Unlock settings in Controls before changing employee roles.');
+    if(!role)throw Error('Choose a role before assigning it.');
+    let employees=employeeDirectory.filter(employee=>employeeIds.includes(employee.id));
+    if(!employees.length||employees.length!==employeeIds.length)throw Error('One or more selected employees are no longer in the directory.');
+    for(let employee of employees){
+        if(!model.pools.some(pool=>pool.location===employee.location&&pool.role===role))throw Error(`Create a ${employee.location} · ${role} Location Roles pool before assigning this role.`);
+        let location=scheduleLocations.find(item=>item.id===employee.scheduleLocationId);
+        if(location&&!roleFitsScheduleGroup(role,location))throw Error(`The role ${role} does not match ${employee.name}'s schedule location. Change the schedule location first.`)
+    }
+    let changed=employees.filter(employee=>employee.role!==role);
+    if(!changed.length)return 0;
+    await directoryRequest('/employees/roles',{method:'PUT',body:JSON.stringify({employeeIds:employees.map(employee=>employee.id),role})});
+    for(let employee of changed){
+        let index=model.roster.findIndex(entry=>String(entry.id)===employee.id);
+        if(index<0)continue;
+        model.roster[index]=blankRosterProfile({...employee,role,active:false},index)
+    }
+    await loadDirectoryData();
+    await saveState();
+    render(true);
+    return changed.length
+}
+function applyEmployeeIdChanges(changes){
+    for(let change of changes||[]){
+        let matching=change.bamboohrId?model.roster.find(employee=>employee.bamboohrId===change.bamboohrId):null;
+        let oldProfile=model.roster.find(employee=>String(employee.id)===String(change.oldId));
+        if(change.mergedManualId){
+            let manualProfile=model.roster.find(employee=>String(employee.id)===String(change.mergedManualId));
+            let existingProfile=matching||oldProfile;
+            let keep=manualProfile&&(!existingProfile||employeeProfileReady(manualProfile)&&!employeeProfileReady(existingProfile))?manualProfile:existingProfile||manualProfile;
+            model.roster=model.roster.filter(employee=>employee!==manualProfile&&employee!==existingProfile);
+            if(keep){
+                keep.id=change.newId;
+                model.roster.push(keep)
+            }
+        }
+        else if(change.source==='manual'&&oldProfile)oldProfile.id=change.newId;
+        else if(change.source==='bamboohr'&&(matching||oldProfile))(matching||oldProfile).id=change.newId
+    }
+    model.roster.forEach((employee,index)=>employee.index=index)
+}
+async function finishBambooEmployeeSync(result){
+    applyEmployeeIdChanges(result.employeeIdChanges);
+    await loadDirectoryData();
+    let persisted=await saveState(),directoryReloadError=directoryError;
+    pendingEmployeeSyncConflicts=[];
+    $('employeeSyncDialog')?.close();
+    employeeSyncStatus=`BambooHR sync complete · ${result.synced} active records checked, ${result.added} added, ${result.updated} refreshed, ${result.merged} duplicate(s) merged, ${result.rekeyed} Employee ID(s) updated, ${result.inactivated} locally deactivated.`;
+    render(true);
+    message(directoryReloadError?`BambooHR sync completed, but the employee directory could not be refreshed: ${directoryReloadError}`:persisted?'BambooHR employee directory synchronized. Review new or unmapped employees and assign their roles.':'BambooHR employee directory synchronized for this session. Download a workspace backup to preserve roster changes.',!!directoryReloadError)
+}
+async function requestBambooEmployeeSync(resolutions=[]){
+    let result=await directoryRequest('/bamboohr/employees/sync',{method:'POST',body:JSON.stringify({resolutions})});
+    if(result.requiresReview){
+        openEmployeeSyncReview(result.conflicts);
+        employeeSyncStatus=`${result.conflicts.length} possible duplicate(s) need review. No employee records were changed.`;
+        render(true);
+        return
+    }
+    await finishBambooEmployeeSync(result)
+}
+function workflowDialog(id){
+    let dialog=$(id);
+    if(!dialog){
+        dialog=document.createElement('dialog');
+        dialog.id=id;
+        dialog.className='wide-dialog';
+        document.body.append(dialog)
+    }
+    return dialog
+}
+function openEmployeeSyncReview(conflicts){
+    pendingEmployeeSyncConflicts=conflicts;
+    let dialog=workflowDialog('employeeSyncDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">EMPLOYEE RECONCILIATION</div><h2>Review possible duplicate employees</h2></div><button type="button" data-dialog-close="employeeSyncDialog" aria-label="Close">✕</button></div><p>These manual records share an Employee ID with a BambooHR record. Confirm whether each pair is the same person. No changes will be made until you confirm.</p>${conflicts.map((conflict,index)=>`<section class="panel"><h3>${esc(conflict.manualEmployee.name)} · ${esc(conflict.manualEmployee.id)}</h3><p>BambooHR: ${esc(conflict.bamboohrName)} · Employee ID ${esc(conflict.employeeId)}${conflict.existingBambooEmployeeId?` · existing BambooHR Employee ID ${esc(conflict.existingBambooEmployeeId)}`:''}</p><label><input type="radio" name="sync-person-${index}" value="same" checked> Same person — keep the BambooHR record and retain available app mappings</label><label><input type="radio" name="sync-person-${index}" value="different"> Different people — keep both records</label><label>New Employee ID for the manual employee<input data-sync-new-id="${index}" maxlength="80" value="" placeholder="Required if these are different people"></label></section>`).join('')}<div class="actions"><button type="button" data-dialog-close="employeeSyncDialog">Cancel</button><button type="button" class="primary" data-action="resolveBambooEmployeeSync">Confirm and sync</button></div>`;
+    if(!dialog.open)dialog.showModal()
+}
+function sourceRoleOptions(workspace,location){
+    let roles=[...new Set(workspace.pools.filter(pool=>pool.location===location).map(pool=>pool.role))].sort();
+    return [['','Select role'],...roles.map(role=>[role,role])]
+}
+function updateSourceReviewRow(index){
+    let row=sourceReviewRows[index],dialog=$('sourceImportReviewDialog');
+    if(!row||!dialog)return;
+    let location=dialog.querySelector(`[data-import-location="${index}"]`)?.value||'';
+    let roleSelect=dialog.querySelector(`[data-import-role="${index}"]`),scheduleSelect=dialog.querySelector(`[data-import-schedule="${index}"]`);
+    if(roleSelect){
+        let current=roleSelect.value;
+        roleSelect.innerHTML=sourceRoleOptions(pendingSourceImport,location).map(([value,label])=>`<option value="${esc(value)}" ${current===value?'selected':''}>${esc(label)}</option>`).join('');
+        if(![...roleSelect.options].some(option=>option.value===current))roleSelect.value=''
+    }
+    if(scheduleSelect){
+        let role=roleSelect?.value||'',prior=scheduleSelect.value;
+        scheduleSelect.innerHTML=`<option value="">Not assigned</option>${scheduleLocations.filter(item=>item.location===location&&roleFitsScheduleGroup(role,item)).map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
+        if([...scheduleSelect.options].some(option=>option.value===prior))scheduleSelect.value=prior
+    }
+}
+function openSourceImportReview(workspace){
+    pendingSourceImport=workspace;
+    let currentById=new Map(employeeDirectory.map(employee=>[normalizedEmployeeKey(employee.id),employee]));
+    sourceReviewRows=workspace.roster.map(profile=>{
+        let existing=currentById.get(normalizedEmployeeKey(profile.id)),locationNames=new Set(workspace.locations.map(location=>location.name));
+        let location=existing&&locationNames.has(existing.location)?existing.location:locationNames.has(profile.location)?profile.location:'';
+        let roleOptions=workspace.pools.filter(pool=>pool.location===location).map(pool=>pool.role);
+        let role=existing&&roleOptions.includes(existing.role)?existing.role:roleOptions.includes(profile.role)?profile.role:'';
+        let scheduleLocationId=existing?.scheduleLocationId||'';
+        if(!scheduleLocations.some(item=>item.id===scheduleLocationId&&item.location===location&&roleFitsScheduleGroup(role,item)))scheduleLocationId='';
+        return {profile,existing,location,role,scheduleLocationId,addManual:false}
+    });
+    let dialog=workflowDialog('sourceImportReviewDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">SOURCE WORKBOOK</div><h2>Review employee mappings</h2></div><button type="button" data-dialog-close="sourceImportReviewDialog" aria-label="Close">✕</button></div><p>Review every employee's app location and role before importing. Existing BambooHR/manual mappings are preselected and retain their current role when it is available. Select Add manually only for unknown people who should be added to this app.</p><div class="tablewrap"><table><thead><tr><th>Employee</th><th>Source</th><th>Location</th><th>Role</th><th>Schedule location</th><th>New manual employee</th></tr></thead><tbody>${sourceReviewRows.map((row,index)=>{
+        let source=row.existing?row.existing.source==='manual'?'Manual':'BambooHR':'Unknown';
+        let roles=sourceRoleOptions(workspace,row.location),locations=workspace.locations.map(item=>[item.name,item.name]);
+        let schedules=scheduleLocations.filter(item=>item.location===row.location&&roleFitsScheduleGroup(row.role,item)).map(item=>[item.id,item.name]);
+        return `<tr><td>${esc(row.profile.name)}<small>Employee ID ${esc(row.profile.id)}</small></td><td>${badge(source,row.existing?'good':'warn')}${row.existing?`<small>Current: ${esc(row.existing.location)} · ${esc(row.existing.role||'No role')}</small>`:''}</td><td>${select([['','Select location'],...locations],row.location,`data-import-location="${index}"`)}</td><td>${select(roles,row.role,`data-import-role="${index}"`)}</td><td>${select([['','Not assigned'],...schedules],row.scheduleLocationId,`data-import-schedule="${index}"`)}</td><td>${row.existing?'—':`<label><input type="checkbox" data-import-manual="${index}"> Add manually</label>`}</td></tr>`
+    }).join('')}</tbody></table></div><div class="actions"><button type="button" data-dialog-close="sourceImportReviewDialog">Cancel import</button><button type="button" class="primary" data-action="approveSourceImport">Approve mappings and import</button></div>`;
+    dialog.querySelectorAll('[data-import-location],[data-import-role]').forEach(select=>select.addEventListener('change',()=>updateSourceReviewRow(Number(select.dataset.importLocation??select.dataset.importRole))));
+    dialog.showModal()
+}
+async function approveSourceImportMappings(){
+    let workspace=pendingSourceImport,dialog=$('sourceImportReviewDialog');
+    if(!workspace||!dialog)throw Error('The pending source workbook review could not be found.');
+    let mappings=sourceReviewRows.map((row,index)=>{
+        let location=dialog.querySelector(`[data-import-location="${index}"]`)?.value||'';
+        let role=dialog.querySelector(`[data-import-role="${index}"]`)?.value||'';
+        let scheduleLocationId=dialog.querySelector(`[data-import-schedule="${index}"]`)?.value||null;
+        let addManual=!!dialog.querySelector(`[data-import-manual="${index}"]`)?.checked;
+        if(!location||!role||!workspace.pools.some(pool=>pool.location===location&&pool.role===role))throw Error(`Choose a valid Location Roles mapping for ${row.profile.name}.`);
+        if(scheduleLocationId&&!scheduleLocations.some(item=>item.id===scheduleLocationId&&item.location===location&&roleFitsScheduleGroup(role,item)))throw Error(`Choose a schedule location that matches ${row.profile.name}'s location and role.`);
+        return {id:row.existing?.id||String(row.profile.id),name:row.existing?.name||String(row.profile.name),location,role,scheduleLocationId,addManual}
+    });
+    let result=mappings.length?await directoryRequest('/employees/import-review',{method:'PUT',body:JSON.stringify({employees:mappings})}):{addedManual:0,deactivated:0};
+    let mappedById=new Map(mappings.map(mapping=>[normalizedEmployeeKey(mapping.id),mapping]));
+    workspace.roster=workspace.roster.map(profile=>{
+        let mapping=mappedById.get(normalizedEmployeeKey(profile.id));
+        if(!mapping){
+            profile.active=false;
+            return profile
+        }
+        let prior=mapping.id===String(profile.id)?employeeDirectory.find(employee=>employee.id===mapping.id):employeeDirectory.find(employee=>normalizedEmployeeKey(employee.id)===normalizedEmployeeKey(mapping.id));
+        profile.id=mapping.id;
+        profile.name=mapping.name;
+        profile.location=mapping.location;
+        profile.role=mapping.role;
+        profile.scheduleLocationId=mapping.scheduleLocationId;
+        profile.bamboohrId=prior?.bamboohrId||'';
+        profile.active=!!prior?.active&&prior.location===mapping.location&&prior.role===mapping.role;
+        profile.sourceType=prior?.source|| (mapping.addManual?'manual':'unregistered');
+        return profile
+    });
+    workspace.roster.forEach((profile,index)=>profile.index=index);
+    model=workspace;
+    await loadDirectoryData();
+    let persisted=await saveState(),directoryReloadError=directoryError;
+    pendingSourceImport=null;
+    sourceReviewRows=[];
+    dialog.close();
+    page='home';
+    filterLoc=filterRole='All';
+    search='';
+    render();
+    message(directoryReloadError?`Source mappings were approved and imported, but the employee directory could not be refreshed: ${directoryReloadError}`:persisted?`Source workbook imported after review. ${result.addedManual||0} manual employee(s) added; ${result.deactivated||0} employee(s) deactivated for changed mappings.`:'Source workbook imported for this session. Download a workspace backup before closing.',!!directoryReloadError)
 }
 function scheduleLocationsPage(){
     return heading('PEOPLE / SCHEDULE LOCATIONS','Connect app locations to BambooHR schedules.','Each schedule location maps a name and app location to one BambooHR schedule ID. Employees can be assigned to only one schedule location at a time.')+
         (directoryError?panel('Schedule location directory unavailable',`<p class="badtext">${esc(directoryError)}</p><button type="button" data-action="reloadDirectory">Retry</button>`):'')+
         `<div class="toolbar"><span>${scheduleLocations.length} schedule locations</span><button type="button" class="primary" data-action="addScheduleLocation">Add schedule location</button></div>`+
-        panel('Schedule location directory',`<div class="tablewrap"><table><thead><tr><th>Schedule name</th><th>BambooHR schedule ID</th><th>App location</th><th>Employees</th><th>Actions</th></tr></thead><tbody>${scheduleLocations.map(location=>`<tr><td>${esc(location.name)}<small>${esc(location.roleGroup)}</small></td><td>${esc(location.bambooScheduleId)}</td><td>${esc(location.location)}</td><td>${location.employeeCount}</td><td><div class="actions"><button type="button" data-action="assignEmployees" data-location-id="${esc(location.id)}">Assign employees</button><button type="button" data-action="editScheduleLocation" data-location-id="${esc(location.id)}">Edit</button><button type="button" class="danger" data-action="deleteScheduleLocation" data-location-id="${esc(location.id)}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`,'Employees moved to a schedule location inherit its app location; their required role is preserved. A schedule location with assigned employees cannot be deleted.')
+        panel('Schedule location directory',`<div class="tablewrap"><table><thead><tr><th>Schedule name</th><th>BambooHR schedule ID</th><th>App location</th><th>Confirmation manager</th><th>Employees</th><th>Actions</th></tr></thead><tbody>${scheduleLocations.map(location=>`<tr><td>${esc(location.name)}<small>${esc(location.roleGroup)}</small></td><td>${esc(location.bambooScheduleId)}</td><td>${esc(location.location)}</td><td>${esc(location.managerName||'Manager not set')}<small>${esc(location.managerEmail||'')}</small></td><td>${location.employeeCount}</td><td><div class="actions"><button type="button" data-action="assignEmployees" data-location-id="${esc(location.id)}">Assign employees</button><button type="button" data-action="editScheduleLocation" data-location-id="${esc(location.id)}">Edit</button><button type="button" class="danger" data-action="deleteScheduleLocation" data-location-id="${esc(location.id)}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`,'The manager receives schedule confirmation drafts for this schedule location. Enter manager contact details before preparing emails. Employees moved to a schedule location inherit its app location; their required role is preserved. A schedule location with assigned employees cannot be deleted.')
 }
 function openEmployeeForm(employeeId=''){
     let existing=allEmployeeRecords().find(employee=>employee.id===employeeId),dialog=$('employeeDialog'),employee=existing||{
         id:'',bamboohrId:'',name:'',location:model.locations[0]?.name||'',role:'',active:false,scheduleLocationId:''
     };
-    let roles=[...new Set(model.pools.map(pool=>pool.role))].sort(),locations=model.locations.map(item=>[item.name,item.name]);
-    dialog.innerHTML=`<form id="employeeForm"><div class="dialoghead"><div><div class="eyebrow">EMPLOYEE DIRECTORY</div><h2>${existing?'Edit employee':'Add employee'}</h2></div><button type="button" data-dialog-close="employeeDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Employee ID<input name="id" required maxlength="80" value="${esc(employee.id)}"></label><label>BambooHR ID<input name="bamboohrId" required inputmode="numeric" pattern="[0-9]+" value="${esc(employee.bamboohrId)}"></label><label>Employee name<input name="name" required maxlength="240" value="${esc(employee.name)}"></label><label>Location ${select(locations,employee.location,'name="location" required')}</label><label>Role ${select([['','Select role'],...roles.map(role=>[role,role])],employee.role,'name="role" required')}</label><label>Schedule location ${select([['','Not assigned'],...scheduleLocations.filter(item=>item.location===employee.location).map(item=>[item.id,item.name])],employee.scheduleLocationId||'','name="scheduleLocationId"')}</label><label class="setting-row"><input type="checkbox" name="active" ${employee.active?'checked':''}><span><b>Active</b><small>Active employees can be scheduled and assigned.</small></span></label></div><p class="note">Active status requires a complete roster profile. Editing the location or role must match an existing Location Roles pool.</p><div class="actions"><button type="button" data-dialog-close="employeeDialog">Cancel</button><button class="primary" type="submit">Save employee</button></div></form>`;
+    let isManual=employee.source==='manual'||!existing,roles=[...new Set(model.pools.map(item=>item.role))].sort(),locations=model.locations.map(item=>[item.name,item.name]);
+    dialog.innerHTML=`<form id="employeeForm"><div class="dialoghead"><div><div class="eyebrow">EMPLOYEE DIRECTORY</div><h2>${existing?'Edit employee': 'Add manual employee'}</h2></div><button type="button" data-dialog-close="employeeDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Employee ID<input name="id" required maxlength="80" value="${esc(employee.id)}" ${!isManual?'readonly':''}></label><label>BambooHR ID<input name="bamboohrId" readonly value="${esc(employee.bamboohrId||'Assigned automatically for manual employees')}"></label><label>Employee name<input name="name" required maxlength="240" value="${esc(employee.name)}" ${!isManual?'readonly':''}></label><label>Location ${select(locations,employee.location,'name="location" required')}</label><label>Role ${select([['','Select role'],...roles.map(role=>[role,role])],employee.role,'name="role" required')}</label><label>Schedule location ${select([['','Not assigned'],...scheduleLocations.filter(item=>item.location===employee.location&&roleFitsScheduleGroup(employee.role,item)).map(item=>[item.id,item.name])],employee.scheduleLocationId||'','name="scheduleLocationId" '+(!existing?'disabled':'') )}</label><label class="setting-row"><input type="checkbox" name="active" ${employee.active?'checked':''} ${!existing?'disabled':''}><span><b>Active for scheduling</b><small>${existing?'App-only status; it does not change BambooHR.':'New manual employees start inactive.'}</small></span></label></div><p class="note">${existing?.source==='bamboohr'?'BambooHR ID, Employee ID, and name are read-only and refreshed from BambooHR.':'Manual employees receive an app-generated dummy BambooHR ID and are never published to BambooHR.'} Active status requires a complete roster profile. Role and location must match a source Location Roles pool.</p><div class="actions"><button type="button" data-dialog-close="employeeDialog">Cancel</button><button class="primary" type="submit">Save employee</button></div></form>`;
     dialog.showModal();
     let refreshScheduleLocations=()=>{
         let current=dialog.querySelector('select[name="scheduleLocationId"]'),chosen=scheduleLocations.find(item=>item.id===current.value);
@@ -2444,9 +2672,9 @@ function openEmployeeForm(employeeId=''){
 }
 function openScheduleLocationForm(locationId=''){
     let existing=scheduleLocations.find(location=>location.id===locationId),dialog=$('scheduleLocationDialog'),location=existing||{
-        id:'',name:'',bambooScheduleId:'',location:model.locations[0]?.name||'',roleGroup:''
+        id:'',name:'',bambooScheduleId:'',location:model.locations[0]?.name||'',roleGroup:'',managerName:'',managerEmail:''
     };
-    dialog.innerHTML=`<form id="scheduleLocationForm"><div class="dialoghead"><div><div class="eyebrow">BAMBOOHR SCHEDULE</div><h2>${existing?'Edit schedule location':'Add schedule location'}</h2></div><button type="button" data-dialog-close="scheduleLocationDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Schedule name<input name="name" required maxlength="240" value="${esc(location.name)}"></label><label>BambooHR schedule ID<input name="bambooScheduleId" required maxlength="120" value="${esc(location.bambooScheduleId)}"></label><label>App location ${select(model.locations.map(item=>[item.name,item.name]),location.location,'name="location" required')}</label><label>Role group / description<input name="roleGroup" maxlength="120" value="${esc(location.roleGroup)}"></label></div><div class="actions"><button type="button" data-dialog-close="scheduleLocationDialog">Cancel</button><button class="primary" type="submit">Save schedule location</button></div></form>`;
+    dialog.innerHTML=`<form id="scheduleLocationForm"><div class="dialoghead"><div><div class="eyebrow">BAMBOOHR SCHEDULE</div><h2>${existing?'Edit schedule location':'Add schedule location'}</h2></div><button type="button" data-dialog-close="scheduleLocationDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Schedule name<input name="name" required maxlength="240" value="${esc(location.name)}"></label><label>BambooHR schedule ID<input name="bambooScheduleId" required maxlength="120" value="${esc(location.bambooScheduleId)}"></label><label>App location ${select(model.locations.map(item=>[item.name,item.name]),location.location,'name="location" required')}</label><label>Role group / description<input name="roleGroup" maxlength="120" value="${esc(location.roleGroup)}"></label><label>Manager name<input name="managerName" required maxlength="120" value="${esc(location.managerName)}"></label><label>Manager email<input name="managerEmail" type="email" required maxlength="254" value="${esc(location.managerEmail)}"></label></div><div class="actions"><button type="button" data-dialog-close="scheduleLocationDialog">Cancel</button><button class="primary" type="submit">Save schedule location</button></div></form>`;
     dialog.showModal();
     dialog.querySelector('#scheduleLocationForm').addEventListener('submit',async event=>{
         event.preventDefault();
@@ -2476,7 +2704,7 @@ function renderAssignmentDialog(){
 }
 async function saveEmployeeForm(originalId){
     if(model.locked)throw Error('Unlock settings in Controls before changing employees.');
-    let form=$('employeeForm'),values=new FormData(form),id=String(values.get('id')).trim(),bamboohrId=String(values.get('bamboohrId')).trim();
+    let form=$('employeeForm'),values=new FormData(form),id=String(values.get('id')).trim(),registered=originalId?employeeDirectory.find(entry=>entry.id===String(originalId)):null,bamboohrId=registered?.bamboohrId||'';
     let employee={
         id,bamboohrId,name:String(values.get('name')).trim(),location:String(values.get('location')),
         role:String(values.get('role')),active:values.get('active')==='on',
@@ -2489,10 +2717,10 @@ async function saveEmployeeForm(originalId){
     if(employee.active&&profileChanged)throw Error('Make the employee inactive before changing their location or role. Complete the updated roster profile before reactivating them.');
     if(employee.active&&!rosterEntry)throw Error('Add this employee to Roster settings before activating them.');
     if(employee.active&&rosterEntry?.active===false&&!employeeProfileReady(rosterEntry))throw Error('Complete the employee’s Roster settings before making them active.');
-    let isRegistered=employeeDirectory.some(entry=>entry.id===String(originalId||id));
-    await directoryRequest(isRegistered?'/employees/'+encodeURIComponent(originalId):'/employees',{
-        method:isRegistered?'PUT':'POST',body:JSON.stringify(employee)
+    let response=await directoryRequest(registered?'/employees/'+encodeURIComponent(originalId):'/employees',{
+        method:registered?'PUT':'POST',body:JSON.stringify(employee)
     });
+    employee={...employee,...response.employee};
     if(rosterEntry&&profileChanged){
         let index=model.roster.indexOf(rosterEntry);
         model.roster[index]=blankRosterProfile(employee,index)
@@ -2504,7 +2732,8 @@ async function saveEmployeeForm(originalId){
         rosterEntry.role=employee.role;
         rosterEntry.bamboohrId=employee.bamboohrId;
         rosterEntry.scheduleLocationId=employee.scheduleLocationId;
-        rosterEntry.active=employee.active
+        rosterEntry.active=employee.active;
+        rosterEntry.sourceType=employee.source
     }
     else model.roster.push(blankRosterProfile(employee,model.roster.length));
     model.roster.forEach((entry,index)=>entry.index=index);
@@ -2518,7 +2747,8 @@ async function saveEmployeeForm(originalId){
 async function saveScheduleLocationForm(locationId){
     let form=$('scheduleLocationForm'),values=new FormData(form),data={
         name:String(values.get('name')).trim(),bambooScheduleId:String(values.get('bambooScheduleId')).trim(),
-        location:String(values.get('location')),roleGroup:String(values.get('roleGroup')||'').trim()
+        location:String(values.get('location')),roleGroup:String(values.get('roleGroup')||'').trim(),
+        managerName:String(values.get('managerName')).trim(),managerEmail:String(values.get('managerEmail')).trim()
     };
     let assigned=employeeDirectory.filter(employee=>employee.scheduleLocationId===locationId);
     if(assigned.some(employee=>!model.pools.some(pool=>pool.location===data.location&&pool.role===employee.role)))throw Error('Create matching Location Roles pools for all assigned employee roles before changing this schedule location.');
@@ -2673,6 +2903,7 @@ function sourcePage(){
 }
 function render(preserveScroll=false){
     if(!model)return;
+    applyBranding();
     let scrollPosition=preserveScroll?{x:window.scrollX,y:window.scrollY,wrappers:[...document.querySelectorAll('#content .tablewrap')].map(wrapper=>({left:wrapper.scrollLeft,top:wrapper.scrollTop}))}:null;
     let openPublishGroups=new Set([...document.querySelectorAll('#content details[data-publish-group][open]')].map(details=>details.dataset.publishGroup));
     profileHeader();
@@ -2733,6 +2964,14 @@ function render(preserveScroll=false){
         filterRole=e.target.value;render()
     }
     );
+    $('employeeLocationFilter')?.addEventListener('change',e=>{
+        employeeLocationFilter=e.target.value;render()
+    }
+    );
+    $('employeeRoleFilter')?.addEventListener('change',e=>{
+        employeeRoleFilter=e.target.value;render()
+    }
+    );
     $('rosterSearch')?.addEventListener('change',e=>{
         search=e.target.value;render()
     }
@@ -2772,6 +3011,26 @@ function refreshConfigurationIndicators(){
 }
 function editChange(event){
     let e=event.target;
+    if(e.matches?.('[data-employee-role]')){
+        let employeeId=e.dataset.employeeRole,role=e.value;
+        if(busy){
+            e.value=e.dataset.currentRole||'';
+            return
+        }
+        if(!role){
+            e.value=e.dataset.currentRole||'';
+            message('Select a role before assigning it.',true);
+            return
+        }
+        busy=true;
+        saveEmployeeRoleChanges([employeeId],role).then(changed=>{
+            message(changed?'Role updated. The employee is inactive until the updated roster profile is reviewed.':'The employee already has that role.')
+        }).catch(error=>{
+            e.value=e.dataset.currentRole||'';
+            message(error.message,true)
+        }).finally(()=>busy=false);
+        return
+    }
     if(e.matches?.('[data-employee-select]')){
         e.checked?selectedEmployeeIds.add(e.dataset.employeeSelect):selectedEmployeeIds.delete(e.dataset.employeeSelect);
         updateEmployeeSelectionUI();
@@ -2779,6 +3038,7 @@ function editChange(event){
     }
     if(e.matches?.('[data-employee-select-all]')){
         for(let input of document.querySelectorAll('#content [data-employee-select]')){
+            if(input.disabled)continue;
             input.checked=e.checked;
             e.checked?selectedEmployeeIds.add(input.dataset.employeeSelect):selectedEmployeeIds.delete(input.dataset.employeeSelect)
         }
@@ -2869,6 +3129,30 @@ function editChange(event){
 
 }
 document.addEventListener('change',editChange);
+document.addEventListener('change',e=>{
+    if(e.target.id!=='businessLogoFile')return;
+    let file=e.target.files?.[0];
+    if(!file)return;
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){
+        message('Choose a PNG, JPEG, or WebP logo no larger than 2 MB.',true);
+        e.target.value='';
+        return
+    }
+    let reader=new FileReader();
+    reader.onload=()=>{
+        businessConfig.logoDataUrl=String(reader.result||'');
+        render(true);
+        message('Logo selected. Save business settings to apply it.')
+    };
+    reader.onerror=()=>message('The selected logo could not be read.',true);
+    reader.readAsDataURL(file)
+});
+document.addEventListener('input',e=>{
+    if(!['tenantIdSetting','bambooTestApiKey'].includes(e.target.id))return;
+    bambooPromotionToken='';
+    if($('promoteBambooKey'))$('promoteBambooKey').hidden=true;
+    if($('businessKeyStatus'))$('businessKeyStatus').textContent=''
+});
 async function updateScheduleShift(input){
     let original=clone(model),run=model.results.find(item=>item.id===input.dataset.runId),employee=run?.employees.find(item=>item.id===input.dataset.employeeId),day=Number(input.dataset.day);
     if(!run||!employee||!Number.isInteger(day)||day<0||day>6){
@@ -2939,6 +3223,67 @@ async function action(a,element=null){
         return
     }
     try{
+        if(a==='pickBusinessLogo'){
+            $('businessLogoFile')?.click();
+            return
+        }
+        if(a==='removeBusinessLogo'){
+            businessConfig.logoDataUrl='';
+            render(true);
+            message('Logo removed from the pending settings. Save business settings to apply the default logo.');
+            return
+        }
+        if(a==='saveBusinessSettings'){
+            let config={
+                businessName:$('businessNameSetting')?.value.trim(),
+                teamName:$('teamNameSetting')?.value.trim(),
+                tenantId:$('tenantIdSetting')?.value.trim(),
+                primaryColor:$('primaryColorSetting')?.value,
+                accentColor:$('accentColorSetting')?.value,
+                logoDataUrl:businessConfig.logoDataUrl||''
+            };
+            bambooPromotionToken='';
+            let saved=await directoryRequest('/app-config',{method:'PUT',body:JSON.stringify(config)});
+            businessConfig=saved;
+            applyBranding();
+            render(true);
+            message('Business settings saved. The saved tenant now controls BambooHR API requests.');
+            return
+        }
+        if(a==='testBambooKey'){
+            let tenantId=$('tenantIdSetting')?.value.trim(),apiKey=$('bambooTestApiKey')?.value;
+            if(!tenantId||tenantId!==businessConfig.tenantId)throw Error('Save the tenant settings before testing a key.');
+            if(!apiKey?.trim())throw Error('Enter an API key to test.');
+            bambooPromotionToken='';
+            $('promoteBambooKey').hidden=true;
+            $('businessKeyStatus').textContent='Testing a read-only BambooHR time-off request…';
+            try{
+                let result=await directoryRequest('/bamboohr/validate-key',{method:'POST',body:JSON.stringify({tenantId,apiKey})});
+                bambooPromotionToken=result.promotionToken;
+                $('bambooTestApiKey').value='';
+                $('businessKeyStatus').textContent='Key verified for '+result.tenantId+'. It has not been saved.';
+                $('promoteBambooKey').hidden=false
+            }
+            catch(error){
+                $('businessKeyStatus').textContent=error.message;
+                throw error
+            }
+            return
+        }
+        if(a==='promoteBambooKey'){
+            if(!bambooPromotionToken)throw Error('Test a key successfully before promoting it.');
+            let result=await directoryRequest('/bamboohr/promote-key',{
+                method:'POST',body:JSON.stringify({tenantId:businessConfig.tenantId,promotionToken:bambooPromotionToken})
+            });
+            bambooPromotionToken='';
+            businessConfig.apiKeyConfigured='true';
+            $('promoteBambooKey').hidden=true;
+            $('businessKeyStatus').textContent='The tested key is now the app’s operational BambooHR API key for '+result.tenantId+'.';
+            if($('bambooTestApiKey'))$('bambooTestApiKey').value='';
+            render(true);
+            message('Tested BambooHR API key promoted and saved to the server .env file.');
+            return
+        }
         if(a==='reloadDirectory'){
             await loadDirectoryData();
             if(directoryError)throw Error(directoryError);
@@ -2950,6 +3295,45 @@ async function action(a,element=null){
             render(true);
             if(publishError)throw Error(publishError);
             message(publishConfigured?'BambooHR server credential is configured.':'BAMBOOHR_API_KEY is not configured on the server.',!publishConfigured);
+            return
+        }
+        if(a==='syncBambooEmployees'){
+            busy=true;
+            employeeSyncStatus='Fetching active employees from BambooHR…';
+            render(true);
+            try{
+                await requestBambooEmployeeSync()
+            }
+            catch(error){
+                employeeSyncStatus='BambooHR sync failed: '+error.message;
+                render(true);
+                throw error
+            }
+            return
+        }
+        if(a==='resolveBambooEmployeeSync'){
+            let resolutions=pendingEmployeeSyncConflicts.map((conflict,index)=>{
+                let choice=$(`employeeSyncDialog`)?.querySelector(`input[name="sync-person-${index}"]:checked`)?.value;
+                if(!choice)throw Error(`Choose whether ${conflict.manualEmployee.name} and ${conflict.bamboohrName} are the same person.`);
+                let resolution={bamboohrId:conflict.bamboohrId,employeeId:conflict.manualEmployee.id,samePerson:choice==='same'};
+                if(choice==='different'){
+                    let newId=$(`employeeSyncDialog`)?.querySelector(`[data-sync-new-id="${index}"]`)?.value.trim();
+                    if(!newId)throw Error(`Enter a new Employee ID for manual employee ${conflict.manualEmployee.name}.`);
+                    resolution.newManualEmployeeId=newId
+                }
+                return resolution
+            });
+            busy=true;
+            employeeSyncStatus='Applying reviewed employee reconciliations…';
+            render(true);
+            try{
+                await requestBambooEmployeeSync(resolutions)
+            }
+            catch(error){
+                employeeSyncStatus='BambooHR sync failed: '+error.message;
+                render(true);
+                throw error
+            }
             return
         }
         if(a==='addEmployee'){
@@ -3006,6 +3390,24 @@ async function action(a,element=null){
             await saveState();
             render(true);
             message(`${employees.length} employee${employees.length===1?'':'s'} made ${status}.`);
+            return
+        }
+        if(a==='batchEmployeeRole'){
+            let role=$('batchEmployeeRole')?.value||'';
+            if(!selectedEmployeeIds.size)throw Error('Select one or more employees from the directory.');
+            busy=true;
+            let changed=await saveEmployeeRoleChanges([...selectedEmployeeIds],role);
+            message(changed?`Role assigned to ${changed} employee${changed===1?'':'s'}. Changed employees were made inactive until their roster profiles are reviewed.`:'The selected employees already have that role.');
+            return
+        }
+        if(a==='approveSourceImport'){
+            busy=true;
+            try{
+                await approveSourceImportMappings()
+            }
+            catch(error){
+                message(error.message,true)
+            }
             return
         }
         if(a==='deleteEmployee'){
@@ -3759,13 +4161,8 @@ async function importSourceFile(file){
         );
         next.bambooTimeOff=clone(model.bambooTimeOff||null);
         next.timeOffWorkbook=clone(model.timeOffWorkbook||null);
-        await persistWorkspace(next);
-        model=next;
-        page='home';
-        filterLoc=filterRole='All';
-        search='';
-        render();
-        message(storageMode==='session'?'Updated source imported for this session. Review settings, then download the portable ZIP bundle when hosted or a workspace backup.':'Updated source imported and saved. Review inputs, choose the first Monday and lock settings.')
+        openSourceImportReview(next);
+        message('Workbook validated. Review and approve every employee mapping before importing.');
         return true
     }
     catch(err){
@@ -3947,6 +4344,7 @@ async function init(){
             storageReason=e.message;
             storageStatus()
         }
+        await loadBusinessConfig();
         await clearLegacyBambooCredentials();
         await loadAcceptedSchedules();
         await loadDirectoryData();

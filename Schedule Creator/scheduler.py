@@ -3,14 +3,17 @@ from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
 import json
 import os
+import re
+import secrets
 import sqlite3
 import base64
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv, set_key, unset_key
 from flask import Flask, abort, jsonify, request, send_from_directory
 
 from directory_seed import (
@@ -25,8 +28,17 @@ APP_DIRECTORY = Path(__file__).resolve().parent
 load_dotenv(APP_DIRECTORY / ".env")
 DATABASE_PATH = APP_DIRECTORY / "data" / "schedule_creator.sqlite3"
 MAX_ACCEPTED_SCHEDULE_BYTES = 16 * 1024 * 1024
-BAMBOOHR_SCHEDULES_URL = "https://cbljm.bamboohr.com/api/v1/scheduling/shifts"
-BAMBOOHR_TIME_OFF_URL = "https://cbljm.bamboohr.com/api/v1/time_off/whos_out"
+ENV_PATH = APP_DIRECTORY / ".env"
+DEFAULT_APP_CONFIG = {
+    "businessName": "Celebration Brands Limited",
+    "teamName": "Schedule Management",
+    "logoDataUrl": "",
+    "primaryColor": "#159bd5",
+    "accentColor": "#74bf16",
+    "tenantId": "cbljm",
+}
+MAX_LOGO_BYTES = 2 * 1024 * 1024
+_validated_bamboo_keys: dict[str, tuple[str, str, datetime]] = {}
 STATIC_ASSETS = {
     "CBL-Scheduler2.css",
     "CBL-Scheduler2.config.js",
@@ -60,7 +72,9 @@ def initialize_database() -> None:
                 name TEXT NOT NULL UNIQUE,
                 bamboo_schedule_id TEXT NOT NULL UNIQUE,
                 location TEXT NOT NULL,
-                role_group TEXT NOT NULL DEFAULT ''
+                role_group TEXT NOT NULL DEFAULT '',
+                manager_name TEXT NOT NULL DEFAULT '',
+                manager_email TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS employees (
                 employee_id TEXT PRIMARY KEY,
@@ -69,13 +83,68 @@ def initialize_database() -> None:
                 location TEXT NOT NULL,
                 role TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-                schedule_location_id TEXT REFERENCES schedule_locations(id) ON DELETE SET NULL
+                schedule_location_id TEXT REFERENCES schedule_locations(id) ON DELETE SET NULL,
+                source_type TEXT NOT NULL DEFAULT 'bamboohr' CHECK (source_type IN ('bamboohr', 'manual')),
+                bamboohr_location TEXT NOT NULL DEFAULT '',
+                bamboohr_active INTEGER NOT NULL DEFAULT 1 CHECK (bamboohr_active IN (0, 1))
             );
             CREATE TABLE IF NOT EXISTS app_migrations (
                 migration_id TEXT PRIMARY KEY
             );
+            CREATE TABLE IF NOT EXISTS application_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            );
             """
         )
+        connection.executemany(
+            "INSERT OR IGNORE INTO application_settings (setting_key, setting_value) VALUES (?, ?)",
+            DEFAULT_APP_CONFIG.items(),
+        )
+        location_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(schedule_locations)")
+        }
+        for column, definition in (
+            ("manager_name", "TEXT NOT NULL DEFAULT ''"),
+            ("manager_email", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if column not in location_columns:
+                connection.execute(
+                    f"ALTER TABLE schedule_locations ADD COLUMN {column} {definition}"
+                )
+        employee_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(employees)")
+        }
+        source_type_missing = "source_type" not in employee_columns
+        for column, definition in (
+            ("source_type", "TEXT NOT NULL DEFAULT 'bamboohr'"),
+            ("bamboohr_location", "TEXT NOT NULL DEFAULT ''"),
+            ("bamboohr_active", "INTEGER NOT NULL DEFAULT 1"),
+        ):
+            if column not in employee_columns:
+                connection.execute(f"ALTER TABLE employees ADD COLUMN {column} {definition}")
+        if source_type_missing:
+            connection.execute(
+                """
+                UPDATE employees
+                SET source_type = CASE WHEN bamboohr_id IS NULL THEN 'manual' ELSE 'bamboohr' END
+                """
+            )
+            connection.execute(
+                """
+                UPDATE employees
+                SET bamboohr_id = 'MANUAL-' || lower(hex(randomblob(12)))
+                WHERE source_type = 'manual' AND (bamboohr_id IS NULL OR bamboohr_id = '')
+                """
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE employees
+                SET bamboohr_id = 'MANUAL-' || lower(hex(randomblob(12)))
+                WHERE source_type = 'manual' AND (bamboohr_id IS NULL OR bamboohr_id = '')
+                """
+            )
         migration = connection.execute(
             "SELECT 1 FROM app_migrations WHERE migration_id = ?",
             ("seed-employee-schedule-locations-v1",),
@@ -125,8 +194,8 @@ def initialize_database() -> None:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO employees
-                    (employee_id, bamboohr_id, name, location, role, active, schedule_location_id)
-                VALUES (?, NULL, ?, ?, ?, 0, NULL)
+                    (employee_id, bamboohr_id, name, location, role, active, schedule_location_id, source_type, bamboohr_active)
+                VALUES (?, NULL, ?, ?, ?, 0, NULL, 'manual', 0)
                 """,
                 UNMAPPED_ROSTER_EMPLOYEE,
             )
@@ -163,6 +232,98 @@ def valid_schedule(payload: object) -> bool:
         and isinstance(payload.get("employees"), list)
         and all(isinstance(employee, dict) for employee in payload["employees"])
     )
+
+
+def current_app_config() -> dict[str, str]:
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+        rows = connection.execute(
+            "SELECT setting_key, setting_value FROM application_settings"
+        ).fetchall()
+    config = DEFAULT_APP_CONFIG | dict(rows)
+    config["apiKeyConfigured"] = str(bool(os.environ.get("BAMBOOHR_API_KEY", "").strip())).lower()
+    return config
+
+
+def bamboohr_endpoint(path: str) -> str:
+    tenant_id = current_app_config()["tenantId"]
+    return f"https://{tenant_id}.bamboohr.com/api/v1/{path.lstrip('/')}"
+
+
+def valid_tenant_id(value: object) -> bool:
+    return isinstance(value, str) and len(value) <= 63 and re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9-]*", value
+    ) is not None
+
+
+def validate_logo_data_url(value: object) -> str | None:
+    if value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > (MAX_LOGO_BYTES * 4 // 3) + 128:
+        return None
+    match = re.fullmatch(r"data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)", value)
+    if not match:
+        return None
+    try:
+        image_bytes = base64.b64decode(match.group(2), validate=True)
+    except ValueError:
+        return None
+    if len(image_bytes) > MAX_LOGO_BYTES:
+        return None
+    image_type = match.group(1)
+    valid_signature = (
+        image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+        if image_type == "png"
+        else image_bytes.startswith(b"\xff\xd8\xff")
+        if image_type == "jpeg"
+        else image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP"
+    )
+    return value if valid_signature else None
+
+
+def valid_app_config(payload: object) -> dict[str, str] | None:
+    if not isinstance(payload, dict):
+        return None
+    business_name = payload.get("businessName")
+    team_name = payload.get("teamName")
+    tenant_id = payload.get("tenantId")
+    primary_color = payload.get("primaryColor")
+    accent_color = payload.get("accentColor")
+    logo_data_url = validate_logo_data_url(payload.get("logoDataUrl", ""))
+    if (
+        not isinstance(business_name, str)
+        or not business_name.strip()
+        or len(business_name.strip()) > 120
+        or not isinstance(team_name, str)
+        or not team_name.strip()
+        or len(team_name.strip()) > 120
+        or not valid_tenant_id(tenant_id)
+        or not isinstance(primary_color, str)
+        or re.fullmatch(r"#[0-9a-fA-F]{6}", primary_color) is None
+        or not isinstance(accent_color, str)
+        or re.fullmatch(r"#[0-9a-fA-F]{6}", accent_color) is None
+        or logo_data_url is None
+    ):
+        return None
+    return {
+        "businessName": business_name.strip(),
+        "teamName": team_name.strip(),
+        "logoDataUrl": logo_data_url,
+        "primaryColor": primary_color.lower(),
+        "accentColor": accent_color.lower(),
+        "tenantId": tenant_id.lower(),
+    }
+
+
+def save_app_config(config: dict[str, str]) -> None:
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        connection.executemany(
+            """
+            INSERT INTO application_settings (setting_key, setting_value)
+            VALUES (?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value
+            """,
+            config.items(),
+        )
 
 
 @app.get("/")
@@ -279,7 +440,444 @@ def directory_employee(row: tuple) -> dict:
         "role": row[4],
         "active": bool(row[5]),
         "scheduleLocationId": row[6],
+        "source": row[7],
+        "bamboohrLocation": row[8],
+        "bamboohrActive": bool(row[9]) if row[7] == "bamboohr" else None,
     }
+
+
+def normalized_employee_id(value: object) -> str:
+    return str(value or "").strip().casefold()
+
+
+def employee_id_in_use(
+    connection: sqlite3.Connection, employee_id: str, exclude_employee_id: str | None = None
+) -> bool:
+    query = "SELECT 1 FROM employees WHERE lower(trim(employee_id)) = lower(trim(?))"
+    parameters: tuple[str, ...] = (employee_id,)
+    if exclude_employee_id is not None:
+        query += " AND employee_id != ?"
+        parameters += (exclude_employee_id,)
+    return connection.execute(query, parameters).fetchone() is not None
+
+
+def fetch_bamboohr_employees() -> list[dict[str, str]]:
+    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("BAMBOOHR_API_KEY is not configured on the app server.")
+    authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
+    cursor = None
+    seen_cursors: set[str] = set()
+    employees: list[dict[str, str]] = []
+    expected_total = None
+
+    while True:
+        parameters = {
+            "fields": "employeeNumber,location",
+            "filter[status]": "active",
+            "page[limit]": "2500",
+        }
+        if cursor:
+            parameters["page[after]"] = cursor
+        outbound = Request(
+            f"{bamboohr_endpoint('employees')}?{urlencode(parameters)}",
+            headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
+            method="GET",
+        )
+        try:
+            with urlopen(outbound, timeout=30) as response:
+                raw_data = response.read(10_000_001)
+        except HTTPError as error:
+            if error.code == 401:
+                raise RuntimeError("BambooHR rejected the configured API key.") from error
+            if error.code == 403:
+                raise RuntimeError(
+                    "BambooHR denied access to the employee list. Check the API key permissions."
+                ) from error
+            raise RuntimeError(f"BambooHR employee sync failed with HTTP {error.code}.") from error
+        except (URLError, TimeoutError, OSError) as error:
+            raise RuntimeError("The app server could not reach BambooHR for employee data.") from error
+        if len(raw_data) > 10_000_000:
+            raise RuntimeError("BambooHR employee response exceeds the allowed size.")
+        try:
+            page = json.loads(raw_data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RuntimeError("BambooHR returned an invalid employee response.") from error
+        if not isinstance(page, dict) or not isinstance(page.get("data"), list):
+            raise RuntimeError("BambooHR returned an invalid employee list.")
+        meta = page.get("meta")
+        page_meta = meta.get("page") if isinstance(meta, dict) else None
+        total = meta.get("total") if isinstance(meta, dict) else None
+        if not isinstance(total, int) or total < 0 or not isinstance(page_meta, dict):
+            raise RuntimeError("BambooHR returned incomplete employee pagination data.")
+        if expected_total is None:
+            expected_total = total
+        elif expected_total != total:
+            raise RuntimeError("The BambooHR employee list changed during synchronization; retry.")
+
+        for item in page["data"]:
+            if not isinstance(item, dict):
+                raise RuntimeError("BambooHR returned an invalid employee record.")
+            status = item.get("status")
+            if status is not None and str(status).casefold() != "active":
+                continue
+            bamboohr_id = item.get("employeeId")
+            employee_number = item.get("employeeNumber")
+            if not isinstance(bamboohr_id, (str, int)) or not str(bamboohr_id).strip():
+                raise RuntimeError("A BambooHR employee record is missing its BambooHR ID.")
+            if not isinstance(employee_number, (str, int)) or not str(employee_number).strip():
+                raise RuntimeError(
+                    f"BambooHR employee {bamboohr_id} is missing Employee #. Complete it in BambooHR before syncing."
+                )
+            first_name = str(item.get("preferredName") or item.get("firstName") or "").strip()
+            last_name = str(item.get("lastName") or "").strip()
+            name = " ".join(part for part in (first_name, last_name) if part)
+            if not name:
+                name = str(item.get("displayName") or "").strip()
+            if not name:
+                raise RuntimeError(
+                    f"BambooHR employee {bamboohr_id} is missing a display name."
+                )
+            employees.append(
+                {
+                    "bamboohrId": str(bamboohr_id).strip(),
+                    "id": str(employee_number).strip(),
+                    "name": name,
+                    "bamboohrLocation": str(item.get("location") or "").strip(),
+                }
+            )
+            if len(employees) > 100_000:
+                raise RuntimeError("BambooHR employee list exceeds the supported size.")
+
+        next_cursor = page_meta.get("nextCursor")
+        if next_cursor is None:
+            break
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+            raise RuntimeError("BambooHR returned an invalid employee page cursor.")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+
+    if expected_total != len(employees):
+        raise RuntimeError(
+            "BambooHR returned an incomplete active employee list; no changes were saved."
+        )
+    if len({employee["bamboohrId"] for employee in employees}) != len(employees):
+        raise RuntimeError("BambooHR returned duplicate internal employee IDs; no changes were saved.")
+    if len({normalized_employee_id(employee["id"]) for employee in employees}) != len(employees):
+        raise RuntimeError("BambooHR returned duplicate Employee # values; no changes were saved.")
+    return employees
+
+
+def bamboo_employee_sync_conflicts(
+    connection: sqlite3.Connection, remote_employees: list[dict[str, str]]
+) -> list[dict]:
+    records = connection.execute(
+        """
+        SELECT employee_id, bamboohr_id, name, location, role, active,
+               schedule_location_id, source_type
+        FROM employees
+        """
+    ).fetchall()
+    if len({normalized_employee_id(row[0]) for row in records}) != len(records):
+        raise RuntimeError(
+            "The app contains duplicate Employee IDs ignoring case; resolve them before syncing."
+        )
+    by_id = {normalized_employee_id(row[0]): row for row in records}
+    by_bamboo_id = {
+        row[1]: row for row in records if row[1] and row[7] == "bamboohr"
+    }
+    conflicts = []
+    for remote in remote_employees:
+        employee = by_bamboo_id.get(remote["bamboohrId"])
+        collision = by_id.get(normalized_employee_id(remote["id"]))
+        if collision and collision[7] == "manual" and (
+            employee is None or collision[0] != employee[0]
+        ):
+            conflicts.append(
+                {
+                    "bamboohrId": remote["bamboohrId"],
+                    "employeeId": remote["id"],
+                    "bamboohrName": remote["name"],
+                    "existingBambooEmployeeId": employee[0] if employee else None,
+                    "manualEmployee": {
+                        "id": collision[0],
+                        "name": collision[2],
+                        "role": collision[4],
+                        "location": collision[3],
+                        "scheduleLocationId": collision[6],
+                        "active": bool(collision[5]),
+                    },
+                }
+            )
+        elif collision and collision[7] == "bamboohr" and (
+            employee is None or collision[0] != employee[0]
+        ):
+            raise RuntimeError(
+                f"Employee # {remote['id']} is already assigned to another BambooHR record."
+            )
+    return conflicts
+
+
+def mapped_bamboohr_location(connection: sqlite3.Connection, location: str) -> str:
+    if not location:
+        return ""
+    rows = connection.execute(
+        "SELECT DISTINCT location FROM schedule_locations"
+    ).fetchall()
+    matches = [
+        row[0] for row in rows
+        if normalized_employee_id(row[0]) == normalized_employee_id(location)
+    ]
+    return matches[0] if len(matches) == 1 else ""
+
+
+@app.post("/api/bamboohr/employees/sync")
+def sync_bamboohr_employees():
+    payload = request.get_json(silent=True) or {}
+    resolutions = payload.get("resolutions", []) if isinstance(payload, dict) else None
+    if not isinstance(resolutions, list):
+        return jsonify(error="Employee reconciliation choices must be a list."), 400
+    try:
+        remote_employees = fetch_bamboohr_employees()
+    except RuntimeError as error:
+        return jsonify(error=str(error)), 502 if "not configured" not in str(error) else 503
+
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            conflicts = bamboo_employee_sync_conflicts(connection, remote_employees)
+        except RuntimeError as error:
+            return jsonify(error=str(error)), 409
+        if conflicts and not resolutions:
+            return jsonify(requiresReview=True, conflicts=conflicts)
+        conflict_by_bamboo_id = {conflict["bamboohrId"]: conflict for conflict in conflicts}
+        resolution_by_bamboo_id = {}
+        for resolution in resolutions:
+            if (
+                not isinstance(resolution, dict)
+                or not isinstance(resolution.get("bamboohrId"), str)
+                or resolution.get("bamboohrId") in resolution_by_bamboo_id
+                or not isinstance(resolution.get("samePerson"), bool)
+            ):
+                return jsonify(error="Each employee conflict needs one valid reconciliation choice."), 400
+            resolution_by_bamboo_id[resolution["bamboohrId"]] = resolution
+        if set(resolution_by_bamboo_id) != set(conflict_by_bamboo_id):
+            if conflicts:
+                return jsonify(requiresReview=True, conflicts=conflicts)
+            return jsonify(error="The BambooHR list changed; refresh it and review again."), 409
+        for bamboohr_id, resolution in resolution_by_bamboo_id.items():
+            conflict = conflict_by_bamboo_id[bamboohr_id]
+            if resolution.get("employeeId") != conflict["manualEmployee"]["id"]:
+                return jsonify(error="A manual employee changed during reconciliation; refresh and review again."), 409
+            if not resolution["samePerson"]:
+                new_id = resolution.get("newManualEmployeeId")
+                if (
+                    not isinstance(new_id, str)
+                    or not new_id.strip()
+                    or normalized_employee_id(new_id) == normalized_employee_id(conflict["employeeId"])
+                ):
+                    return jsonify(error="Enter a new, unique Employee ID for the different manual employee."), 400
+        if conflicts:
+            existing_ids = {
+                normalized_employee_id(row[0]): row[0]
+                for row in connection.execute("SELECT employee_id FROM employees")
+            }
+            remote_ids = {
+                normalized_employee_id(employee["id"]) for employee in remote_employees
+            }
+            proposed_ids = set()
+            for bamboohr_id, resolution in resolution_by_bamboo_id.items():
+                if resolution["samePerson"]:
+                    continue
+                replacement_id = resolution["newManualEmployeeId"].strip()
+                normalized_replacement = normalized_employee_id(replacement_id)
+                manual_id = conflict_by_bamboo_id[bamboohr_id]["manualEmployee"]["id"]
+                if (
+                    normalized_replacement in existing_ids
+                    and existing_ids[normalized_replacement] != manual_id
+                ):
+                    return jsonify(error=f"Employee ID {replacement_id} is already in use."), 409
+                if normalized_replacement in remote_ids or normalized_replacement in proposed_ids:
+                    return jsonify(error=f"Employee ID {replacement_id} is already in use."), 409
+                proposed_ids.add(normalized_replacement)
+
+        by_bamboo_id = {
+            row[1]: row
+            for row in connection.execute(
+                """
+                SELECT employee_id, bamboohr_id, name, location, role, active,
+                       schedule_location_id, source_type
+                FROM employees WHERE source_type = 'bamboohr'
+                """
+            ).fetchall()
+        }
+        by_employee_id = {
+            normalized_employee_id(row[0]): row
+            for row in connection.execute(
+                """
+                SELECT employee_id, bamboohr_id, name, location, role, active,
+                       schedule_location_id, source_type
+                FROM employees
+                """
+            ).fetchall()
+        }
+        added = updated = inactivated = merged = rekeyed = 0
+        employee_id_changes = []
+        for remote in remote_employees:
+            existing = by_bamboo_id.get(remote["bamboohrId"])
+            resolution = resolution_by_bamboo_id.get(remote["bamboohrId"])
+            collision = by_employee_id.get(normalized_employee_id(remote["id"]))
+            if collision and collision[7] == "manual" and (
+                existing is None or collision[0] != existing[0]
+            ):
+                if resolution["samePerson"]:
+                    if existing and existing[0] != collision[0]:
+                        connection.execute(
+                            "DELETE FROM employees WHERE employee_id = ?",
+                            (collision[0],),
+                        )
+                        if not existing[4]:
+                            connection.execute(
+                                """
+                                UPDATE employees
+                                SET location = ?, role = ?, active = ?, schedule_location_id = ?
+                                WHERE employee_id = ?
+                                """,
+                                (
+                                    collision[3], collision[4], collision[5],
+                                    collision[6], existing[0],
+                                ),
+                            )
+                        connection.execute(
+                            "UPDATE employees SET employee_id = ? WHERE employee_id = ?",
+                            (remote["id"], existing[0]),
+                        )
+                        employee_id_changes.append(
+                            {
+                                "oldId": existing[0],
+                                "newId": remote["id"],
+                                "source": "bamboohr",
+                                "bamboohrId": remote["bamboohrId"],
+                                "mergedManualId": collision[0],
+                            }
+                        )
+                        rekeyed += 1
+                        existing = (
+                            remote["id"], existing[1], existing[2],
+                            collision[3] if not existing[4] else existing[3],
+                            collision[4] if not existing[4] else existing[4],
+                            collision[5] if not existing[4] else existing[5],
+                            collision[6] if not existing[4] else existing[6],
+                            existing[7],
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE employees
+                            SET bamboohr_id = ?, name = ?, bamboohr_location = ?,
+                                source_type = 'bamboohr', bamboohr_active = 1
+                            WHERE employee_id = ? AND source_type = 'manual'
+                            """,
+                            (
+                                remote["bamboohrId"], remote["name"],
+                                remote["bamboohrLocation"], collision[0],
+                            ),
+                        )
+                        existing = connection.execute(
+                            """
+                            SELECT employee_id, bamboohr_id, name, location, role, active,
+                                   schedule_location_id, source_type
+                            FROM employees WHERE employee_id = ?
+                            """,
+                            (collision[0],),
+                        ).fetchone()
+                    merged += 1
+                else:
+                    replacement_id = resolution["newManualEmployeeId"].strip()
+                    connection.execute(
+                        "UPDATE employees SET employee_id = ? WHERE employee_id = ?",
+                        (replacement_id, collision[0]),
+                    )
+                    employee_id_changes.append(
+                        {"oldId": collision[0], "newId": replacement_id, "source": "manual"}
+                    )
+                    rekeyed += 1
+            if existing is None:
+                mapped_location = mapped_bamboohr_location(
+                    connection, remote["bamboohrLocation"]
+                )
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id, bamboohr_id, name, location, role, active,
+                         schedule_location_id, source_type, bamboohr_location, bamboohr_active)
+                    VALUES (?, ?, ?, ?, '', 0, NULL, 'bamboohr', ?, 1)
+                    """,
+                    (
+                        remote["id"], remote["bamboohrId"], remote["name"],
+                        mapped_location, remote["bamboohrLocation"],
+                    ),
+                )
+                added += 1
+            else:
+                old_id = existing[0]
+                if normalized_employee_id(old_id) != normalized_employee_id(remote["id"]):
+                    connection.execute(
+                        "UPDATE employees SET employee_id = ? WHERE employee_id = ?",
+                        (remote["id"], old_id),
+                    )
+                    employee_id_changes.append(
+                        {
+                            "oldId": old_id,
+                            "newId": remote["id"],
+                            "source": "bamboohr",
+                            "bamboohrId": remote["bamboohrId"],
+                        }
+                    )
+                    rekeyed += 1
+                connection.execute(
+                    """
+                    UPDATE employees
+                    SET name = ?, bamboohr_id = ?, bamboohr_location = ?,
+                        source_type = 'bamboohr', bamboohr_active = 1
+                    WHERE employee_id = ?
+                    """,
+                    (
+                        remote["name"], remote["bamboohrId"],
+                        remote["bamboohrLocation"], remote["id"],
+                    ),
+                )
+                updated += 1
+
+        active_bamboo_ids = [employee["bamboohrId"] for employee in remote_employees]
+        if active_bamboo_ids:
+            placeholders = ",".join("?" for _ in active_bamboo_ids)
+            inactive_cursor = connection.execute(
+                f"""
+                UPDATE employees SET active = 0, bamboohr_active = 0
+                WHERE source_type = 'bamboohr' AND bamboohr_id NOT IN ({placeholders})
+                  AND (active != 0 OR bamboohr_active != 0)
+                """,
+                active_bamboo_ids,
+            )
+        else:
+            inactive_cursor = connection.execute(
+                """
+                UPDATE employees SET active = 0, bamboohr_active = 0
+                WHERE source_type = 'bamboohr' AND (active != 0 OR bamboohr_active != 0)
+                """
+            )
+        inactivated = inactive_cursor.rowcount
+        return jsonify(
+            synced=len(remote_employees),
+            added=added,
+            updated=updated,
+            merged=merged,
+            rekeyed=rekeyed,
+            inactivated=inactivated,
+            employeeIdChanges=employee_id_changes,
+            syncedAt=datetime.now(timezone.utc).isoformat(),
+        )
 
 
 @app.get("/api/employees")
@@ -287,9 +885,10 @@ def list_employees():
     with closing(sqlite3.connect(DATABASE_PATH)) as connection:
         rows = connection.execute(
             """
-            SELECT employee_id, bamboohr_id, name, location, role, active, schedule_location_id
+            SELECT employee_id, bamboohr_id, name, location, role, active, schedule_location_id,
+                   source_type, bamboohr_location, bamboohr_active
             FROM employees
-            ORDER BY active DESC, name COLLATE NOCASE
+            ORDER BY name COLLATE NOCASE
             """
         ).fetchall()
     return jsonify(employees=[directory_employee(row) for row in rows])
@@ -323,15 +922,190 @@ def update_employee_statuses():
     return jsonify(employeeIds=employee_ids, active=active)
 
 
+@app.put("/api/employees/roles")
+def update_employee_roles():
+    payload = request.get_json(silent=True)
+    employee_ids = payload.get("employeeIds") if isinstance(payload, dict) else None
+    role = payload.get("role") if isinstance(payload, dict) else None
+    if (
+        not isinstance(employee_ids, list)
+        or not employee_ids
+        or any(not isinstance(employee_id, str) or not employee_id.strip() for employee_id in employee_ids)
+        or len(employee_ids) != len(set(employee_ids))
+        or not isinstance(role, str)
+        or not role.strip()
+    ):
+        return jsonify(error="Select employees and provide one role to assign."), 400
+    role = role.strip()
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        rows = connection.execute(
+            """
+            SELECT employee_id, location, role, active, schedule_location_id
+            FROM employees
+            WHERE employee_id IN ({})
+            """.format(",".join("?" for _ in employee_ids)),
+            employee_ids,
+        ).fetchall()
+        if len(rows) != len(employee_ids):
+            return jsonify(error="One or more selected employees were not found."), 404
+        for employee in rows:
+            if employee[4] and not role_matches_schedule_group(
+                role,
+                connection.execute(
+                    "SELECT role_group FROM schedule_locations WHERE id = ?",
+                    (employee[4],),
+                ).fetchone()[0],
+            ):
+                return jsonify(
+                    error=f"The role {role} does not match {employee[0]}'s schedule location. Change the schedule location first."
+                ), 400
+        changed_ids = [row[0] for row in rows if row[2] != role]
+        if changed_ids:
+            placeholders = ",".join("?" for _ in changed_ids)
+            connection.execute(
+                f"""
+                UPDATE employees SET role = ?, active = 0
+                WHERE employee_id IN ({placeholders})
+                """,
+                [role, *changed_ids],
+            )
+    return jsonify(role=role, employeeIds=employee_ids, deactivatedIds=changed_ids)
+
+
+@app.put("/api/employees/import-review")
+def confirm_imported_employee_mappings():
+    payload = request.get_json(silent=True)
+    mappings = payload.get("employees") if isinstance(payload, dict) else None
+    if not isinstance(mappings, list) or not mappings:
+        return jsonify(error="Approve at least one valid employee mapping."), 400
+    seen_ids = set()
+    normalized_mappings = []
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            return jsonify(error="The employee mapping review contains an invalid row."), 400
+        employee_id = mapping.get("id")
+        role = mapping.get("role")
+        location = mapping.get("location")
+        schedule_location_id = mapping.get("scheduleLocationId")
+        if (
+            not isinstance(employee_id, str)
+            or not employee_id.strip()
+            or not isinstance(mapping.get("name"), str)
+            or not mapping["name"].strip()
+            or not isinstance(location, str)
+            or not location.strip()
+            or not isinstance(role, str)
+            or not role.strip()
+            or not isinstance(mapping.get("addManual"), bool)
+        ):
+            return jsonify(error="Each mapping needs an Employee ID, name, location, role, and manual-add choice."), 400
+        normalized_id = normalized_employee_id(employee_id)
+        if normalized_id in seen_ids:
+            return jsonify(error=f"Employee ID {employee_id} appears more than once in the review."), 400
+        seen_ids.add(normalized_id)
+        if schedule_location_id is not None and not isinstance(schedule_location_id, str):
+            return jsonify(error="A schedule location selection is invalid."), 400
+        normalized_mappings.append(
+            {
+                **mapping,
+                "id": employee_id.strip(),
+                "name": mapping["name"].strip(),
+                "location": location.strip(),
+                "role": role.strip(),
+                "scheduleLocationId": schedule_location_id.strip() or None
+                if isinstance(schedule_location_id, str)
+                else None,
+            }
+        )
+    updated = added = deactivated = 0
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        existing_rows = connection.execute(
+            """
+            SELECT employee_id, name, location, role, active,
+                   schedule_location_id, source_type
+            FROM employees
+            """
+        ).fetchall()
+        if len({normalized_employee_id(row[0]) for row in existing_rows}) != len(existing_rows):
+            return jsonify(error="Resolve duplicate Employee IDs before importing mappings."), 409
+        current_by_id = {
+            normalized_employee_id(row[0]): row for row in existing_rows
+        }
+        plans = []
+        for mapping in normalized_mappings:
+            current = current_by_id.get(normalized_employee_id(mapping["id"]))
+            if current is None and not mapping["addManual"]:
+                plans.append((mapping, None))
+                continue
+            schedule_location_id = mapping["scheduleLocationId"]
+            if schedule_location_id:
+                schedule = connection.execute(
+                    "SELECT location, role_group FROM schedule_locations WHERE id = ?",
+                    (schedule_location_id,),
+                ).fetchone()
+                if (
+                    not schedule
+                    or schedule[0] != mapping["location"]
+                    or not role_matches_schedule_group(mapping["role"], schedule[1])
+                ):
+                    return jsonify(error=f"Schedule location does not match {mapping['name']}."), 400
+            plans.append((mapping, current))
+
+        for mapping, current in plans:
+            employee_id = mapping["id"]
+            role = mapping["role"]
+            location_name = mapping["location"]
+            schedule_location_id = mapping["scheduleLocationId"]
+            if current is None:
+                if not mapping["addManual"]:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id, bamboohr_id, name, location, role, active,
+                         schedule_location_id, source_type, bamboohr_location, bamboohr_active)
+                    VALUES (?, ?, ?, ?, ?, 0, ?, 'manual', '', 0)
+                    """,
+                    (
+                        employee_id,
+                        "MANUAL-" + secrets.token_hex(12).upper(),
+                        mapping["name"],
+                        location_name,
+                        role,
+                        schedule_location_id,
+                    ),
+                )
+                added += 1
+                continue
+            changed = current[2] != location_name or current[3] != role
+            active = 0 if changed and current[4] else current[4]
+            cursor = connection.execute(
+                """
+                UPDATE employees
+                SET location = ?, role = ?, schedule_location_id = ?, active = ?
+                WHERE employee_id = ?
+                """,
+                (location_name, role, schedule_location_id, active, current[0]),
+            )
+            updated += cursor.rowcount
+            if changed and current[4]:
+                deactivated += 1
+    return jsonify(updated=updated, addedManual=added, deactivated=deactivated)
+
+
 def valid_employee(payload: object, *, require_bamboo_id: bool = True) -> bool:
     if not isinstance(payload, dict):
         return False
-    fields = ("id", "name", "location", "role")
+    fields = ("id", "name", "location")
     if any(not isinstance(payload.get(field), str) or not payload[field].strip() for field in fields):
+        return False
+    role = payload.get("role")
+    if not isinstance(role, str) or not role.strip():
         return False
     bamboohr_id = payload.get("bamboohrId")
     if require_bamboo_id and (
-        not isinstance(bamboohr_id, str) or not bamboohr_id.strip().isdigit()
+        not isinstance(bamboohr_id, str) or not bamboohr_id.strip()
     ):
         return False
     return isinstance(payload.get("active"), bool) and (
@@ -368,48 +1142,102 @@ def employee_location_exists(connection: sqlite3.Connection, payload: dict) -> b
     )
 
 
-def directory_conflict(error: sqlite3.IntegrityError):
+def directory_conflict():
     return jsonify(error="Employee ID or BambooHR ID is already in use."), 409
 
 
 @app.post("/api/employees")
 def create_employee():
     payload = request.get_json(silent=True)
-    if not valid_employee(payload):
-        return jsonify(error="Employee ID, BambooHR ID, name, location, role, and active status are required."), 400
+    if (
+        not isinstance(payload, dict)
+        or any(
+            not isinstance(payload.get(field), str) or not payload[field].strip()
+            for field in ("id", "name", "location")
+        )
+        or not isinstance(payload.get("role", ""), str)
+        or not payload.get("role", "").strip()
+        or payload.get("active", False) is not False
+        or payload.get("scheduleLocationId") not in (None, "")
+    ):
+        return jsonify(error="A manual employee needs an Employee ID, name, and location and must start inactive."), 400
+    employee_id = payload["id"].strip()
+    role = payload.get("role", "").strip()
+    bamboohr_id = "MANUAL-" + secrets.token_hex(12).upper()
+    employee_payload = {
+        "id": employee_id,
+        "bamboohrId": bamboohr_id,
+        "name": payload["name"].strip(),
+        "location": payload["location"].strip(),
+        "role": role,
+        "active": False,
+        "scheduleLocationId": None,
+        "source": "manual",
+    }
     with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
-        if not employee_location_exists(connection, payload):
+        if employee_id_in_use(connection, employee_id):
+            return directory_conflict()
+        if not employee_location_exists(connection, employee_payload):
             return jsonify(error="The assigned schedule location does not match the employee's location."), 400
         try:
             connection.execute(
                 """
                 INSERT INTO employees
-                    (employee_id, bamboohr_id, name, location, role, active, schedule_location_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (employee_id, bamboohr_id, name, location, role, active, schedule_location_id,
+                     source_type, bamboohr_location, bamboohr_active)
+                VALUES (?, ?, ?, ?, ?, 0, NULL, 'manual', '', 0)
                 """,
                 (
-                    payload["id"].strip(),
-                    payload["bamboohrId"].strip(),
-                    payload["name"].strip(),
-                    payload["location"].strip(),
-                    payload["role"].strip(),
-                    int(payload["active"]),
-                    payload.get("scheduleLocationId"),
+                    employee_payload["id"],
+                    bamboohr_id,
+                    employee_payload["name"],
+                    employee_payload["location"],
+                    role,
                 ),
             )
-        except sqlite3.IntegrityError as error:
-            return directory_conflict(error)
-    return jsonify(employee=payload), 201
+        except sqlite3.IntegrityError:
+            return directory_conflict()
+    return jsonify(employee=employee_payload), 201
 
 
 @app.put("/api/employees/<path:employee_id>")
 def update_employee(employee_id: str):
     payload = request.get_json(silent=True)
     if not valid_employee(payload):
-        return jsonify(error="Employee ID, BambooHR ID, name, location, role, and active status are required."), 400
+        return jsonify(error="Employee ID, name, location, role, and active status are required."), 400
     with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        existing = connection.execute(
+            """
+            SELECT employee_id, bamboohr_id, name, location, role, active,
+                   schedule_location_id, source_type
+            FROM employees WHERE employee_id = ?
+            """,
+            (employee_id,),
+        ).fetchone()
+        if not existing:
+            return jsonify(error="Employee was not found."), 404
+        source_type = existing[7]
+        if source_type == "bamboohr":
+            payload = {
+                **payload,
+                "id": existing[0],
+                "bamboohrId": existing[1],
+                "name": existing[2],
+            }
+        else:
+            payload = {
+                **payload,
+                "bamboohrId": existing[1],
+                "active": bool(payload["active"]),
+            }
+        if employee_id_in_use(connection, payload["id"].strip(), employee_id):
+            return directory_conflict()
         if not employee_location_exists(connection, payload):
             return jsonify(error="The assigned schedule location does not match the employee's location."), 400
+        if payload["active"] and not payload["role"].strip():
+            return jsonify(error="Assign a role before making the employee active."), 400
+        if payload.get("scheduleLocationId") and not payload["role"].strip():
+            return jsonify(error="Assign a role before mapping the employee to a schedule location."), 400
         try:
             cursor = connection.execute(
                 """
@@ -429,8 +1257,8 @@ def update_employee(employee_id: str):
                     employee_id,
                 ),
             )
-        except sqlite3.IntegrityError as error:
-            return directory_conflict(error)
+        except sqlite3.IntegrityError:
+            return directory_conflict()
         if cursor.rowcount == 0:
             return jsonify(error="Employee was not found."), 404
     return jsonify(employee=payload)
@@ -439,11 +1267,16 @@ def update_employee(employee_id: str):
 @app.delete("/api/employees/<path:employee_id>")
 def delete_employee(employee_id: str):
     with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        employee = connection.execute(
+            "SELECT source_type FROM employees WHERE employee_id = ?", (employee_id,)
+        ).fetchone()
+        if not employee:
+            return jsonify(error="Employee was not found."), 404
+        if employee[0] != "manual":
+            return jsonify(error="BambooHR employees cannot be deleted; make them inactive instead."), 409
         cursor = connection.execute(
             "DELETE FROM employees WHERE employee_id = ?", (employee_id,)
         )
-        if cursor.rowcount == 0:
-            return jsonify(error="Employee was not found."), 404
     return jsonify(id=employee_id)
 
 
@@ -453,6 +1286,7 @@ def list_schedule_locations():
         rows = connection.execute(
             """
             SELECT s.id, s.name, s.bamboo_schedule_id, s.location, s.role_group,
+                   s.manager_name, s.manager_email,
                    COUNT(e.employee_id)
             FROM schedule_locations s
             LEFT JOIN employees e ON e.schedule_location_id = s.id
@@ -468,7 +1302,9 @@ def list_schedule_locations():
                 "bambooScheduleId": row[2],
                 "location": row[3],
                 "roleGroup": row[4],
-                "employeeCount": row[5],
+                "managerName": row[5],
+                "managerEmail": row[6],
+                "employeeCount": row[7],
             }
             for row in rows
         ]
@@ -476,9 +1312,17 @@ def list_schedule_locations():
 
 
 def valid_schedule_location(payload: object) -> bool:
-    return isinstance(payload, dict) and all(
+    if not isinstance(payload, dict) or not all(
         isinstance(payload.get(field), str) and payload[field].strip()
-        for field in ("name", "bambooScheduleId", "location")
+        for field in ("name", "bambooScheduleId", "location", "managerName", "managerEmail")
+    ):
+        return False
+    manager_name = payload["managerName"].strip()
+    manager_email = payload["managerEmail"].strip()
+    return (
+        not re.search(r"[\r\n<>]", manager_name)
+        and re.fullmatch(r"[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+", manager_email)
+        is not None
     )
 
 
@@ -490,15 +1334,18 @@ def schedule_location_conflict(error: sqlite3.IntegrityError):
 def create_schedule_location():
     payload = request.get_json(silent=True)
     if not valid_schedule_location(payload):
-        return jsonify(error="Schedule name, BambooHR schedule ID, and location are required."), 400
+        return jsonify(
+            error="Schedule name, BambooHR schedule ID, app location, manager name, and valid manager email are required."
+        ), 400
     location_id = os.urandom(16).hex()
     with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
         try:
             connection.execute(
                 """
                 INSERT INTO schedule_locations
-                    (id, name, bamboo_schedule_id, location, role_group)
-                VALUES (?, ?, ?, ?, ?)
+                    (id, name, bamboo_schedule_id, location, role_group,
+                     manager_name, manager_email)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     location_id,
@@ -506,6 +1353,8 @@ def create_schedule_location():
                     payload["bambooScheduleId"].strip(),
                     payload["location"].strip(),
                     str(payload.get("roleGroup", "")).strip(),
+                    payload["managerName"].strip(),
+                    payload["managerEmail"].strip(),
                 ),
             )
         except sqlite3.IntegrityError as error:
@@ -517,7 +1366,9 @@ def create_schedule_location():
 def update_schedule_location(location_id: str):
     payload = request.get_json(silent=True)
     if not valid_schedule_location(payload):
-        return jsonify(error="Schedule name, BambooHR schedule ID, and location are required."), 400
+        return jsonify(
+            error="Schedule name, BambooHR schedule ID, app location, manager name, and valid manager email are required."
+        ), 400
     with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
         assigned_roles = connection.execute(
             "SELECT role FROM employees WHERE schedule_location_id = ?",
@@ -532,7 +1383,8 @@ def update_schedule_location(location_id: str):
             cursor = connection.execute(
                 """
                 UPDATE schedule_locations
-                SET name = ?, bamboo_schedule_id = ?, location = ?, role_group = ?
+                SET name = ?, bamboo_schedule_id = ?, location = ?, role_group = ?,
+                    manager_name = ?, manager_email = ?
                 WHERE id = ?
                 """,
                 (
@@ -540,6 +1392,8 @@ def update_schedule_location(location_id: str):
                     payload["bambooScheduleId"].strip(),
                     payload["location"].strip(),
                     str(payload.get("roleGroup", "")).strip(),
+                    payload["managerName"].strip(),
+                    payload["managerEmail"].strip(),
                     location_id,
                 ),
             )
@@ -569,6 +1423,20 @@ def delete_schedule_location(location_id: str):
         if cursor.rowcount == 0:
             return jsonify(error="Schedule location was not found."), 404
     return jsonify(id=location_id)
+
+
+@app.get("/api/app-config")
+def get_application_config():
+    return jsonify(current_app_config())
+
+
+@app.put("/api/app-config")
+def update_application_config():
+    config = valid_app_config(request.get_json(silent=True))
+    if config is None:
+        return jsonify(error="Provide valid business, team, logo, color, and BambooHR tenant settings."), 400
+    save_app_config(config)
+    return jsonify(current_app_config())
 
 
 @app.put("/api/schedule-locations/<path:location_id>/employees")
@@ -675,7 +1543,8 @@ def bamboo_payloads(
     payloads = {}
     employee_rows = connection.execute(
         """
-        SELECT employee_id, bamboohr_id, active, schedule_location_id, location, role
+        SELECT employee_id, bamboohr_id, active, schedule_location_id, location, role,
+               source_type
         FROM employees
         """
     ).fetchall()
@@ -706,6 +1575,8 @@ def bamboo_payloads(
             if assigned["slots"][day] != start:
                 continue
             employee = employees.get(str(assigned.get("id", "")))
+            if employee and employee[6] == "manual":
+                continue
             if not employee or not employee[2] or not employee[1]:
                 raise ValueError(
                     f"Employee {assigned.get('name', assigned.get('id', ''))} is inactive "
@@ -778,7 +1649,9 @@ def bamboo_payloads(
                 payload["employeeNames"].append(assigned.get("name", assigned["id"]))
 
     if not payloads:
-        raise ValueError("The selected shifts have no assigned employees.")
+        raise ValueError(
+            "The selected shifts have no BambooHR employees to publish; manually added employees are excluded."
+        )
     return sorted(payloads.values(), key=lambda item: (item["start"], item["scheduleName"]))
 
 
@@ -802,6 +1675,103 @@ def bamboohr_status():
     return jsonify(configured=bool(os.environ.get("BAMBOOHR_API_KEY", "").strip()))
 
 
+@app.post("/api/bamboohr/validate-key")
+def validate_bamboohr_key():
+    payload = request.get_json(silent=True)
+    tenant_id = payload.get("tenantId") if isinstance(payload, dict) else None
+    api_key = payload.get("apiKey") if isinstance(payload, dict) else None
+    if (
+        not valid_tenant_id(tenant_id)
+        or not isinstance(api_key, str)
+        or not api_key.strip()
+        or len(api_key) > 4096
+        or any(character in api_key for character in "\r\n:")
+    ):
+        return jsonify(error="Enter a valid BambooHR tenant ID and API key."), 400
+
+    tenant_id = tenant_id.lower()
+    authorization = base64.b64encode(f"{api_key.strip()}:x".encode("utf-8")).decode("ascii")
+    outbound = Request(
+        f"{bamboohr_endpoint_for_tenant(tenant_id, 'time_off/whos_out')}?"
+        f"{urlencode({'start': date.today().isoformat(), 'end': date.today().isoformat()})}",
+        headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
+        method="GET",
+    )
+    try:
+        with urlopen(outbound, timeout=20) as response:
+            response.read(2048)
+    except HTTPError as error:
+        if error.code == 401:
+            return jsonify(error="BambooHR rejected this API key for the supplied tenant."), 401
+        if error.code == 403:
+            return jsonify(error="BambooHR denied this key access to the time-off endpoint."), 403
+        return jsonify(error=f"BambooHR key validation failed with HTTP {error.code}."), 502
+    except (URLError, TimeoutError, OSError):
+        return jsonify(error="The app server could not reach BambooHR to validate the key."), 502
+
+    now = datetime.now(timezone.utc)
+    for token, (_, _, expires_at) in list(_validated_bamboo_keys.items()):
+        if expires_at <= now:
+            del _validated_bamboo_keys[token]
+    promotion_token = secrets.token_urlsafe(32)
+    _validated_bamboo_keys[promotion_token] = (
+        tenant_id,
+        api_key.strip(),
+        now + timedelta(minutes=10),
+    )
+    return jsonify(valid=True, tenantId=tenant_id, promotionToken=promotion_token)
+
+
+def bamboohr_endpoint_for_tenant(tenant_id: str, path: str) -> str:
+    return f"https://{tenant_id}.bamboohr.com/api/v1/{path.lstrip('/')}"
+
+
+@app.post("/api/bamboohr/promote-key")
+def promote_bamboohr_key():
+    payload = request.get_json(silent=True)
+    token = payload.get("promotionToken") if isinstance(payload, dict) else None
+    tenant_id = payload.get("tenantId") if isinstance(payload, dict) else None
+    validation = _validated_bamboo_keys.get(token) if isinstance(token, str) else None
+    now = datetime.now(timezone.utc)
+    if (
+        validation is None
+        or validation[2] <= now
+        or not valid_tenant_id(tenant_id)
+        or tenant_id.lower() != validation[0]
+        or current_app_config()["tenantId"] != validation[0]
+    ):
+        if isinstance(token, str):
+            _validated_bamboo_keys.pop(token, None)
+        return jsonify(error="Test the API key successfully for the currently saved tenant before promoting it."), 400
+
+    key_path = ENV_PATH
+    previous_dotenv_key = dotenv_values(key_path).get("BAMBOOHR_API_KEY")
+    try:
+        success, _, _ = set_key(key_path, "BAMBOOHR_API_KEY", validation[1])
+        if not success:
+            return jsonify(error="The API key could not be saved to the app server .env file."), 500
+        try:
+            save_app_config({"tenantId": validation[0]})
+        except sqlite3.Error:
+            if previous_dotenv_key is None:
+                rollback_succeeded = unset_key(key_path, "BAMBOOHR_API_KEY")[0]
+            else:
+                rollback_succeeded = set_key(
+                    key_path, "BAMBOOHR_API_KEY", previous_dotenv_key
+                )[0]
+            if not rollback_succeeded:
+                return jsonify(
+                    error="The app settings could not be saved and the API key rollback failed; review the server .env file."
+                ), 500
+            return jsonify(error="The app settings could not be saved; the API key change was rolled back."), 500
+    except OSError:
+        return jsonify(error="The API key could not be written to the app server .env file."), 500
+
+    os.environ["BAMBOOHR_API_KEY"] = validation[1]
+    del _validated_bamboo_keys[token]
+    return jsonify(promoted=True, tenantId=validation[0])
+
+
 @app.get("/api/bamboohr/time-offs")
 def bamboohr_time_offs():
     start_text, end_text = request.args.get("start", ""), request.args.get("end", "")
@@ -818,7 +1788,7 @@ def bamboohr_time_offs():
 
     authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
     outbound = Request(
-        f"{BAMBOOHR_TIME_OFF_URL}?{urlencode({'start': start_text, 'end': end_text})}",
+        f"{bamboohr_endpoint('time_off/whos_out')}?{urlencode({'start': start_text, 'end': end_text})}",
         headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
         method="GET",
     )
@@ -907,7 +1877,7 @@ def publish_bamboohr_schedules():
             if key not in {"scheduleName", "employeeNames"}
         }
         outbound = Request(
-            BAMBOOHR_SCHEDULES_URL,
+            bamboohr_endpoint("scheduling/shifts"),
             data=json.dumps(request_payload).encode("utf-8"),
             headers={
                 "Accept": "application/json",

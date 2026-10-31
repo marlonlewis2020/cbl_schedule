@@ -1761,6 +1761,20 @@ dialog input[type=checkbox]{
     font-weight:600;
     color:#176454
 }
+#employeeSyncDialog{
+    width:min(820px,92vw)
+}
+#sourceImportReviewDialog{
+    width:min(1200px,96vw)
+}
+#sourceImportReviewDialog .tablewrap{
+    max-height:58vh;
+    overflow:auto
+}
+#sourceImportReviewDialog select{
+    min-width:125px;
+    max-width:220px
+}
 [data-theme=dark] dialog{
     background:#142e39;
     color:#e7f0f4
