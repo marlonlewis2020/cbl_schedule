@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 import scheduler
@@ -63,6 +64,18 @@ class AcceptedScheduleApiTests(unittest.TestCase):
         self.assertEqual(
             listing.get_json()["schedules"][0]["schedule"]["employees"][0]["slots"][0],
             8.5,
+        )
+
+    def test_accepted_schedule_can_be_unaccepted(self):
+        self.assertEqual(self.client.post("/api/accepted-shifts", json=self.schedule).status_code, 200)
+
+        deleted = self.client.delete("/api/accepted-shifts/pool%7C2026-11-02%7Cr1")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.get_json()["id"], self.schedule["id"])
+        self.assertEqual(self.client.get("/api/accepted-shifts").get_json()["schedules"], [])
+        self.assertEqual(
+            self.client.delete("/api/accepted-shifts/pool%7C2026-11-02%7Cr1").status_code,
+            404,
         )
 
     def test_rejects_malformed_schedule(self):
@@ -304,6 +317,106 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         }
         self.assertEqual(self.client.post("/api/accepted-shifts", json=schedule).status_code, 200)
         return schedule
+
+    def test_bamboo_time_off_endpoint_filters_approved_period_records(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(
+                    [
+                        {
+                            "id": 1,
+                            "type": "timeOff",
+                            "status": "approved",
+                            "employeeId": 901033,
+                            "name": "Candino Boothe",
+                            "start": "2026-11-03",
+                            "end": "2026-11-04",
+                        },
+                        {
+                            "type": "timeOff",
+                            "status": "denied",
+                            "name": "Denied Employee",
+                            "start": "2026-11-03",
+                            "end": "2026-11-04",
+                        },
+                        {
+                            "type": "holiday",
+                            "name": "Company holiday",
+                            "start": "2026-11-03",
+                            "end": "2026-11-04",
+                        },
+                        {
+                            "type": "timeOff",
+                            "name": "Outside period",
+                            "start": "2026-12-01",
+                            "end": "2026-12-02",
+                        },
+                    ]
+                ).encode()
+
+        with patch.dict(os.environ, {"BAMBOOHR_API_KEY": "test-key"}), patch(
+            "scheduler.urlopen", return_value=FakeResponse()
+        ) as open_url:
+            response = self.client.get(
+                "/api/bamboohr/time-offs?start=2026-11-02&end=2026-11-08"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["entries"],
+            [
+                {
+                    "id": 1,
+                    "type": "timeOff",
+                    "employeeId": 901033,
+                    "name": "Candino Boothe",
+                    "start": "2026-11-03",
+                    "end": "2026-11-04",
+                }
+            ],
+        )
+        outbound = open_url.call_args.args[0]
+        self.assertEqual(outbound.get_method(), "GET")
+        self.assertIn(
+            ("Authorization", "Basic dGVzdC1rZXk6eA=="),
+            outbound.header_items(),
+        )
+        self.assertIn("start=2026-11-02", outbound.full_url)
+
+    def test_bamboo_time_off_endpoint_reports_missing_key_invalid_range_and_upstream_failure(self):
+        with patch.dict(os.environ, {"BAMBOOHR_API_KEY": ""}):
+            missing_key = self.client.get(
+                "/api/bamboohr/time-offs?start=2026-11-02&end=2026-11-08"
+            )
+        self.assertEqual(missing_key.status_code, 503)
+
+        with patch.dict(os.environ, {"BAMBOOHR_API_KEY": "test-key"}):
+            invalid_range = self.client.get(
+                "/api/bamboohr/time-offs?start=2026-11-08&end=2026-11-02"
+            )
+        self.assertEqual(invalid_range.status_code, 400)
+
+        with patch.dict(os.environ, {"BAMBOOHR_API_KEY": "test-key"}), patch(
+            "scheduler.urlopen", side_effect=HTTPError("url", 401, "unauthorized", {}, None)
+        ):
+            rejected_key = self.client.get(
+                "/api/bamboohr/time-offs?start=2026-11-02&end=2026-11-08"
+            )
+        self.assertEqual(rejected_key.status_code, 502)
+        self.assertIn("HTTP 401", rejected_key.get_json()["error"])
+
+        with patch.dict(os.environ, {"BAMBOOHR_API_KEY": "test-key"}), patch(
+            "scheduler.urlopen", side_effect=URLError("offline")
+        ):
+            unavailable = self.client.get(
+                "/api/bamboohr/time-offs?start=2026-11-02&end=2026-11-08"
+            )
+        self.assertEqual(unavailable.status_code, 502)
 
     def test_publish_preview_builds_jamaica_time_payload(self):
         schedule = self.prepare_publish_schedule()

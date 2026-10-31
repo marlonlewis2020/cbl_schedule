@@ -1582,14 +1582,13 @@ function validTimeOffDate(v){
     return typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v
 }
 function timeOffDays(m,e,start){
-    let manual=e.manualTimeOff||[],override=m.timeOffOverride?.[e.id];
-    if(override)return override.slice();
+    let manual=e.manualTimeOff||[];
     let entries=m.bambooTimeOff?.status==='success'?m.bambooTimeOff.entries:[];
     return Array.from({
         length:8
     }
     ,(_,d)=>{
-        let date=addDays(start,d);return !!manual[d]||entries.some(t=>normalizedEmployeeName(t.name)===normalizedEmployeeName(e.name)&&t.start<=date&&t.end>=date)
+        let date=addDays(start,d);return !!manual[d]||entries.some(t=>(t.employeeId?String(t.employeeId)===String(e.bamboohrId):normalizedEmployeeName(t.name)===normalizedEmployeeName(e.name))&&t.start<=date&&t.end>=date)
     }
     )
 }
@@ -1606,10 +1605,9 @@ function timeOffLabel(e,d){
 function timeOffSummary(){
     let t=model.bambooTimeOff;
     if(!t)return '';
-    if(t.source==='workbook')return (t.apiStatus==='error'?' BambooHR API failed; workbook fallback used.':'')+' Uploaded time-offs applied from '+t.sourceName+' for '+t.start+' to '+t.end+' ('+t.entries.length+' matching-period records).';
-    if(t.status==='error')return ' BambooHR error: '+t.error+' Scheduling continued without the API time-off check.';
-    if(t.status==='success')return ' BambooHR time-offs checked for '+t.start+' to '+t.end+'; '+t.entries.length+' employee time-off records received.';
-    return ' BambooHR time-off check not configured.'
+    if(t.status==='error')return ' BambooHR time-off data unavailable; review this schedule. '+t.error;
+    if(t.status==='success')return ' BambooHR time-offs checked for '+t.start+' to '+t.end+' at '+new Date(t.checkedAt).toLocaleString()+'; '+t.entries.length+' employee time-off records received.';
+    return ' BambooHR time-off data unavailable; review this schedule.'
 }
 function basicAuthorization(key,password){
     let bytes=new TextEncoder().encode(key+':'+password),binary='';
@@ -1618,72 +1616,28 @@ function basicAuthorization(key,password){
 }
 async function prepareTimeOff(start,end){
     let state={
-        status:'notConfigured',start,end,entries:[],checkedAt:new Date().toISOString(),error:''
+        status:'loading',source:'api',start,end,entries:[],checkedAt:new Date().toISOString(),error:''
     }
     ;
     model.bambooTimeOff=state;
-    if(!bambooCredentials?.apiKey)return state;
-    let controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
-    state.status='loading';
     try{
-        let connection=bambooTransport();
-        if(connection.mode==='localMissing')throw Error('BambooHR local connector session is missing. Reopen the full session URL printed by the launcher.');
-        let url=connection.url+'?'+new URLSearchParams({
-            start,end
-        }
-        ),headers={
-            accept:'application/json',authorization:basicAuthorization(bambooCredentials.apiKey,bambooCredentials.apiPassword)
-        }
-        ;
-        if(connection.mode==='local')headers['X-CBL-Connector-Token']=localConnectorToken;
-        let response=await fetch(url,{
-            method:'GET',headers,signal:controller.signal,credentials:'omit',cache:'no-store',redirect:'error'
-        }
-        );
-        if(!response.ok){
-            if(connection.mode==='local'){
-                let problem;
-                try{
-                    problem=await response.json()
-                }
-                catch{
-
-                }
-                throw Error('BambooHR local connector: '+(typeof problem?.error==='string'?problem.error.slice(0,400):'HTTP '+response.status+'.'))
-            }
-            throw Error('BambooHR returned HTTP '+response.status+'.');
-
-        }
-        let data;
-        try{
-            data=await response.json()
-        }
-        catch{
-            throw Error('BambooHR returned an invalid JSON response.')
-        }
-        if(!Array.isArray(data))throw Error('BambooHR response must be a list of time-off records.');
-        let entries=[];
-        for(let t of data){
-            if(t?.type!=='timeOff')continue;
-            if(t.status&&String(t.status).toLowerCase()!=='approved')continue;
-            if(typeof t.name!=='string'||!t.name.trim()||!validTimeOffDate(t.start)||!validTimeOffDate(t.end)||t.end<t.start)throw Error('BambooHR returned an invalid employee time-off record.');
-            if(t.end>=start&&t.start<=end)entries.push({
-                id:t.id??'',type:'timeOff',employeeId:t.employeeId??'',name:t.name.trim(),start:t.start,end:t.end
-            }
-            )
-        }
-        state.entries=entries;
-        state.status='success'
+        let response=await fetch('/api/bamboohr/time-offs?'+new URLSearchParams({start,end}),{
+            method:'GET',headers:{accept:'application/json'},cache:'no-store'
+        });
+        let data=await response.json().catch(()=>({}));
+        if(!response.ok)throw Error(data.error||'BambooHR time-off request failed with HTTP '+response.status+'.');
+        if(!Array.isArray(data.entries))throw Error('BambooHR time-off response is invalid.');
+        state.entries=data.entries;
+        state.status='success';
+        state.start=data.start||start;
+        state.end=data.end||end
     }
     catch(err){
         state.status='error';
         state.entries=[];
-        state.error=controller.signal.aborted?'BambooHR request timed out.':String(err.message).startsWith('BambooHR')?err.message:'BambooHR could not be reached (network or browser cross-origin restrictions).'
+        state.error=err.message||'BambooHR time-off request failed.'
     }
-    finally{
-        clearTimeout(timer);
-        state.checkedAt=new Date().toISOString()
-    }
+    state.checkedAt=new Date().toISOString();
     return state
 }
 async function prepareGenerationTimeOff(){
@@ -1694,8 +1648,11 @@ async function prepareGenerationTimeOff(){
     return prepareSchedulingTimeOff(model.controls.week,addDays(model.controls.week,weeks*7-1))
 }
 function refreshedTimeOffRun(r){
-    if(model.bambooTimeOff?.status!=='success')return clone(r);
     let next=clone(r);
+    if(model.bambooTimeOff?.status!=='success'){
+        next.timeOffCheck=timeOffCheckSnapshot(model);
+        return next
+    }
     for(let e of next.employees){
         e.timeOff=timeOffDays(model,e,next.start);
         for(let d=0;d<7;d++)if(e.slots[d]!==null&&(e.timeOff[d]||e.slots[d]+next.controls.span>24&&e.timeOff[d+1])){
@@ -1715,14 +1672,13 @@ function refreshedTimeOffRun(r){
     }
     return rebuildScheduleAudit(next)
 }
-async function loadBambooCredentials(){
+async function clearLegacyBambooCredentials(){
     if(storageMode==='session')return;
     try{
-        let saved=await store('get',undefined,'bambooCredentials');
-        if(saved?.apiKey&&typeof saved.apiKey==='string'&&typeof saved.apiPassword==='string')bambooCredentials=saved
+        await store('delete',undefined,'bambooCredentials')
     }
-    catch{
-        credentialSessionOnly=true
+    catch(error){
+        message('A previously saved browser BambooHR credential could not be removed: '+error.message,true)
     }
 
 }
@@ -1745,7 +1701,7 @@ async function saveBambooCredentials(value){
 }
 function openUserProfile(){
     let name=model.user?.firstName||'';
-    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">CELEBRATION BRANDS LIMITED</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>Enter your first name to continue. BambooHR API credentials are optional.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><label>BambooHR API key · optional<input id="profileApiKey" type="password" autocomplete="off" placeholder="${bambooCredentials?'Saved · leave blank to keep':'API key'}"></label><label>BambooHR API password · optional<input id="profileApiPassword" type="password" autocomplete="off" placeholder="${bambooCredentials?'Saved · leave blank to keep':'Usually x'}"></label><p class="note">BambooHR normally uses x as the API password; leave it blank to use x when adding a key. These are API credentials, not your BambooHR sign-in password. Credentials are saved only in this browser when storage is permitted and are excluded from portable ZIP bundle, workspace backups and Excel exports. Shared browser users can access saved credentials. If storage is blocked, they remain available only until this app is closed or refreshed.</p>${bambooCredentials?'<button type="button" data-bamboo-action="remove">Remove saved API credentials</button>':''}<section class="connectionpanel"><h3>BambooHR connection</h3><p>${esc(bambooTransport().mode==='local'?'Local connector · same-origin connection active':bambooTransport().mode==='localMissing'?'Local connector session missing · use the full URL printed by the launcher':'Direct browser request · may be blocked by cross-origin restrictions')}</p><div class="actions"><button type="button" data-bamboo-action="testConnection">Test connection</button><button type="button" data-bamboo-action="uploadTimeOffs">Upload time-off workbook</button><button type="button" data-bamboo-action="downloadConnector">Download local connector kit</button></div><p class="note">For the connector: extract the ZIP, then run Start-Windows.cmd (Windows) or sh start.sh (macOS/Linux). Python 3.9+ is required. It opens this workspace in your normal browser. Keep the launcher running. The connector forwards only to CBL’s BambooHR endpoint and does not save API credentials on disk.</p></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
+    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">CELEBRATION BRANDS LIMITED</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>Enter your first name to continue. BambooHR credentials are configured on the Flask server and are never entered or stored in this browser.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><input id="profileApiKey" type="hidden"><input id="profileApiPassword" type="hidden"><section class="connectionpanel"><h3>BambooHR time-off connection</h3><p>${publishConfigured?'Server API key is configured.':'BAMBOOHR_API_KEY is not configured in the app server .env file.'}</p><p class="note">Time-offs are fetched automatically when schedules are generated or refreshed. If BambooHR is unavailable, scheduling continues and the schedule must be reviewed.</p><button type="button" data-bamboo-action="checkTimeOff">Test time-off connection</button></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
     $('profileSave').onclick=async ()=>{
         if(busy)return;
         let name=$('profileFirstName').value.trim();
@@ -1776,7 +1732,7 @@ function openUserProfile(){
             $('profileDialog').close();
             $('profileDialog').innerHTML='';
             render();
-            message('Welcome, '+name+'.'+(credentialSessionOnly&&bambooCredentials?' API credentials are available for this session only.':''))
+            message('Welcome, '+name+'.')
         }
         finally{
             busy=false
@@ -1804,27 +1760,57 @@ function profileHeader(){
 }
 function timeOffTable(query=''){
     let state=model.bambooTimeOff,entries=state?.entries||[],q=normalizedEmployeeName(query),shown=entries.filter(t=>normalizedEmployeeName(t.name+' '+t.employeeId).includes(q));
-    return `<p>${state?.status==='success'?(state.source==='workbook'?'Loaded workbook '+esc(state.sourceName)+' · ':'Fetched ')+esc(state.checkedAt)+' · '+esc(state.start)+' to '+esc(state.end):state?.status==='error'?'Last request failed: '+esc(state.error):'No successful BambooHR time-off check has been made.'}</p><p>${shown.length} of ${entries.length} employee time-off records. Name matching ignores case, accents, punctuation and extra spaces. Company holiday entries are excluded.</p><div class="tablewrap"><table><thead><tr><th>Employee</th><th>BambooHR employee ID</th><th>Start</th><th>End</th><th>Roster match / location × role</th></tr></thead><tbody>${shown.map(t=>{
-        let matches=model.roster.filter(e=>normalizedEmployeeName(e.name)===normalizedEmployeeName(t.name));return `<tr><td>${esc(t.name)}</td><td>${esc(t.employeeId)}</td><td>${t.start}</td><td>${t.end}</td><td>${matches.length?matches.map(e=>esc(e.location+' · '+e.role+' · '+e.id)).join('<br>')+(matches.length>1?'<small>Multiple name matches · all matching employees excluded</small>':''):'No roster name match'}</td></tr>`
+    return `<p>${state?.status==='success'?'Fetched '+esc(state.checkedAt)+' · '+esc(state.start)+' to '+esc(state.end):state?.status==='error'?'BambooHR time-off data unavailable; review schedule. '+esc(state.error):'No successful BambooHR time-off check has been made.'}</p><p>${shown.length} of ${entries.length} employee time-off records. Employees are matched by BambooHR ID when available; names are used only when an ID is absent. Company holidays are excluded.</p><div class="tablewrap"><table><thead><tr><th>Employee</th><th>BambooHR employee ID</th><th>Start</th><th>End</th><th>Roster match / location × role</th></tr></thead><tbody>${shown.map(t=>{
+        let matches=model.roster.filter(e=>t.employeeId?String(e.bamboohrId)===String(t.employeeId):normalizedEmployeeName(e.name)===normalizedEmployeeName(t.name));return `<tr><td>${esc(t.name)}</td><td>${esc(t.employeeId)}</td><td>${t.start}</td><td>${t.end}</td><td>${matches.length?matches.map(e=>esc(e.location+' · '+e.role+' · '+e.id)).join('<br>')+(matches.length>1?'<small>Multiple BambooHR ID matches · all matching employees excluded</small>':''):'No roster match'}</td></tr>`
     }
     ).join('')}</tbody></table></div>`
 }
 function openTimeOffs(){
-    $('timeOffDialog').innerHTML='<div class="dialoghead"><div><div class="eyebrow">BAMBOOHR</div><h2>Employee time-offs</h2></div><button type="button" data-bamboo-action="closeTimeOffs" aria-label="Close time-offs">✕</button></div><label>Find employee<input id="timeOffSearch" placeholder="Name or BambooHR employee ID"></label><div id="timeOffTable">'+timeOffTable()+'</div><div class="actions"><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button><button type="button" data-bamboo-action="closeTimeOffs">Close</button></div>';
+    $('timeOffDialog').innerHTML='<div class="dialoghead"><div><div class="eyebrow">BAMBOOHR</div><h2>Employee time-offs</h2></div><button type="button" data-bamboo-action="closeTimeOffs" aria-label="Close time-offs">✕</button></div><label>Find employee<input id="timeOffSearch" placeholder="Name or BambooHR employee ID"></label><div id="timeOffTable">'+timeOffTable()+'</div><div class="actions"><button type="button" data-action="refreshTimeOffs">Fetch current schedule period</button><button type="button" data-bamboo-action="closeTimeOffs">Close</button></div>';
     $('timeOffSearch').oninput=e=>$('timeOffTable').innerHTML=timeOffTable(e.target.value);
     $('timeOffDialog').showModal()
 }
+async function refreshTimeOffFromServer(){
+    if(busy)return;
+    busy=true;
+    try{
+    let {
+        start,end
+    }=schedulingTimeOffPeriod();
+    let check=await prepareSchedulingTimeOff(start,end);
+    if($('timeOffDialog')?.open){
+        let query=$('timeOffSearch')?.value||'';
+        $('timeOffTable').innerHTML=timeOffTable(query)
+    }
+    render(true);
+    message(check.status==='success'?'BambooHR time-offs refreshed for '+start+' to '+end+'.':timeOffSummary(),check.status!=='success')
+    }
+    finally{
+        busy=false
+    }
+}
 function timeOffExportRows(runs){
-    let a=[['Week commencing','Location','Role','Employee ID','Employee','Date','Status','Time-off check','Time-off source','Source workbook']];
-    for(let r of runs)for(let e of r.employees)for(let d=0;d<7;d++)if(e.timeOff?.[d])a.push([r.start,r.location,r.role,e.id,e.name,addDays(r.start,d),'time-off',r.timeOffCheck?.status||'Uploaded',r.timeOffCheck?.source==='workbook'?'Uploaded workbook':r.timeOffCheck?'BambooHR':'Uploaded schedule',r.timeOffCheck?.sourceName||'']);
+    let a=[['Week commencing','Location','Role','Employee ID','Employee','Date','Status','Time-off check','Time-off source']];
+    for(let r of runs)for(let e of r.employees)for(let d=0;d<7;d++)if(e.timeOff?.[d])a.push([r.start,r.location,r.role,e.id,e.name,addDays(r.start,d),'time-off',r.timeOffCheck?.status||'Not checked',r.timeOffCheck?'BambooHR':'No data']);
     return a
 }
 document.addEventListener('click',async e=>{
     let dismiss=e.target.closest('[data-dismiss-header]')?.dataset.dismissHeader;if(dismiss){
         dismissHeaderNotice(dismiss);return
     }
-    let cmd=e.target.closest('[data-bamboo-action]')?.dataset.bambooAction;if(cmd==='uploadTimeOffs'&&!busy){
-        openTimeOffWorkbook();return
+    let cmd=e.target.closest('[data-bamboo-action]')?.dataset.bambooAction;    if(cmd==='checkTimeOff'&&!busy){
+        busy=true;
+        try{
+            let {start,end}=schedulingTimeOffPeriod(),check=await prepareSchedulingTimeOff(start,end);
+            $('profileStatus').textContent=check.status==='success'?'Connection successful. '+check.entries.length+' approved time-off records received.':timeOffSummary()
+        }
+        catch(err){
+            $('profileStatus').textContent=err.message
+        }
+        finally{
+            busy=false
+        }
+        return
     }
     if(cmd==='downloadConnector'&&!busy){
         try{
@@ -2011,11 +1997,7 @@ function applyTimeOffWorkbook(state){
     return active
 }
 async function prepareSchedulingTimeOff(start,end){
-    let state=await prepareTimeOff(start,end);
-    if(state.status==='success')return state;
-    if(workbookCoversPeriod(model.timeOffWorkbook,start,end))return applyTimeOffWorkbook(state);
-    if(state.status==='error'||model.timeOffWorkbook)return offerTimeOffFallback(state);
-    return state
+    return prepareTimeOff(start,end)
 }
 function offerTimeOffFallback(state){
     return new Promise(resolve=>{
@@ -2619,7 +2601,7 @@ function acceptedHistoryPanel(){
     if(!acceptedSchedules.length)return panel('Previously accepted shifts','<p>No schedules have been accepted yet. Accept a generated or uploaded schedule to save it to the app database.</p>');
     return panel('Previously accepted shifts',acceptedSchedules.map(record=>{
         let r=record.schedule;
-        return `<details class="accepted-schedule"><summary>${esc(r.start)} · ${esc(r.location)} · ${esc(r.role)} · accepted ${esc(record.acceptedAt)}</summary><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((day,index)=>`<th>${day}<small>${addDays(r.start,index)}</small></th>`).join('')}</tr></thead><tbody>${r.employees.map(employee=>`<tr><td class="sticky">${esc(employee.name)}<small>${esc(employee.id)}</small></td>${employee.slots.map((start,day)=>`<td>${start===null?'OFF':esc(shiftLabel(start,r.controls.span))}${employee.types[day]==='Make-up'?'<b class="plus"> +</b>':''}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`
+        return `<details class="accepted-schedule"><summary>${esc(r.start)} · ${esc(r.location)} · ${esc(r.role)} · accepted ${esc(record.acceptedAt)}</summary><div class="actions"><button type="button" class="danger" data-action="undoAccept" data-run-id="${esc(r.id)}">Undo accept</button><span class="note">Removes only the accepted database copy; generated schedules remain unchanged.</span></div><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((day,index)=>`<th>${day}<small>${addDays(r.start,index)}</small></th>`).join('')}</tr></thead><tbody>${r.employees.map(employee=>`<tr><td class="sticky">${esc(employee.name)}<small>${esc(employee.id)}</small></td>${employee.slots.map((start,day)=>`<td>${start===null?'OFF':esc(shiftLabel(start,r.controls.span))}${employee.types[day]==='Make-up'?'<b class="plus"> +</b>':''}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`
     }).join(''))
 }
 function acceptedPublishGroups(){
@@ -2704,6 +2686,28 @@ function render(preserveScroll=false){
         home,pools,roster,employees:employeesPage,scheduleLocations:scheduleLocationsPage,controls,meta:metaPage,schedules,publish:bambooPublishPage,source:sourcePage,settings:settingsPage,links:workforceLinksPage
     }
     [page])();
+    document.querySelectorAll('#content [data-action="timeOffWorkbook"]').forEach(button=>{
+        button.remove()
+    });
+    if(page==='schedules'){
+        let selected=model.results.find(run=>run.id===model.selectedRun);
+        if(selected?.timeOffCheck?.status==='error'){
+            let warning=document.createElement('div');
+            warning.className='callout';
+            warning.setAttribute('role','alert');
+            warning.textContent='BambooHR time-off data unavailable; review this schedule. '+selected.timeOffCheck.error;
+            $('content').prepend(warning)
+        }
+        document.querySelectorAll('#content details.accepted-schedule').forEach((details,index)=>{
+            let check=acceptedSchedules[index]?.schedule?.timeOffCheck;
+            if(check?.status!=='error')return;
+            let warning=document.createElement('p');
+            warning.className='badtext';
+            warning.setAttribute('role','alert');
+            warning.textContent='BambooHR time-off data unavailable when accepted; review this schedule. '+check.error;
+            details.querySelector('summary')?.after(warning)
+        })
+    }
     document.querySelectorAll('#content details[data-publish-group]').forEach(details=>{
         details.open=openPublishGroups.has(details.dataset.publishGroup)
     });
@@ -3147,7 +3151,7 @@ async function action(a,element=null){
             return
         }
         if(a==='timeOffWorkbook'){
-            openTimeOffWorkbook();
+            openTimeOffs();
             return
         }
         if(a==='profile'){
@@ -3156,6 +3160,10 @@ async function action(a,element=null){
         }
         if(a==='timeOffs'){
             openTimeOffs();
+            return
+        }
+        if(a==='refreshTimeOffs'){
+            await refreshTimeOffFromServer();
             return
         }
         if(a==='trade'){
@@ -3211,6 +3219,19 @@ async function action(a,element=null){
             await loadAcceptedSchedules();
             render();
             message('Schedule accepted and saved to the app database.');
+            return
+        }
+        if(a==='undoAccept'){
+            let runId=element.dataset.runId;
+            if(!runId)throw Error('The accepted schedule could not be identified.');
+            if(!confirm('Undo acceptance for this schedule? The generated workspace schedule will remain unchanged.'))return;
+            await acceptedScheduleRequest('/'+encodeURIComponent(runId),{method:'DELETE'});
+            publishSelection=publishSelection.filter(selection=>selection.runId!==runId);
+            publishPreview=null;
+            publishResults=[];
+            await loadAcceptedSchedules();
+            render();
+            message('Schedule acceptance undone. The generated workspace schedule remains unchanged.');
             return
         }
         if(a==='downloadVisible'){
@@ -3353,7 +3374,7 @@ function store(action,value,recordKey='current'){
                     db.close();return
                 }
                 try{
-                    tx=db.transaction('workspace',action==='put'?'readwrite':'readonly');let rq=action==='put'?tx.objectStore('workspace').put(value,recordKey):tx.objectStore('workspace').get(recordKey),out;rq.onsuccess=()=>out=rq.result;tx.oncomplete=()=>finish(null,out);tx.onerror=tx.onabort=()=>finish(tx.error||Error('Storage write failed'))
+                    let writing=action==='put'||action==='delete';tx=db.transaction('workspace',writing?'readwrite':'readonly');let store=tx.objectStore('workspace'),rq=action==='put'?store.put(value,recordKey):action==='delete'?store.delete(recordKey):store.get(recordKey),out;rq.onsuccess=()=>out=rq.result;tx.oncomplete=()=>finish(null,out);tx.onerror=tx.onabort=()=>finish(tx.error||Error('Storage write failed'))
                 }
                 catch(err){
                     finish(err)
@@ -3926,8 +3947,7 @@ async function init(){
             storageReason=e.message;
             storageStatus()
         }
-        initLocalConnector();
-        await loadBambooCredentials();
+        await clearLegacyBambooCredentials();
         await loadAcceptedSchedules();
         await loadDirectoryData();
         await loadBambooPublishStatus();

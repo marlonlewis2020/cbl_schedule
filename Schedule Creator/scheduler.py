@@ -6,6 +6,7 @@ import os
 import sqlite3
 import base64
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,7 @@ load_dotenv(APP_DIRECTORY / ".env")
 DATABASE_PATH = APP_DIRECTORY / "data" / "schedule_creator.sqlite3"
 MAX_ACCEPTED_SCHEDULE_BYTES = 16 * 1024 * 1024
 BAMBOOHR_SCHEDULES_URL = "https://cbljm.bamboohr.com/api/v1/scheduling/shifts"
+BAMBOOHR_TIME_OFF_URL = "https://cbljm.bamboohr.com/api/v1/time_off/whos_out"
 STATIC_ASSETS = {
     "CBL-Scheduler2.css",
     "CBL-Scheduler2.config.js",
@@ -251,6 +253,17 @@ def update_accepted_shifts(run_id: str):
             WHERE run_id = ?
             """,
             (payload["start"], payload["location"], payload["role"], encoded, run_id),
+        )
+        if cursor.rowcount == 0:
+            return jsonify(error="Accepted schedule was not found."), 404
+    return jsonify(id=run_id)
+
+
+@app.delete("/api/accepted-shifts/<path:run_id>")
+def delete_accepted_shifts(run_id: str):
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        cursor = connection.execute(
+            "DELETE FROM accepted_schedules WHERE run_id = ?", (run_id,)
         )
         if cursor.rowcount == 0:
             return jsonify(error="Accepted schedule was not found."), 404
@@ -787,6 +800,73 @@ def bamboo_preview_response(payloads: list[dict]) -> list[dict]:
 @app.get("/api/bamboohr/status")
 def bamboohr_status():
     return jsonify(configured=bool(os.environ.get("BAMBOOHR_API_KEY", "").strip()))
+
+
+@app.get("/api/bamboohr/time-offs")
+def bamboohr_time_offs():
+    start_text, end_text = request.args.get("start", ""), request.args.get("end", "")
+    try:
+        start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+    except ValueError:
+        return jsonify(error="Provide valid start and end dates in YYYY-MM-DD format."), 400
+    if start.isoformat() != start_text or end.isoformat() != end_text or end < start:
+        return jsonify(error="Provide a valid inclusive time-off date range."), 400
+
+    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    if not api_key:
+        return jsonify(error="BAMBOOHR_API_KEY is not configured on the app server."), 503
+
+    authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
+    outbound = Request(
+        f"{BAMBOOHR_TIME_OFF_URL}?{urlencode({'start': start_text, 'end': end_text})}",
+        headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
+        method="GET",
+    )
+    try:
+        with urlopen(outbound, timeout=20) as response:
+            raw_data = response.read(10_000_001)
+        if len(raw_data) > 10_000_000:
+            return jsonify(error="BambooHR time-off response exceeds the allowed size."), 502
+        data = json.loads(raw_data)
+        if not isinstance(data, list):
+            return jsonify(error="BambooHR returned an invalid time-off response."), 502
+        entries = []
+        for item in data:
+            if not isinstance(item, dict) or item.get("type") != "timeOff":
+                continue
+            if item.get("status") and str(item["status"]).casefold() != "approved":
+                continue
+            name, item_start, item_end = item.get("name"), item.get("start"), item.get("end")
+            if not isinstance(name, str) or not name.strip():
+                return jsonify(error="BambooHR returned a time-off record without an employee name."), 502
+            try:
+                leave_start, leave_end = date.fromisoformat(item_start), date.fromisoformat(item_end)
+            except (TypeError, ValueError):
+                return jsonify(error="BambooHR returned a time-off record with invalid dates."), 502
+            if (
+                leave_start.isoformat() != item_start
+                or leave_end.isoformat() != item_end
+                or leave_end < leave_start
+            ):
+                return jsonify(error="BambooHR returned a time-off record with invalid dates."), 502
+            if leave_end >= start and leave_start <= end:
+                entries.append(
+                    {
+                        "id": item.get("id", ""),
+                        "type": "timeOff",
+                        "employeeId": item.get("employeeId", ""),
+                        "name": name.strip(),
+                        "start": item_start,
+                        "end": item_end,
+                    }
+                )
+    except HTTPError as error:
+        return jsonify(error=f"BambooHR time-off request failed with HTTP {error.code}."), 502
+    except (URLError, TimeoutError, OSError):
+        return jsonify(error="The app server could not reach BambooHR for time-off data."), 502
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return jsonify(error="BambooHR returned an invalid time-off response."), 502
+    return jsonify(start=start_text, end=end_text, entries=entries)
 
 
 @app.post("/api/bamboohr/preview")
