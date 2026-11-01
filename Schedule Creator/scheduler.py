@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import base64
+import time as time_module
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -14,7 +15,8 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values, load_dotenv, set_key, unset_key
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, request, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from directory_seed import (
     EMPLOYEE_ASSIGNMENTS,
@@ -45,9 +47,74 @@ STATIC_ASSETS = {
     "CBL-Scheduler2.js",
     "CBL-MicrosoftAuth.html",
 }
+DEVELOPER_REQUESTS = (
+    (
+        "developer-change-log",
+        "Developer change-request log",
+        "Provide a developer-only, password-protected change-request log with request statuses, filters, dependency/blocker display, secure credential updates, and approval before logging new requests. Do not use shared default credentials. The initial local developer account is established through a loopback-only setup flow.",
+        (),
+    ),
+    (
+        "tenant-identity",
+        "Secure tenant identity foundation",
+        "Move the current local single-business scheduler to a secure multi-tenant deployment with verified admin authentication, hashed credentials, tenant isolation, role checks, audit events, HTTPS, and a production database. Preserve the existing business as an explicitly migrated tenant.",
+        (),
+    ),
+    (
+        "business-hub",
+        "Business registration and SaaS hub",
+        "Create a separate SaaS hub for business registration, business details, BambooHR tenant/API credential validation and encrypted storage, the main business admin and additional admins, two-factor authentication enrollment, manual approval/rejection, and active/pending/suspended membership states. Pending businesses may sign in only to complete onboarding and view status; scheduling stays disabled until active. Decide whether two-factor authentication is mandatory for every admin.",
+        ("tenant-identity",),
+    ),
+    (
+        "tier-entitlements",
+        "Membership tiers and feature entitlements",
+        "Enforce Bronze (2 admins, 2 separately configured teams, 20 active employees), Silver (3 admins, 4 teams, 60 employees), Gold (4 admins, up to 6 schedule locations), and Platinum (8 admins, unlimited schedule locations). Gold and Platinum have unlimited active employees. All tiers include schedule generation, sharing, BambooHR publishing, email configuration, employee management, and settings. Higher-tier features include employee schedule access, shift trades, schedule history, overtime forecasting, and user licenses; finalize the exact feature-to-tier matrix.",
+        ("business-hub",),
+    ),
+    (
+        "manager-employee-access",
+        "Manager and employee authentication",
+        "Add verified individual sign-in for admins, schedule-location managers, and employees. Managers may manage/view locations assigned to their verified manager email. Employees authenticate individually and receive only the full schedule for their assigned location and role. Schedule codes are additional checks, not sole credentials.",
+        ("tenant-identity", "business-hub", "tier-entitlements"),
+    ),
+    (
+        "schedule-portal",
+        "Employee schedule portal and access tokens",
+        "Generate cryptographically random, unique, expiring six-digit access codes for each location/role schedule period and include them in manager confirmation messages. The employee portal validates identity, location, role, period, and schedule assignment before revealing the full location/role schedule. Add configurable schedule visibility cadence in weeks and manager access to all assigned locations.",
+        ("manager-employee-access",),
+    ),
+    (
+        "shift-trades",
+        "Authenticated shift-trade workflow",
+        "Add server-side trade records, inbox/notifications, schedule indicators, and an auditable status history: employee request, affected-employee confirmation, manager acceptance, workforce-admin approval, and applied/published, with rejection/withdrawal states. Managers may initiate on an employee's behalf with employee confirmation skipped but workforce approval retained. Employees cannot approve manager or workforce-admin trades. Block non-admin trades for started or past shifts.",
+        ("manager-employee-access", "schedule-portal"),
+    ),
+    (
+        "trade-publishing",
+        "Approved trade and published-schedule reconciliation",
+        "Apply workforce-admin-approved trades to accepted schedules. For already-published shifts, preview and confirm replacement/deletion actions, then update the app and BambooHR with visible success/failure states, retries/reconciliation, and audit history. Include admin overrides for past shifts and manual shift/day-off assignments. Verify BambooHR permissions and supported operations before implementation.",
+        ("shift-trades",),
+    ),
+    (
+        "recurring-billing",
+        "Membership billing and payment providers",
+        "As a later phase, add monthly/annual prices, optional auto-renew, PayPal first behind a provider abstraction, hosted/tokenized payment details, signed webhooks, reminders, daily retries up to seven attempts, suspension after repeated failure, and restoration after successful/manual payment. Never store raw payment credentials. Allow SaaS admins to configure tier features and prices with audit history.",
+        ("business-hub", "tier-entitlements"),
+    ),
+    (
+        "copilot-builder",
+        "Copilot-reviewed request staging and implementation",
+        "Integrate an explicitly authorized Copilot coding-agent/SDK service for drafting/reviewing requests, requiring user approval before logging, selecting the next dependency-ready request, and displaying isolated build progress/results. Run each build in a separate branch/workspace, test it, and require human review/merge; do not deploy or commit directly to the live app. This remains unavailable until a supported Copilot integration, credentials, and isolated runner are configured.",
+        ("developer-change-log",),
+    ),
+)
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_ACCEPTED_SCHEDULE_BYTES
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 
 
 def initialize_database() -> None:
@@ -95,8 +162,55 @@ def initialize_database() -> None:
                 setting_key TEXT PRIMARY KEY,
                 setting_value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS developer_users (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                auth_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS developer_login_attempts (
+                client_key TEXT PRIMARY KEY,
+                failures INTEGER NOT NULL DEFAULT 0,
+                window_started_at INTEGER NOT NULL,
+                locked_until INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS developer_change_requests (
+                request_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'blocked', 'done', 'rejected')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS developer_change_request_dependencies (
+                request_id TEXT NOT NULL REFERENCES developer_change_requests(request_id) ON DELETE CASCADE,
+                depends_on TEXT NOT NULL REFERENCES developer_change_requests(request_id) ON DELETE CASCADE,
+                PRIMARY KEY (request_id, depends_on),
+                CHECK (request_id != depends_on)
+            );
             """
         )
+        for request_id, title, description, _ in DEVELOPER_REQUESTS:
+            status = "done" if request_id == "developer-change-log" else "pending"
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO developer_change_requests
+                    (request_id, title, description, status)
+                VALUES (?, ?, ?, ?)
+                """,
+                (request_id, title, description, status),
+            )
+        for request_id, _, _, dependencies in DEVELOPER_REQUESTS:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO developer_change_request_dependencies
+                    (request_id, depends_on)
+                VALUES (?, ?)
+                """,
+                [(request_id, dependency) for dependency in dependencies],
+            )
         connection.executemany(
             "INSERT OR IGNORE INTO application_settings (setting_key, setting_value) VALUES (?, ?)",
             DEFAULT_APP_CONFIG.items(),
@@ -336,6 +450,332 @@ def serve_asset(asset_name):
     if asset_name not in STATIC_ASSETS:
         abort(404)
     return send_from_directory(APP_DIRECTORY, asset_name)
+
+
+def developer_csrf_valid() -> bool:
+    supplied = request.headers.get("X-CSRF-Token", "")
+    expected = session.get("developer_csrf", "")
+    return bool(supplied and expected and secrets.compare_digest(supplied, expected))
+
+
+def developer_authenticated() -> bool:
+    username = session.get("developer_username")
+    auth_version = session.get("developer_auth_version")
+    if not isinstance(username, str) or not isinstance(auth_version, int):
+        return False
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+        account = connection.execute(
+            "SELECT username, auth_version FROM developer_users WHERE id = 1"
+        ).fetchone()
+    if (
+        not account
+        or account[0] != username
+        or account[1] != auth_version
+    ):
+        session.clear()
+        return False
+    return True
+
+
+def developer_local_request() -> bool:
+    return request.remote_addr in {"127.0.0.1", "::1"}
+
+
+def valid_developer_username(value: object) -> bool:
+    return isinstance(value, str) and 3 <= len(value.strip()) <= 64
+
+
+def valid_developer_password(value: object) -> bool:
+    return isinstance(value, str) and len(value) >= 14 and len(value) <= 1024
+
+
+@app.get("/developer/change-requests")
+def developer_change_requests_page():
+    return send_from_directory(APP_DIRECTORY, "developer-change-requests.html")
+
+
+@app.get("/api/developer/auth-state")
+def developer_auth_state():
+    csrf_token = session.get("developer_csrf")
+    if not isinstance(csrf_token, str):
+        csrf_token = secrets.token_urlsafe(32)
+        session["developer_csrf"] = csrf_token
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+        configured = connection.execute(
+            "SELECT 1 FROM developer_users WHERE id = 1"
+        ).fetchone() is not None
+    authenticated = developer_authenticated()
+    return jsonify(
+        configured=configured,
+        authenticated=authenticated,
+        username=session.get("developer_username") if authenticated else None,
+        csrfToken=csrf_token,
+        canBootstrap=not configured and developer_local_request(),
+    )
+
+
+@app.post("/api/developer/setup")
+def setup_developer_account():
+    if not developer_local_request():
+        return jsonify(error="Initial developer setup is allowed only from this computer."), 403
+    if not developer_csrf_valid():
+        return jsonify(error="The setup session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not valid_developer_username(payload.get("username"))
+        or not valid_developer_password(payload.get("password"))
+    ):
+        return jsonify(
+            error="Enter a username of 3–64 characters and a password of at least 14 characters."
+        ), 400
+    username = payload["username"].strip()
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        try:
+            connection.execute(
+                """
+                INSERT INTO developer_users (id, username, password_hash)
+                VALUES (1, ?, ?)
+                """,
+                (username, generate_password_hash(payload["password"])),
+            )
+        except sqlite3.IntegrityError:
+            return jsonify(error="Developer access has already been initialized."), 409
+    session.clear()
+    session["developer_username"] = username
+    session["developer_auth_version"] = 1
+    session["developer_csrf"] = secrets.token_urlsafe(32)
+    return jsonify(username=username, csrfToken=session["developer_csrf"])
+
+
+@app.post("/api/developer/login")
+def developer_login():
+    if not developer_csrf_valid():
+        return jsonify(error="The login session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Enter your developer username and password."), 400
+    now = int(time_module.time())
+    client_key = request.remote_addr or "unknown"
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        attempt = connection.execute(
+            """
+            SELECT failures, window_started_at, locked_until
+            FROM developer_login_attempts WHERE client_key = ?
+            """,
+            (client_key,),
+        ).fetchone()
+        if attempt and attempt[2] > now:
+            return jsonify(error="Too many failed sign-in attempts. Try again later."), 429
+        if not attempt or now - attempt[1] >= 900:
+            failures, window_started_at = 0, now
+        else:
+            failures, window_started_at = attempt[0], attempt[1]
+        account = connection.execute(
+            "SELECT username, password_hash, auth_version FROM developer_users WHERE id = 1"
+        ).fetchone()
+        valid = bool(
+            account
+            and isinstance(payload.get("username"), str)
+            and account[0].casefold() == payload["username"].strip().casefold()
+            and isinstance(payload.get("password"), str)
+            and check_password_hash(account[1], payload["password"])
+        )
+        if not valid:
+            failures += 1
+            locked_until = now + 900 if failures >= 5 else 0
+            connection.execute(
+                """
+                INSERT INTO developer_login_attempts
+                    (client_key, failures, window_started_at, locked_until)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(client_key) DO UPDATE SET
+                    failures = excluded.failures,
+                    window_started_at = excluded.window_started_at,
+                    locked_until = excluded.locked_until
+                """,
+                (client_key, failures, window_started_at, locked_until),
+            )
+            return jsonify(error="The developer username or password is incorrect."), 401
+        connection.execute(
+            "DELETE FROM developer_login_attempts WHERE client_key = ?",
+            (client_key,),
+        )
+    session.clear()
+    session["developer_username"] = account[0]
+    session["developer_auth_version"] = account[2]
+    session["developer_csrf"] = secrets.token_urlsafe(32)
+    return jsonify(username=account[0], csrfToken=session["developer_csrf"])
+
+
+@app.post("/api/developer/logout")
+def developer_logout():
+    if not developer_authenticated():
+        return jsonify(error="Sign in to the developer area first."), 401
+    if not developer_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    session.clear()
+    return jsonify(loggedOut=True)
+
+
+@app.post("/api/developer/credentials")
+def update_developer_credentials():
+    if not developer_authenticated():
+        return jsonify(error="Sign in to the developer area first."), 401
+    if not developer_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("currentPassword"), str)
+        or not valid_developer_username(payload.get("username"))
+        or not valid_developer_password(payload.get("newPassword"))
+    ):
+        return jsonify(
+            error="Enter your current password, a username of 3–64 characters, and a new password of at least 14 characters."
+        ), 400
+    username = payload["username"].strip()
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        account = connection.execute(
+            "SELECT password_hash FROM developer_users WHERE id = 1"
+        ).fetchone()
+        if not account or not check_password_hash(account[0], payload["currentPassword"]):
+            return jsonify(error="The current password is incorrect."), 403
+        try:
+            connection.execute(
+                """
+                UPDATE developer_users
+                SET username = ?, password_hash = ?, auth_version = auth_version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """,
+                (username, generate_password_hash(payload["newPassword"])),
+            )
+        except sqlite3.IntegrityError:
+            return jsonify(error="That developer username is already in use."), 409
+        auth_version = connection.execute(
+            "SELECT auth_version FROM developer_users WHERE id = 1"
+        ).fetchone()[0]
+    session.clear()
+    session["developer_username"] = username
+    session["developer_auth_version"] = auth_version
+    session["developer_csrf"] = secrets.token_urlsafe(32)
+    return jsonify(username=username, csrfToken=session["developer_csrf"])
+
+
+@app.get("/api/developer/change-requests")
+def list_developer_change_requests():
+    if not developer_authenticated():
+        return jsonify(error="Sign in to the developer area first."), 401
+    status = request.args.get("status", "all")
+    statuses = {"pending", "in_progress", "blocked", "done", "rejected"}
+    if status != "all" and status not in statuses:
+        return jsonify(error="Choose a valid request status filter."), 400
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+        query = """
+            SELECT request_id, title, description, status, created_at, updated_at
+            FROM developer_change_requests
+        """
+        parameters: tuple[str, ...] = ()
+        if status != "all":
+            query += " WHERE status = ?"
+            parameters = (status,)
+        query += " ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'pending' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, developer_change_requests.rowid"
+        rows = connection.execute(query, parameters).fetchall()
+        dependencies = connection.execute(
+            """
+            SELECT dependency.request_id, prerequisite.request_id,
+                   prerequisite.title, prerequisite.status
+            FROM developer_change_request_dependencies AS dependency
+            JOIN developer_change_requests AS prerequisite
+              ON prerequisite.request_id = dependency.depends_on
+            """
+        ).fetchall()
+        next_request = connection.execute(
+            """
+            SELECT request.request_id, request.title
+            FROM developer_change_requests AS request
+            WHERE request.status = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM developer_change_request_dependencies AS dependency
+                  JOIN developer_change_requests AS prerequisite
+                    ON prerequisite.request_id = dependency.depends_on
+                  WHERE dependency.request_id = request.request_id
+                    AND prerequisite.status != 'done'
+              )
+            ORDER BY request.rowid
+            LIMIT 1
+            """
+        ).fetchone()
+        dependency_map: dict[str, list[dict[str, str]]] = {}
+        for request_id, dependency_id, title, dependency_status in dependencies:
+            dependency_map.setdefault(request_id, []).append(
+                {"id": dependency_id, "title": title, "status": dependency_status}
+            )
+    requests = [
+        {
+            "id": row[0],
+            "title": row[1],
+            "description": row[2],
+            "status": row[3],
+            "createdAt": row[4],
+            "updatedAt": row[5],
+            "dependencies": dependency_map.get(row[0], []),
+        }
+        for row in rows
+    ]
+    eligible = (
+        {"id": next_request[0], "title": next_request[1]}
+        if next_request
+        else None
+    )
+    return jsonify(requests=requests, nextEligible=eligible)
+
+
+@app.put("/api/developer/change-requests/<path:request_id>")
+def update_developer_change_request(request_id: str):
+    if not developer_authenticated():
+        return jsonify(error="Sign in to the developer area first."), 401
+    if not developer_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    statuses = {"pending", "in_progress", "blocked", "done", "rejected"}
+    if not isinstance(payload, dict) or payload.get("status") not in statuses:
+        return jsonify(error="Choose a valid request status."), 400
+    status = payload["status"]
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
+        request_row = connection.execute(
+            "SELECT 1 FROM developer_change_requests WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if not request_row:
+            return jsonify(error="Change request was not found."), 404
+        if status in {"in_progress", "done"}:
+            incomplete = connection.execute(
+                """
+                SELECT prerequisite.title, prerequisite.status
+                FROM developer_change_request_dependencies AS dependency
+                JOIN developer_change_requests AS prerequisite
+                  ON prerequisite.request_id = dependency.depends_on
+                WHERE dependency.request_id = ? AND prerequisite.status != 'done'
+                LIMIT 1
+                """,
+                (request_id,),
+            ).fetchone()
+            if incomplete:
+                return jsonify(
+                    error=f"Complete blocking request “{incomplete[0]}” first."
+                ), 409
+        connection.execute(
+            """
+            UPDATE developer_change_requests
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE request_id = ?
+            """,
+            (status, request_id),
+        )
+    return jsonify(id=request_id, status=status)
 
 
 @app.get("/api/accepted-shifts")

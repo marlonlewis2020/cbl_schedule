@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="Developer change-request log">
+    <title>Developer change requests</title>
+    <style>
+        :root{font-family:Segoe UI,Arial,sans-serif;color:#17212b;background:#f3f6f8;font-synthesis:none}
+        *{box-sizing:border-box}
+        body{margin:0}
+        header{background:#102b3c;color:#fff;padding:22px max(24px,calc((100vw - 1200px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}
+        header h1{font-size:20px;margin:0}
+        header a{color:#fff}
+        main{max-width:1200px;margin:28px auto;padding:0 20px}
+        .card{background:#fff;border:1px solid #dce4e9;border-radius:10px;padding:20px;margin:16px 0;box-shadow:0 2px 8px #102b3c0c}
+        .auth{max-width:520px;margin:9vh auto}
+        h2{margin:0 0 10px;font-size:18px}
+        p{line-height:1.55}
+        label{display:block;font-size:13px;font-weight:600;margin:12px 0}
+        input,select,button{font:inherit}
+        input,select{display:block;width:100%;margin-top:5px;padding:10px;border:1px solid #b9c7d0;border-radius:6px;background:#fff}
+        button{border:0;border-radius:6px;background:#116f94;color:white;padding:10px 14px;cursor:pointer;font-weight:600}
+        button:disabled{background:#94a3ac;cursor:not-allowed}
+        button.secondary{background:#52636e}
+        .toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+        .toolbar label{min-width:170px;margin:0}
+        .muted{color:#586873;font-size:13px}
+        .error{color:#a12727;background:#fff0f0;border:1px solid #e8bebe;padding:10px;border-radius:6px}
+        .success{color:#17643a}
+        .request{border-top:1px solid #e0e6ea;padding:18px 0}
+        .request:first-child{border-top:0}
+        .request-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+        .request h3{margin:0;font-size:16px}
+        .request-id{font:12px Consolas,monospace;color:#52636e}
+        .request p{margin:10px 0}
+        .dependencies{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+        .dependency,.status{font-size:12px;border-radius:999px;padding:4px 9px;background:#e8eef2}
+        .status-pending{background:#fff0c7}.status-in_progress{background:#d9effa}
+        .status-blocked{background:#ffe0dc}.status-done{background:#d9f1e0}.status-rejected{background:#e8e8e8}
+        .request select{width:auto;min-width:150px}
+        .status-filter{min-width:180px}
+        .notice{background:#fff6dd;border:1px solid #ead38c;border-radius:7px;padding:12px}
+        details summary{cursor:pointer;font-weight:600}
+        @media(max-width:650px){header{padding:16px 20px}.request-head{display:block}.request-head select{margin-top:12px}.toolbar label{width:100%}}
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Developer change requests</h1>
+        <a href="/">Back to scheduler</a>
+    </header>
+    <main id="app"><p>Loading developer access…</p></main>
+    <script>
+        const app=document.getElementById('app');
+        let csrfToken='',currentUser='',statusFilter='all';
+        const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        async function api(url,options={}){
+            const response=await fetch(url,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken,...options.headers}});
+            const body=await response.json().catch(()=>({error:'The server returned an invalid response.'}));
+            if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);
+            return body
+        }
+        function authForm(setup){
+            app.innerHTML=`<section class="card auth"><h2>${setup?'Set up developer access':'Developer sign-in'}</h2><p class="muted">${setup?'Create the first developer account on this computer. There is no default username or password.':'Sign in to view and manage approved change requests.'}</p>${setup?'<p class="notice">Use a unique password with at least 14 characters. Initial setup is available only from the computer running the app.</p>':''}<form id="authForm"><label>Username<input name="username" minlength="3" maxlength="64" autocomplete="username" required></label><label>Password<input name="password" type="password" minlength="${setup?14:1}" autocomplete="${setup?'new-password':'current-password'}" required></label><button>${setup?'Create developer account':'Sign in'}</button><p id="error" class="error" hidden></p></form></section>`;
+            document.getElementById('authForm').addEventListener('submit',async event=>{
+                event.preventDefault();
+                const data=new FormData(event.currentTarget);
+                try{
+                    const result=await api(setup?'/api/developer/setup':'/api/developer/login',{method:'POST',body:JSON.stringify({username:data.get('username'),password:data.get('password')})});
+                    csrfToken=result.csrfToken;currentUser=result.username;await showRequests()
+                }catch(error){const node=document.getElementById('error');node.textContent=error.message;node.hidden=false}
+            })
+        }
+        const labels={pending:'Pending',in_progress:'In progress',blocked:'Blocked',done:'Done',rejected:'Rejected'};
+        function requestCard(item){
+            const dependencies=item.dependencies.length?`<div class="dependencies"><b>Depends on:</b>${item.dependencies.map(dep=>`<span class="dependency">${esc(dep.title)} · ${esc(labels[dep.status]||dep.status)}</span>`).join('')}</div>`:'<p class="muted">No blocking requests.</p>';
+            return `<article class="request"><div class="request-head"><div><div class="request-id">${esc(item.id)}</div><h3>${esc(item.title)}</h3></div><label>Status<select data-request-status="${esc(item.id)}">${Object.entries(labels).map(([value,label])=>`<option value="${value}" ${item.status===value?'selected':''}>${label}</option>`).join('')}</select></label></div><p>${esc(item.description)}</p>${dependencies}<small class="muted">Created ${esc(item.createdAt)} · Updated ${esc(item.updatedAt)}</small></article>`
+        }
+        async function showRequests(){
+            app.innerHTML=`<section class="card"><div class="toolbar"><div><h2>Approved roadmap</h2><p class="muted">Signed in as ${esc(currentUser)}. Requirements are tracked here; implementation requires a separately approved, dependency-ready task.</p></div><button id="logout" class="secondary">Sign out</button></div><div class="toolbar"><label class="status-filter">Filter by status<select id="statusFilter"><option value="all">All statuses</option>${Object.entries(labels).map(([value,label])=>`<option value="${value}" ${statusFilter===value?'selected':''}>${label}</option>`).join('')}</select></label><button id="credentials" class="secondary">Change developer credentials</button></div><p class="notice">Copilot build execution and new-request review are not configured. This log does not launch agents, alter code, or deploy changes. The approved Copilot integration request is tracked below.</p><div id="nextRequest"></div><div id="requests">Loading requests…</div><div id="error" class="error" hidden></div></section><details class="card" id="credentialPanel"><summary>Change username and password</summary><form id="credentialForm"><label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New username<input name="username" minlength="3" maxlength="64" autocomplete="username" required value="${esc(currentUser)}"></label><label>New password<input name="newPassword" type="password" minlength="14" autocomplete="new-password" required></label><button>Update credentials</button></form></details>`;
+            document.getElementById('logout').addEventListener('click',async()=>{try{await api('/api/developer/logout',{method:'POST',body:'{}'});await load()}catch(error){showError(error.message)}});
+            document.getElementById('statusFilter').addEventListener('change',event=>{statusFilter=event.target.value;loadList()});
+            document.getElementById('credentials').addEventListener('click',()=>document.getElementById('credentialPanel').open=true);
+            document.getElementById('credentialForm').addEventListener('submit',async event=>{
+                event.preventDefault();const values=new FormData(event.currentTarget);
+                try{const result=await api('/api/developer/credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(values))});csrfToken=result.csrfToken;currentUser=result.username;await showRequests()}
+                catch(error){showError(error.message)}
+            });
+            await loadList()
+        }
+        function showError(text){const node=document.getElementById('error');if(node){node.textContent=text;node.hidden=false}}
+        async function loadList(){
+            try{
+                const result=await api(`/api/developer/change-requests?status=${encodeURIComponent(statusFilter)}`);
+                document.getElementById('requests').innerHTML=result.requests.map(requestCard).join('')||'<p class="muted">No change requests match this filter.</p>';
+                for(const select of document.querySelectorAll('[data-request-status]'))select.addEventListener('change',async event=>{
+                    try{await api(`/api/developer/change-requests/${encodeURIComponent(event.target.dataset.requestStatus)}`,{method:'PUT',body:JSON.stringify({status:event.target.value})});await loadList()}
+                    catch(error){showError(error.message);await loadList()}
+                });
+                const next=result.nextEligible;
+                document.getElementById('nextRequest').innerHTML=next?`<p><b>Next dependency-ready request:</b> ${esc(next.title)} <button type="button" disabled title="Copilot builder integration is not configured">Implement next requirement</button></p>`:'<p class="muted">No pending request is currently dependency-ready.';
+            }catch(error){showError(error.message)}
+        }
+        async function load(){
+            try{
+                const state=await fetch('/api/developer/auth-state',{credentials:'same-origin'}).then(response=>response.json());
+                csrfToken=state.csrfToken;
+                if(state.authenticated){currentUser=state.username;await showRequests()}
+                else authForm(!state.configured&&state.canBootstrap)
+            }catch(error){app.innerHTML=`<p class="error">${esc(error.message)}</p>`}
+        }
+        load()
+    </script>
+</body>
+</html>

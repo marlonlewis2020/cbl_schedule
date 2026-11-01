@@ -2256,3 +2256,11 @@ dialog input[type=checkbox]{
     padding:5px 2px;
     font-size:11px
 }
+.developer-link{
+    display:block;
+    color:var(--muted);
+    font-size:11px;
+    margin:10px 0;
+    text-decoration:underline;
+    text-underline-offset:3px
+}

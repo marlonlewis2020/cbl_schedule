@@ -1062,5 +1062,133 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         )
 
 
+class DeveloperChangeRequestTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.original_database_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.temporary_directory.name) / "developer.sqlite3"
+        scheduler.initialize_database()
+        scheduler.app.config["TESTING"] = True
+        self.client = scheduler.app.test_client()
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_database_path
+        self.temporary_directory.cleanup()
+
+    def setup_developer(self, username="reviewer", password="Strong-Developer-2026!"):
+        state = self.client.get("/api/developer/auth-state").get_json()
+        response = self.client.post(
+            "/api/developer/setup",
+            headers={"X-CSRF-Token": state["csrfToken"]},
+            json={"username": username, "password": password},
+        )
+        return response
+
+    def test_change_request_log_requires_developer_login_and_exposes_dependencies(self):
+        self.assertEqual(
+            self.client.get("/api/developer/change-requests").status_code,
+            401,
+        )
+        state = self.client.get("/api/developer/auth-state").get_json()
+        remote_setup = self.client.post(
+            "/api/developer/setup",
+            environ_base={"REMOTE_ADDR": "192.0.2.1"},
+            headers={"X-CSRF-Token": state["csrfToken"]},
+            json={
+                "username": "remote-reviewer",
+                "password": "Strong-Developer-2026!",
+            },
+        )
+        self.assertEqual(remote_setup.status_code, 403)
+        setup = self.setup_developer()
+        self.assertEqual(setup.status_code, 200)
+
+        listing = self.client.get("/api/developer/change-requests")
+        self.assertEqual(listing.status_code, 200)
+        requests = listing.get_json()["requests"]
+        self.assertEqual(len(requests), len(scheduler.DEVELOPER_REQUESTS))
+        self.assertEqual(listing.get_json()["nextEligible"]["id"], "tenant-identity")
+        hub = next(item for item in requests if item["id"] == "business-hub")
+        self.assertEqual(hub["dependencies"][0]["id"], "tenant-identity")
+        self.assertEqual(hub["dependencies"][0]["status"], "pending")
+        self.assertEqual(
+            self.client.get("/api/developer/change-requests?status=invalid").status_code,
+            400,
+        )
+        done_filter = self.client.get(
+            "/api/developer/change-requests?status=done"
+        ).get_json()
+        self.assertEqual(done_filter["requests"][0]["id"], "developer-change-log")
+        self.assertEqual(done_filter["nextEligible"]["id"], "tenant-identity")
+
+    def test_change_request_status_cannot_bypass_blocking_requests(self):
+        setup = self.setup_developer()
+        token = setup.get_json()["csrfToken"]
+        blocked = self.client.put(
+            "/api/developer/change-requests/business-hub",
+            headers={"X-CSRF-Token": token},
+            json={"status": "in_progress"},
+        )
+        self.assertEqual(blocked.status_code, 409)
+
+        started = self.client.put(
+            "/api/developer/change-requests/tenant-identity",
+            headers={"X-CSRF-Token": token},
+            json={"status": "in_progress"},
+        )
+        self.assertEqual(started.status_code, 200)
+        completed = self.client.put(
+            "/api/developer/change-requests/tenant-identity",
+            headers={"X-CSRF-Token": token},
+            json={"status": "done"},
+        )
+        self.assertEqual(completed.status_code, 200)
+        unblocked = self.client.put(
+            "/api/developer/change-requests/business-hub",
+            headers={"X-CSRF-Token": token},
+            json={"status": "in_progress"},
+        )
+        self.assertEqual(unblocked.status_code, 200)
+
+    def test_developer_credentials_can_be_changed_and_rotated(self):
+        setup = self.setup_developer()
+        token = setup.get_json()["csrfToken"]
+        changed = self.client.post(
+            "/api/developer/credentials",
+            headers={"X-CSRF-Token": token},
+            json={
+                "currentPassword": "Strong-Developer-2026!",
+                "username": "reviewer-two",
+                "newPassword": "Another-Strong-Password-2026!",
+            },
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.get_json()["username"], "reviewer-two")
+        self.client.post(
+            "/api/developer/logout",
+            headers={"X-CSRF-Token": changed.get_json()["csrfToken"]},
+            json={},
+        )
+        state = self.client.get("/api/developer/auth-state").get_json()
+        old_login = self.client.post(
+            "/api/developer/login",
+            headers={"X-CSRF-Token": state["csrfToken"]},
+            json={
+                "username": "reviewer",
+                "password": "Strong-Developer-2026!",
+            },
+        )
+        self.assertEqual(old_login.status_code, 401)
+        new_login = self.client.post(
+            "/api/developer/login",
+            headers={"X-CSRF-Token": state["csrfToken"]},
+            json={
+                "username": "reviewer-two",
+                "password": "Another-Strong-Password-2026!",
+            },
+        )
+        self.assertEqual(new_login.status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

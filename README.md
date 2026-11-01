@@ -113,6 +113,20 @@ attach it before sending. The app creates email drafts; it does not send them
 automatically. Existing schedule locations need manager details added before
 they can be included in a confirmation email.
 
+## Developer change requests
+
+Open **Developer change requests** from the app menu. On first use, create a
+developer username and a unique password with at least 14 characters. Initial
+setup is restricted to the computer running the app; there is no built-in
+`developer/developer` credential. The developer log supports sign-in, credential
+updates, status filters, and dependency checks for starting or completing work.
+
+The approved SaaS roadmap is recorded there, but the Copilot builder is not
+connected yet. The page does not launch agents or apply code changes. The
+current scheduler remains a local single-user app; the planned multi-tenant
+identity, employee portal, shift-trade approval, payment, and Copilot automation
+requests require separate implementation phases.
+
 ## Data and tests
 
 Accepted schedules, employee records, schedule locations, and business
