@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Business status | CBL Schedule</title>
+  <style>
+    :root { color-scheme: light; font-family: Segoe UI, Arial, sans-serif; color: #183044; background: #f3f6f8; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 32px 16px; box-sizing: border-box; }
+    main { width: min(100%, 640px); background: white; border-radius: 12px; padding: 32px; box-shadow: 0 8px 32px #1830441a; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    h2 { margin: 28px 0 8px; font-size: 1.15rem; }
+    p { line-height: 1.5; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    button, a.button { display: inline-block; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+    button.secondary { background: #5b6b78; }
+    button.danger { background: #a12121; margin: 0; padding: 6px 12px; }
+    [hidden] { display: none !important; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; background: #e3eef4; }
+    .badge.pending { background: #fff1c7; }
+    .badge.active { background: #d9f2d0; }
+    .badge.suspended { background: #f8d7d7; }
+    .note { margin-top: 14px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
+    .error { color: #a12121; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e3eaef; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="businessName">Your business</h1>
+    <p>Status: <span id="status" class="badge">…</span></p>
+    <p id="statusText"></p>
+    <p id="statusNote" class="note" hidden></p>
+    <a id="openApp" class="button" href="/" hidden>Open the scheduler</a>
+
+    <section id="adminSection" hidden>
+      <h2>Administrators</h2>
+      <p>Every administrator must set up an authenticator app the first time they sign in.</p>
+      <ul id="adminList"></ul>
+      <form id="adminForm" hidden>
+        <label for="adminName">Name</label>
+        <input id="adminName" maxlength="120" required>
+        <label for="adminEmail">Email</label>
+        <input id="adminEmail" type="email" maxlength="254" required>
+        <label for="adminPassword">Temporary password (14+ characters, share it privately)</label>
+        <input id="adminPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+        <button type="submit">Add administrator</button>
+      </form>
+    </section>
+
+    <button id="signOut" class="secondary" type="button">Sign out</button>
+    <p id="message" class="error" role="alert" aria-live="polite"></p>
+  </main>
+  <script>
+    const $ = selector => document.querySelector(selector);
+    const message = $("#message");
+    let csrfToken = "";
+    let isPrimary = false;
+    const descriptions = {
+      pending: "Your registration is waiting for approval. Scheduling is unavailable until the platform owner approves your business. You can sign in to check back at any time.",
+      active: "Your business is active.",
+      suspended: "Your business is suspended. Scheduling is unavailable. Contact the platform owner to restore access."
+    };
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The request failed.");
+      return result;
+    }
+
+    function renderAdmins(admins) {
+      const list = $("#adminList");
+      list.replaceChildren();
+      for (const admin of admins.filter(item => item.active)) {
+        const row = document.createElement("li");
+        const text = document.createElement("span");
+        text.textContent = `${admin.name} · ${admin.email}${admin.isPrimary ? " · main administrator" : ""}${admin.mfaEnabled ? "" : " · authenticator not set up yet"}`;
+        row.append(text);
+        if (isPrimary && !admin.isPrimary) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "danger";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", async () => {
+            message.textContent = "";
+            try {
+              await request(`/api/business/admins/${encodeURIComponent(admin.id)}`, { method: "DELETE" });
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          row.append(remove);
+        }
+        list.append(row);
+      }
+    }
+
+    async function load() {
+      const status = await (await fetch("/api/business/status")).json();
+      if (status.error) { window.location.assign("/"); return; }
+      csrfToken = status.csrfToken;
+      isPrimary = status.isPrimaryAdmin;
+      $("#businessName").textContent = status.businessName;
+      $("#status").textContent = status.status;
+      $("#status").className = `badge ${status.status}`;
+      $("#statusText").textContent = descriptions[status.status] || "";
+      $("#statusNote").hidden = !status.note;
+      $("#statusNote").textContent = status.note ? `Note from the platform owner: ${status.note}` : "";
+      $("#openApp").hidden = status.status !== "active";
+      $("#adminSection").hidden = false;
+      $("#adminForm").hidden = !isPrimary;
+      renderAdmins((await (await fetch("/api/business/admins")).json()).admins);
+    }
+
+    $("#adminForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      try {
+        await request("/api/business/admins", {
+          method: "POST",
+          body: JSON.stringify({
+            name: $("#adminName").value,
+            email: $("#adminEmail").value,
+            password: $("#adminPassword").value
+          })
+        });
+        event.target.reset();
+        await load();
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    $("#signOut").addEventListener("click", async () => {
+      try {
+        await request("/api/tenant-auth/logout", { method: "POST", body: "{}" });
+        window.location.assign("/");
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    load().catch(() => { message.textContent = "The status could not be loaded. Reload the page."; });
+  </script>
+</body>
+</html>

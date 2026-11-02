@@ -85,7 +85,7 @@ DEFAULT_APP_CONFIG = {
     "tenantId": "cbljm",
 }
 MAX_LOGO_BYTES = 2 * 1024 * 1024
-_validated_bamboo_keys: dict[str, tuple[str, str, datetime]] = {}
+_validated_bamboo_keys: dict[str, tuple[str, str, datetime, str]] = {}
 STATIC_ASSETS = {
     "CBL-Scheduler2.css",
     "CBL-Scheduler2.config.js",
@@ -509,6 +509,31 @@ def initialize_database() -> None:
                 response_status INTEGER NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS platform_owners (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                mfa_secret TEXT,
+                mfa_enabled INTEGER NOT NULL DEFAULT 0 CHECK (mfa_enabled IN (0, 1)),
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                auth_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS platform_mfa_enrollments (
+                owner_id TEXT PRIMARY KEY REFERENCES platform_owners(id) ON DELETE CASCADE,
+                encrypted_secret TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS hub_audit_events (
+                id TEXT PRIMARY KEY,
+                actor_email TEXT,
+                action TEXT NOT NULL,
+                tenant_id TEXT,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS developer_users (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 username TEXT NOT NULL UNIQUE,
@@ -539,6 +564,45 @@ def initialize_database() -> None:
             );
             """
         )
+        tenant_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(tenants)")
+        }
+        status_missing = "status" not in tenant_columns
+        for column, definition in (
+            (
+                "status",
+                "TEXT NOT NULL DEFAULT 'active' CHECK "
+                "(status IN ('pending', 'active', 'suspended', 'rejected'))",
+            ),
+            ("status_note", "TEXT NOT NULL DEFAULT ''"),
+            ("contact_email", "TEXT NOT NULL DEFAULT ''"),
+            ("bamboohr_api_key_encrypted", "TEXT"),
+            ("reviewed_at", "TEXT"),
+        ):
+            if column not in tenant_columns:
+                connection.execute(f"ALTER TABLE tenants ADD COLUMN {column} {definition}")
+        if status_missing:
+            connection.execute("UPDATE tenants SET status = 'suspended' WHERE active = 0")
+        admin_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(tenant_admins)")
+        }
+        if "is_primary" not in admin_columns:
+            connection.execute(
+                "ALTER TABLE tenant_admins ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"
+            )
+            connection.execute(
+                """
+                UPDATE tenant_admins SET is_primary = 1
+                WHERE id IN (
+                    SELECT (
+                        SELECT b.id FROM tenant_admins b
+                        WHERE b.tenant_id = t.tenant_id
+                        ORDER BY b.created_at, b.id LIMIT 1
+                    )
+                    FROM tenants t
+                )
+                """
+            )
         connection.execute(
             "INSERT OR IGNORE INTO tenants (tenant_id, business_name) VALUES (?, ?)",
             (DEFAULT_TENANT_ID, DEFAULT_APP_CONFIG["businessName"]),
@@ -1227,8 +1291,50 @@ def current_app_config() -> dict[str, str]:
             (active_tenant_id(),),
         ).fetchall()
     config = DEFAULT_APP_CONFIG | dict(rows)
-    config["apiKeyConfigured"] = str(bool(os.environ.get("BAMBOOHR_API_KEY", "").strip())).lower()
+    config["apiKeyConfigured"] = str(bool(bamboohr_api_key())).lower()
     return config
+
+
+def bamboohr_cipher() -> Fernet:
+    derived_key = hashlib.sha256(
+        b"cbl-scheduler-bamboohr-credentials\0" + MFA_ENCRYPTION_KEY.encode("utf-8")
+    ).digest()
+    return Fernet(base64.urlsafe_b64encode(derived_key))
+
+
+def encrypt_bamboohr_api_key(api_key: str) -> str:
+    return bamboohr_cipher().encrypt(api_key.encode("utf-8")).decode("ascii")
+
+
+def bamboohr_api_key() -> str:
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection:
+        row = connection.execute(
+            "SELECT bamboohr_api_key_encrypted FROM tenants WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+    if row and row[0]:
+        try:
+            return bamboohr_cipher().decrypt(row[0].encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError):
+            return ""
+    # Only the original business may still fall back to the server environment.
+    return os.environ.get("BAMBOOHR_API_KEY", "").strip() if tenant_id == DEFAULT_TENANT_ID else ""
+
+
+def migrate_environment_bamboohr_key() -> bool:
+    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    if not api_key:
+        return False
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE tenants SET bamboohr_api_key_encrypted = ?
+            WHERE tenant_id = ? AND bamboohr_api_key_encrypted IS NULL
+            """,
+            (encrypt_bamboohr_api_key(api_key), DEFAULT_TENANT_ID),
+        )
+    return updated.rowcount > 0
 
 
 def bamboohr_endpoint(path: str) -> str:
@@ -1346,8 +1452,8 @@ def provision_tenant_admin(name: str, email: str, password: str) -> str:
         created = connection.execute(
             """
             INSERT OR IGNORE INTO tenant_admins
-                (id, tenant_id, email, display_name, password_hash)
-            VALUES (?, ?, ?, ?, ?)
+                (id, tenant_id, email, display_name, password_hash, is_primary)
+            VALUES (?, ?, ?, ?, ?, 1)
             """,
             (
                 admin_id,
@@ -1398,6 +1504,65 @@ def reset_tenant_admin_mfa(email: str) -> None:
         connection.execute("DELETE FROM tenant_login_attempts")
 
 
+def provision_platform_owner(name: str, email: str, password: str) -> str:
+    if (
+        not valid_admin_email(email)
+        or not name.strip()
+        or len(name.strip()) > 120
+        or not 14 <= len(password) <= 1024
+    ):
+        raise ValueError("Provide a valid name, email, and password of at least 14 characters.")
+    owner_id = secrets.token_urlsafe(18)
+    with closing(database_connect()) as connection, connection:
+        created = connection.execute(
+            """
+            INSERT OR IGNORE INTO platform_owners
+                (id, email, display_name, password_hash)
+            VALUES (?, ?, ?, ?)
+            """,
+            (owner_id, email.strip().casefold(), name.strip(), generate_password_hash(password)),
+        )
+        if created.rowcount == 0:
+            raise RuntimeError("A platform owner already uses that email address.")
+    return owner_id
+
+
+def reset_platform_owner_password(email: str, password: str) -> None:
+    if not valid_admin_email(email) or not 14 <= len(password) <= 1024:
+        raise ValueError("Provide a valid email and a password of at least 14 characters.")
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE platform_owners
+            SET password_hash = ?, auth_version = auth_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email = ?
+            """,
+            (generate_password_hash(password), email.strip().casefold()),
+        )
+        if updated.rowcount == 0:
+            raise RuntimeError("No platform owner uses that email address.")
+        connection.execute("DELETE FROM tenant_login_attempts")
+
+
+def reset_platform_owner_mfa(email: str) -> None:
+    if not valid_admin_email(email):
+        raise ValueError("Provide a valid platform owner email.")
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE platform_owners
+            SET mfa_secret = NULL, mfa_enabled = 0, auth_version = auth_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email = ?
+            """,
+            (email.strip().casefold(),),
+        )
+        if updated.rowcount == 0:
+            raise RuntimeError("No platform owner uses that email address.")
+        connection.execute("DELETE FROM tenant_login_attempts")
+
+
 def new_totp_secret() -> str:
     return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
 
@@ -1439,10 +1604,10 @@ def tenant_authenticated() -> bool:
     with closing(database_connect()) as connection:
         account = connection.execute(
             """
-            SELECT a.auth_version, a.active, a.mfa_enabled
+            SELECT a.auth_version, a.active, a.mfa_enabled, t.status
             FROM tenant_admins a
             JOIN tenants t ON t.tenant_id = a.tenant_id
-            WHERE a.id = ? AND a.tenant_id = ? AND t.active = 1
+            WHERE a.id = ? AND a.tenant_id = ? AND t.status != 'rejected'
             """,
             (admin_id, tenant_id),
         ).fetchone()
@@ -1452,6 +1617,7 @@ def tenant_authenticated() -> bool:
         session.clear()
         g.tenant_id = DEFAULT_TENANT_ID
         return False
+    g.tenant_status = account[3]
     return True
 
 
@@ -1520,13 +1686,20 @@ def otp_qr_data_uri(otp_uri: str) -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
-def start_mfa_enrollment(connection, admin_id: str, email: str) -> tuple[str, str]:
+def start_mfa_enrollment(
+    connection, admin_id: str, email: str, platform_owner: bool = False
+) -> tuple[str, str]:
     secret = new_totp_secret()
+    table, column = (
+        ("platform_mfa_enrollments", "owner_id")
+        if platform_owner
+        else ("tenant_mfa_enrollments", "admin_id")
+    )
     connection.execute(
-        """
-        INSERT INTO tenant_mfa_enrollments (admin_id, encrypted_secret)
+        f"""
+        INSERT INTO {table} ({column}, encrypted_secret)
         VALUES (?, ?)
-        ON CONFLICT(admin_id) DO UPDATE
+        ON CONFLICT({column}) DO UPDATE
         SET encrypted_secret = excluded.encrypted_secret,
             created_at = CURRENT_TIMESTAMP
         """,
@@ -1536,14 +1709,30 @@ def start_mfa_enrollment(connection, admin_id: str, email: str) -> tuple[str, st
     return secret, f"otpauth://totp/{label}?secret={secret}&issuer=CBL%20Schedule"
 
 
+def cross_origin_request() -> bool:
+    origin = request.headers.get("Origin")
+    if not origin:
+        return False
+    parsed_origin = urlsplit(origin)
+    return (
+        parsed_origin.scheme not in {"http", "https"}
+        or parsed_origin.netloc.casefold() != request.host.casefold()
+    )
+
+
 @app.before_request
 def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
+    g.tenant_status = None
     if DATABASE_URL and not request.is_secure and not http_allowed_for_client():
         return (
             "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
             400,
         )
+    if request.path.startswith("/api/hub/"):
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
+            return jsonify(error="Cross-origin requests are not allowed."), 403
+        return None
     if request.path.startswith("/api/developer/") or request.path.startswith(
         "/api/tenant-auth/"
     ):
@@ -1551,15 +1740,13 @@ def enforce_tenant_authentication():
     if request.path.startswith("/api/"):
         if not tenant_authenticated():
             return jsonify(error="Sign in as a business administrator to continue."), 401
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("Origin")
-            if origin:
-                parsed_origin = urlsplit(origin)
-                if (
-                    parsed_origin.scheme not in {"http", "https"}
-                    or parsed_origin.netloc.casefold() != request.host.casefold()
-                ):
-                    return jsonify(error="Cross-origin requests are not allowed."), 403
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
+            return jsonify(error="Cross-origin requests are not allowed."), 403
+        if g.tenant_status != "active" and not request.path.startswith("/api/business/"):
+            return jsonify(
+                error="This business is not active. Scheduling is unavailable until it is approved.",
+                businessStatus=g.tenant_status,
+            ), 403
     return None
 
 
@@ -1572,7 +1759,9 @@ def audit_tenant_mutation(response):
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
-    if request.path == "/" or request.path.startswith("/api/tenant-auth/"):
+    if request.path == "/" or request.path.startswith(
+        ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub")
+    ):
         response.headers["Cache-Control"] = "no-store"
     actor_id = session.get("tenant_admin_id") or session.get("pending_tenant_admin_id")
     auth_success = (
@@ -1582,6 +1771,7 @@ def audit_tenant_mutation(response):
     if (
         request.path.startswith("/api/")
         and not request.path.startswith("/api/developer/")
+        and not request.path.startswith("/api/hub/")
         and request.method not in {"GET", "HEAD", "OPTIONS"}
         and response.status_code < 500
         and (isinstance(actor_id, str) or auth_success)
@@ -1622,6 +1812,7 @@ def tenant_auth_state():
         configured=configured,
         authenticated=authenticated,
         email=session.get("tenant_admin_email") if authenticated else None,
+        businessStatus=g.tenant_status if authenticated else None,
         csrfToken=csrf_token,
         canBootstrap=(
             not DATABASE_URL
@@ -1661,8 +1852,8 @@ def bootstrap_tenant_admin():
         created = connection.execute(
             """
             INSERT OR IGNORE INTO tenant_admins
-                (id, tenant_id, email, display_name, password_hash)
-            VALUES (?, ?, ?, ?, ?)
+                (id, tenant_id, email, display_name, password_hash, is_primary)
+            VALUES (?, ?, ?, ?, ?, 1)
             """,
             (
                 admin_id,
@@ -1714,7 +1905,7 @@ def tenant_admin_login():
             SELECT a.id, a.tenant_id, a.email, a.password_hash, a.mfa_secret,
                    a.mfa_enabled, a.auth_version, a.active
             FROM tenant_admins a
-            JOIN tenants t ON t.tenant_id = a.tenant_id AND t.active = 1
+            JOIN tenants t ON t.tenant_id = a.tenant_id AND t.status != 'rejected'
             WHERE a.email = ?
             """,
             (email,),
@@ -1847,11 +2038,523 @@ def tenant_admin_logout():
     return jsonify(loggedOut=True)
 
 
+BUSINESS_STATUS_TRANSITIONS = {
+    "pending": {"active", "rejected"},
+    "active": {"suspended"},
+    "suspended": {"active"},
+    "rejected": {"pending"},
+}
+# Several businesses can share one database only when PostgreSQL enforces tenant isolation.
+MULTI_BUSINESS = bool(DATABASE_URL)
+
+
+class RegistrationConflict(Exception):
+    pass
+
+
+def hub_csrf_valid() -> bool:
+    supplied = request.headers.get("X-CSRF-Token", "")
+    expected = session.get("hub_csrf", "")
+    return bool(supplied and expected and secrets.compare_digest(supplied, expected))
+
+
+def hub_attempt_key(kind: str, identifier: str = "") -> str:
+    return hmac.new(
+        app.config["SECRET_KEY"].encode("utf-8"),
+        f"hub-{kind}\0{request.remote_addr or 'unknown'}\0{identifier}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def hub_audit(
+    connection: DatabaseConnection,
+    action: str,
+    tenant_id: str | None = None,
+    detail: str = "",
+    actor_email: str | None = None,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO hub_audit_events (id, actor_email, action, tenant_id, detail)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (secrets.token_urlsafe(18), actor_email, action, tenant_id, detail[:500]),
+    )
+
+
+def clear_hub_session() -> None:
+    for key in (
+        "platform_owner_id",
+        "platform_owner_email",
+        "platform_auth_version",
+        "pending_platform_owner_id",
+    ):
+        session.pop(key, None)
+    session["hub_csrf"] = secrets.token_urlsafe(32)
+
+
+def platform_owner_authenticated() -> bool:
+    owner_id = session.get("platform_owner_id")
+    auth_version = session.get("platform_auth_version")
+    if not isinstance(owner_id, str) or not isinstance(auth_version, int):
+        return False
+    with closing(database_connect()) as connection:
+        account = connection.execute(
+            "SELECT auth_version, active, mfa_enabled FROM platform_owners WHERE id = ?",
+            (owner_id,),
+        ).fetchone()
+    if not account or account[0] != auth_version or not account[1] or not (
+        account[2] or MFA_BYPASS
+    ):
+        clear_hub_session()
+        return False
+    return True
+
+
+def platform_owner_guard():
+    if not platform_owner_authenticated():
+        return jsonify(error="Sign in as the platform owner to continue."), 401
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not hub_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    return None
+
+
+def business_slug(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")[:40].strip("-")
+    return f"{base or 'business'}-{secrets.token_hex(3)}"
+
+
+@app.get("/api/hub/state")
+def hub_state():
+    if not isinstance(session.get("hub_csrf"), str):
+        session["hub_csrf"] = secrets.token_urlsafe(32)
+    authenticated = platform_owner_authenticated()
+    with closing(database_connect()) as connection:
+        configured = connection.execute(
+            "SELECT 1 FROM platform_owners LIMIT 1"
+        ).fetchone() is not None
+    return jsonify(
+        csrfToken=session["hub_csrf"],
+        registrationOpen=MULTI_BUSINESS,
+        ownerConfigured=configured,
+        ownerAuthenticated=authenticated,
+        ownerEmail=session.get("platform_owner_email") if authenticated else None,
+    )
+
+
+@app.post("/api/hub/register")
+def hub_register():
+    if not MULTI_BUSINESS:
+        return jsonify(
+            error="Business registration requires the PostgreSQL multi-business deployment."
+        ), 503
+    if not hub_csrf_valid():
+        return jsonify(error="The registration session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Send the registration details as JSON."), 400
+    business_name = payload.get("businessName")
+    subdomain = payload.get("bamboohrSubdomain")
+    api_key = payload.get("bamboohrApiKey")
+    admin_name = payload.get("adminName")
+    admin_email = payload.get("adminEmail")
+    password = payload.get("password")
+    if (
+        not isinstance(business_name, str)
+        or not 2 <= len(business_name.strip()) <= 120
+        or not valid_tenant_id(subdomain)
+        or not valid_bamboohr_api_key(api_key)
+        or not isinstance(admin_name, str)
+        or not 1 <= len(admin_name.strip()) <= 120
+        or not valid_admin_email(admin_email)
+        or not isinstance(password, str)
+        or not 14 <= len(password) <= 1024
+    ):
+        return jsonify(
+            error="Enter the business name, BambooHR subdomain and API key, and an administrator name, email, and password of at least 14 characters."
+        ), 400
+    business_name, subdomain = business_name.strip(), subdomain.lower()
+    email = admin_email.strip().casefold()
+    limit_key = hub_attempt_key("register")
+    now = int(time_module.time())
+    with closing(database_connect()) as connection, connection:
+        attempt_state = tenant_auth_attempt_state(connection, limit_key, now)
+        if attempt_state is None:
+            return jsonify(error="Too many registration attempts. Try again later."), 429
+        record_tenant_auth_failure(connection, limit_key, *attempt_state, now)
+    failure = check_bamboohr_credentials(subdomain, api_key)
+    if failure:
+        return jsonify(error=failure[0]), 400 if failure[1] in {401, 403} else failure[1]
+
+    tenant_id = business_slug(business_name)
+    admin_id = secrets.token_urlsafe(18)
+    try:
+        with closing(database_connect()) as connection, connection:
+            if connection.execute(
+                "SELECT 1 FROM tenant_admins WHERE email = ?", (email,)
+            ).fetchone():
+                raise RegistrationConflict
+            connection.execute(
+                """
+                INSERT INTO tenants
+                    (tenant_id, business_name, status, contact_email, bamboohr_api_key_encrypted)
+                VALUES (?, ?, 'pending', ?, ?)
+                """,
+                (tenant_id, business_name, email, encrypt_bamboohr_api_key(api_key.strip())),
+            )
+            connection.execute(
+                """
+                INSERT INTO tenant_admins
+                    (id, tenant_id, email, display_name, password_hash, is_primary)
+                VALUES (?, ?, ?, ?, ?, 1)
+                """,
+                (admin_id, tenant_id, email, admin_name.strip(), generate_password_hash(password)),
+            )
+            hub_audit(connection, "register", tenant_id, business_name)
+    except RegistrationConflict:
+        return jsonify(error="An administrator already uses that email address."), 409
+    except database_integrity_errors():
+        return jsonify(error="An administrator already uses that email address."), 409
+    g.tenant_id = tenant_id
+    try:
+        save_app_config(
+            DEFAULT_APP_CONFIG | {"businessName": business_name, "tenantId": subdomain}
+        )
+    except database_errors():
+        with closing(database_connect()) as connection, connection:
+            connection.execute("DELETE FROM tenant_admins WHERE tenant_id = ?", (tenant_id,))
+            connection.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
+        return jsonify(error="The business could not be registered. Try again."), 500
+    return jsonify(registered=True, businessStatus="pending"), 201
+
+
+@app.post("/api/hub/owner/login")
+def hub_owner_login():
+    if not hub_csrf_valid():
+        return jsonify(error="The sign-in session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not valid_admin_email(payload.get("email"))
+        or not isinstance(payload.get("password"), str)
+    ):
+        return jsonify(error="Enter your platform owner email and password."), 400
+    email = payload["email"].strip().casefold()
+    login_key = hub_attempt_key("owner", email)
+    now = int(time_module.time())
+    with closing(database_connect()) as connection, connection:
+        attempt_state = tenant_auth_attempt_state(connection, login_key, now)
+        if attempt_state is None:
+            return jsonify(error="Too many failed sign-in attempts. Try again later."), 429
+        account = connection.execute(
+            """
+            SELECT id, email, password_hash, mfa_secret, mfa_enabled, auth_version
+            FROM platform_owners WHERE email = ? AND active = 1
+            """,
+            (email,),
+        ).fetchone()
+        if not account or not check_password_hash(account[2], payload["password"]):
+            record_tenant_auth_failure(connection, login_key, *attempt_state, now)
+            return jsonify(error="The email or password is incorrect."), 401
+        if MFA_BYPASS:
+            connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+        elif not account[4]:
+            secret, otp_uri = start_mfa_enrollment(
+                connection, account[0], account[1], platform_owner=True
+            )
+            clear_hub_session()
+            session["pending_platform_owner_id"] = account[0]
+            return jsonify(
+                mfaEnrollmentRequired=True,
+                secret=secret,
+                otpAuthUri=otp_uri,
+                qrCode=otp_qr_data_uri(otp_uri),
+                csrfToken=session["hub_csrf"],
+            )
+        else:
+            try:
+                secret = mfa_cipher().decrypt(account[3].encode("ascii")).decode("ascii")
+            except (AttributeError, InvalidToken, UnicodeDecodeError):
+                return jsonify(error="Owner MFA data is unavailable; reset it from the server."), 503
+            if not verify_totp(secret, payload.get("code")):
+                record_tenant_auth_failure(connection, login_key, *attempt_state, now)
+                return jsonify(error="The email, password, or verification code is incorrect."), 401
+            connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+        hub_audit(connection, "owner-login", actor_email=account[1])
+    clear_hub_session()
+    session.permanent = True
+    session["platform_owner_id"] = account[0]
+    session["platform_owner_email"] = account[1]
+    session["platform_auth_version"] = account[5]
+    return jsonify(authenticated=True, csrfToken=session["hub_csrf"])
+
+
+@app.post("/api/hub/owner/verify-mfa")
+def hub_owner_verify_mfa():
+    if not hub_csrf_valid():
+        return jsonify(error="The setup session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    owner_id = session.get("pending_platform_owner_id")
+    if not isinstance(payload, dict) or not isinstance(owner_id, str):
+        return jsonify(error="Restart platform owner sign-in to continue MFA setup."), 401
+    with closing(database_connect()) as connection, connection:
+        enrollment = connection.execute(
+            """
+            SELECT e.encrypted_secret, o.email, o.auth_version, o.active
+            FROM platform_mfa_enrollments e
+            JOIN platform_owners o ON o.id = e.owner_id
+            WHERE e.owner_id = ?
+            """,
+            (owner_id,),
+        ).fetchone()
+        if not enrollment or not enrollment[3]:
+            return jsonify(error="The MFA enrollment session is no longer valid."), 401
+        login_key = hub_attempt_key("owner", enrollment[1])
+        now = int(time_module.time())
+        attempt_state = tenant_auth_attempt_state(connection, login_key, now)
+        if attempt_state is None:
+            return jsonify(error="Too many failed verification attempts. Try again later."), 429
+        try:
+            secret = mfa_cipher().decrypt(enrollment[0].encode("ascii")).decode("ascii")
+        except (InvalidToken, UnicodeDecodeError):
+            return jsonify(error="MFA enrollment data is unavailable; reset it from the server."), 503
+        if not verify_totp(secret, payload.get("code")):
+            record_tenant_auth_failure(connection, login_key, *attempt_state, now)
+            return jsonify(error="Enter the current six-digit code from your authenticator."), 400
+        connection.execute(
+            """
+            UPDATE platform_owners
+            SET mfa_secret = ?, mfa_enabled = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (mfa_cipher().encrypt(secret.encode("ascii")).decode("ascii"), owner_id),
+        )
+        connection.execute("DELETE FROM platform_mfa_enrollments WHERE owner_id = ?", (owner_id,))
+        connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+        hub_audit(connection, "owner-mfa-enrolled", actor_email=enrollment[1])
+    clear_hub_session()
+    session.permanent = True
+    session["platform_owner_id"] = owner_id
+    session["platform_owner_email"] = enrollment[1]
+    session["platform_auth_version"] = enrollment[2]
+    return jsonify(authenticated=True, csrfToken=session["hub_csrf"])
+
+
+@app.post("/api/hub/owner/logout")
+def hub_owner_logout():
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    clear_hub_session()
+    return jsonify(loggedOut=True)
+
+
+@app.get("/api/hub/businesses")
+def hub_businesses():
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    with closing(database_connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT t.tenant_id, t.business_name, t.status, t.status_note,
+                   t.contact_email, t.created_at, t.reviewed_at,
+                   (SELECT COUNT(*) FROM tenant_admins a
+                    WHERE a.tenant_id = t.tenant_id AND a.active = 1)
+            FROM tenants t
+            ORDER BY CASE t.status WHEN 'pending' THEN 0 WHEN 'active' THEN 1
+                     WHEN 'suspended' THEN 2 ELSE 3 END, t.created_at DESC
+            """
+        ).fetchall()
+    return jsonify(
+        businesses=[
+            {
+                "id": row[0],
+                "name": row[1],
+                "status": row[2],
+                "note": row[3],
+                "contactEmail": row[4],
+                "createdAt": row[5],
+                "reviewedAt": row[6],
+                "adminCount": row[7],
+            }
+            for row in rows
+        ]
+    )
+
+
+@app.post("/api/hub/businesses/<tenant_id>/status")
+def hub_set_business_status(tenant_id: str):
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    status = payload.get("status") if isinstance(payload, dict) else None
+    note = payload.get("note", "") if isinstance(payload, dict) else ""
+    if status not in {"pending", "active", "suspended", "rejected"} or not isinstance(note, str) or len(note) > 500:
+        return jsonify(error="Choose a valid status and a note of at most 500 characters."), 400
+    with closing(database_connect()) as connection, connection:
+        current = connection.execute(
+            "SELECT status FROM tenants WHERE tenant_id = ?", (tenant_id,)
+        ).fetchone()
+        if not current:
+            return jsonify(error="Business was not found."), 404
+        if status not in BUSINESS_STATUS_TRANSITIONS[current[0]]:
+            return jsonify(error=f"A {current[0]} business cannot become {status}."), 409
+        changed = connection.execute(
+            """
+            UPDATE tenants
+            SET status = ?, status_note = ?, reviewed_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND status = ?
+            """,
+            (status, note.strip(), tenant_id, current[0]),
+        )
+        if changed.rowcount == 0:
+            return jsonify(error="The business changed while you were reviewing it. Reload and retry."), 409
+        hub_audit(
+            connection,
+            f"status-{current[0]}-to-{status}",
+            tenant_id,
+            note.strip(),
+            session.get("platform_owner_email"),
+        )
+    return jsonify(id=tenant_id, status=status)
+
+
+@app.get("/api/business/status")
+def business_status():
+    with closing(database_connect()) as connection:
+        row = connection.execute(
+            "SELECT business_name, status, status_note FROM tenants WHERE tenant_id = ?",
+            (active_tenant_id(),),
+        ).fetchone()
+        admin = connection.execute(
+            "SELECT is_primary FROM tenant_admins WHERE id = ?",
+            (session.get("tenant_admin_id"),),
+        ).fetchone()
+    return jsonify(
+        businessName=row[0],
+        status=row[1],
+        note=row[2],
+        isPrimaryAdmin=bool(admin and admin[0]),
+        email=session.get("tenant_admin_email"),
+        csrfToken=session.get("tenant_auth_csrf"),
+    )
+
+
+def primary_admin_guard():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    with closing(database_connect()) as connection:
+        admin = connection.execute(
+            "SELECT is_primary FROM tenant_admins WHERE id = ? AND tenant_id = ?",
+            (session.get("tenant_admin_id"), active_tenant_id()),
+        ).fetchone()
+    if not admin or not admin[0]:
+        return jsonify(error="Only the main business administrator can manage administrators."), 403
+    return None
+
+
+@app.get("/api/business/admins")
+def list_business_admins():
+    with closing(database_connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, email, display_name, active, mfa_enabled, is_primary
+            FROM tenant_admins WHERE tenant_id = ?
+            ORDER BY is_primary DESC, created_at, email
+            """,
+            (active_tenant_id(),),
+        ).fetchall()
+    return jsonify(
+        admins=[
+            {
+                "id": row[0],
+                "email": row[1],
+                "name": row[2],
+                "active": bool(row[3]),
+                "mfaEnabled": bool(row[4]),
+                "isPrimary": bool(row[5]),
+            }
+            for row in rows
+        ]
+    )
+
+
+@app.post("/api/business/admins")
+def add_business_admin():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not valid_admin_email(payload.get("email"))
+        or not isinstance(payload.get("name"), str)
+        or not 1 <= len(payload["name"].strip()) <= 120
+        or not isinstance(payload.get("password"), str)
+        or not 14 <= len(payload["password"]) <= 1024
+    ):
+        return jsonify(error="Enter a name, a valid email, and a temporary password of at least 14 characters."), 400
+    admin_id = secrets.token_urlsafe(18)
+    with closing(database_connect()) as connection, connection:
+        created = connection.execute(
+            """
+            INSERT OR IGNORE INTO tenant_admins
+                (id, tenant_id, email, display_name, password_hash, is_primary)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            (
+                admin_id,
+                active_tenant_id(),
+                payload["email"].strip().casefold(),
+                payload["name"].strip(),
+                generate_password_hash(payload["password"]),
+            ),
+        )
+        if created.rowcount == 0:
+            return jsonify(error="An administrator already uses that email address."), 409
+    return jsonify(id=admin_id), 201
+
+
+@app.delete("/api/business/admins/<admin_id>")
+def remove_business_admin(admin_id: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    with closing(database_connect()) as connection, connection:
+        removed = connection.execute(
+            """
+            UPDATE tenant_admins
+            SET active = 0, auth_version = auth_version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ? AND is_primary = 0 AND active = 1
+            """,
+            (admin_id, active_tenant_id()),
+        )
+        if removed.rowcount == 0:
+            return jsonify(error="That administrator was not found or cannot be removed."), 404
+    return jsonify(removed=True)
+
+
 @app.get("/")
 def index():
     if not tenant_authenticated():
         return send_from_directory(APP_DIRECTORY, "tenant-login.html")
+    if g.tenant_status != "active":
+        return send_from_directory(APP_DIRECTORY, "business-status.html")
     return send_from_directory(APP_DIRECTORY, "CBL-Scheduler2.html")
+
+
+@app.get("/hub")
+def hub_page():
+    return send_from_directory(APP_DIRECTORY, "hub.html")
+
+
+@app.get("/business")
+def business_page():
+    if not tenant_authenticated():
+        return redirect("/")
+    return send_from_directory(APP_DIRECTORY, "business-status.html")
 
 
 @app.get("/<path:asset_name>")
@@ -2312,9 +3015,9 @@ def employee_id_in_use(
 
 
 def fetch_bamboohr_employees() -> list[dict[str, str]]:
-    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    api_key = bamboohr_api_key()
     if not api_key:
-        raise RuntimeError("BAMBOOHR_API_KEY is not configured on the app server.")
+        raise RuntimeError("The BambooHR API key is not configured for this business.")
     authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
     cursor = None
     seen_cursors: set[str] = set()
@@ -3523,27 +4226,14 @@ def bamboo_preview_response(payloads: list[dict]) -> list[dict]:
 
 @app.get("/api/bamboohr/status")
 def bamboohr_status():
-    return jsonify(configured=bool(os.environ.get("BAMBOOHR_API_KEY", "").strip()))
+    return jsonify(configured=bool(bamboohr_api_key()))
 
 
-@app.post("/api/bamboohr/validate-key")
-def validate_bamboohr_key():
-    payload = request.get_json(silent=True)
-    tenant_id = payload.get("tenantId") if isinstance(payload, dict) else None
-    api_key = payload.get("apiKey") if isinstance(payload, dict) else None
-    if (
-        not valid_tenant_id(tenant_id)
-        or not isinstance(api_key, str)
-        or not api_key.strip()
-        or len(api_key) > 4096
-        or any(character in api_key for character in "\r\n:")
-    ):
-        return jsonify(error="Enter a valid BambooHR tenant ID and API key."), 400
-
-    tenant_id = tenant_id.lower()
+def check_bamboohr_credentials(subdomain: str, api_key: str) -> tuple[str, int] | None:
+    """Return (message, status) when BambooHR rejects the credentials, else None."""
     authorization = base64.b64encode(f"{api_key.strip()}:x".encode("utf-8")).decode("ascii")
     outbound = Request(
-        f"{bamboohr_endpoint_for_tenant(tenant_id, 'time_off/whos_out')}?"
+        f"{bamboohr_endpoint_for_tenant(subdomain, 'time_off/whos_out')}?"
         f"{urlencode({'start': date.today().isoformat(), 'end': date.today().isoformat()})}",
         headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
         method="GET",
@@ -3553,15 +4243,39 @@ def validate_bamboohr_key():
             response.read(2048)
     except HTTPError as error:
         if error.code == 401:
-            return jsonify(error="BambooHR rejected this API key for the supplied tenant."), 401
+            return "BambooHR rejected this API key for the supplied tenant.", 401
         if error.code == 403:
-            return jsonify(error="BambooHR denied this key access to the time-off endpoint."), 403
-        return jsonify(error=f"BambooHR key validation failed with HTTP {error.code}."), 502
+            return "BambooHR denied this key access to the time-off endpoint.", 403
+        return f"BambooHR key validation failed with HTTP {error.code}.", 502
     except (URLError, TimeoutError, OSError):
-        return jsonify(error="The app server could not reach BambooHR to validate the key."), 502
+        return "The app server could not reach BambooHR to validate the key.", 502
+    return None
+
+
+def valid_bamboohr_api_key(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= 4096
+        and not any(character in value for character in "\r\n:")
+    )
+
+
+@app.post("/api/bamboohr/validate-key")
+def validate_bamboohr_key():
+    payload = request.get_json(silent=True)
+    tenant_id = payload.get("tenantId") if isinstance(payload, dict) else None
+    api_key = payload.get("apiKey") if isinstance(payload, dict) else None
+    if not valid_tenant_id(tenant_id) or not valid_bamboohr_api_key(api_key):
+        return jsonify(error="Enter a valid BambooHR tenant ID and API key."), 400
+
+    tenant_id = tenant_id.lower()
+    failure = check_bamboohr_credentials(tenant_id, api_key)
+    if failure:
+        return jsonify(error=failure[0]), failure[1]
 
     now = datetime.now(timezone.utc)
-    for token, (_, _, expires_at) in list(_validated_bamboo_keys.items()):
+    for token, (_, _, expires_at, _) in list(_validated_bamboo_keys.items()):
         if expires_at <= now:
             del _validated_bamboo_keys[token]
     promotion_token = secrets.token_urlsafe(32)
@@ -3569,6 +4283,7 @@ def validate_bamboohr_key():
         tenant_id,
         api_key.strip(),
         now + timedelta(minutes=10),
+        active_tenant_id(),
     )
     return jsonify(valid=True, tenantId=tenant_id, promotionToken=promotion_token)
 
@@ -3587,6 +4302,7 @@ def promote_bamboohr_key():
     if (
         validation is None
         or validation[2] <= now
+        or validation[3] != active_tenant_id()
         or not valid_tenant_id(tenant_id)
         or tenant_id.lower() != validation[0]
         or current_app_config()["tenantId"] != validation[0]
@@ -3595,30 +4311,25 @@ def promote_bamboohr_key():
             _validated_bamboo_keys.pop(token, None)
         return jsonify(error="Test the API key successfully for the currently saved tenant before promoting it."), 400
 
-    key_path = ENV_PATH
-    previous_dotenv_key = dotenv_values(key_path).get("BAMBOOHR_API_KEY")
+    with closing(database_connect()) as connection, connection:
+        previous = connection.execute(
+            "SELECT bamboohr_api_key_encrypted FROM tenants WHERE tenant_id = ?",
+            (active_tenant_id(),),
+        ).fetchone()
+        connection.execute(
+            "UPDATE tenants SET bamboohr_api_key_encrypted = ? WHERE tenant_id = ?",
+            (encrypt_bamboohr_api_key(validation[1]), active_tenant_id()),
+        )
     try:
-        success, _, _ = set_key(key_path, "BAMBOOHR_API_KEY", validation[1])
-        if not success:
-            return jsonify(error="The API key could not be saved to the app server .env file."), 500
-        try:
-            save_app_config({"tenantId": validation[0]})
-        except database_errors():
-            if previous_dotenv_key is None:
-                rollback_succeeded = unset_key(key_path, "BAMBOOHR_API_KEY")[0]
-            else:
-                rollback_succeeded = set_key(
-                    key_path, "BAMBOOHR_API_KEY", previous_dotenv_key
-                )[0]
-            if not rollback_succeeded:
-                return jsonify(
-                    error="The app settings could not be saved and the API key rollback failed; review the server .env file."
-                ), 500
-            return jsonify(error="The app settings could not be saved; the API key change was rolled back."), 500
-    except OSError:
-        return jsonify(error="The API key could not be written to the app server .env file."), 500
+        save_app_config({"tenantId": validation[0]})
+    except database_errors():
+        with closing(database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET bamboohr_api_key_encrypted = ? WHERE tenant_id = ?",
+                (previous[0] if previous else None, active_tenant_id()),
+            )
+        return jsonify(error="The app settings could not be saved; the API key change was rolled back."), 500
 
-    os.environ["BAMBOOHR_API_KEY"] = validation[1]
     del _validated_bamboo_keys[token]
     return jsonify(promoted=True, tenantId=validation[0])
 
@@ -3633,9 +4344,9 @@ def bamboohr_time_offs():
     if start.isoformat() != start_text or end.isoformat() != end_text or end < start:
         return jsonify(error="Provide a valid inclusive time-off date range."), 400
 
-    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    api_key = bamboohr_api_key()
     if not api_key:
-        return jsonify(error="BAMBOOHR_API_KEY is not configured on the app server."), 503
+        return jsonify(error="The BambooHR API key is not configured for this business."), 503
 
     authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
     outbound = Request(
@@ -3709,9 +4420,9 @@ def publish_bamboohr_schedules():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict) or payload.get("confirmed") is not True:
         return jsonify(error="Explicit confirmation is required before publishing."), 400
-    api_key = os.environ.get("BAMBOOHR_API_KEY", "").strip()
+    api_key = bamboohr_api_key()
     if not api_key:
-        return jsonify(error="Set BAMBOOHR_API_KEY on the app server before publishing."), 503
+        return jsonify(error="Set the BambooHR API key in Settings before publishing."), 503
     with closing(database_connect()) as connection:
         try:
             selections = accepted_schedule_selections(connection, payload.get("selections"))
@@ -3778,6 +4489,22 @@ def main() -> None:
         help="Remove an administrator's authenticator so it can be enrolled again.",
     )
     mfa_reset_command.add_argument("--email", required=True)
+    owner_command = commands.add_parser(
+        "bootstrap-platform-owner",
+        help="Create a platform owner who approves business registrations.",
+    )
+    owner_command.add_argument("--email", required=True)
+    owner_command.add_argument("--name", required=True)
+    owner_reset_command = commands.add_parser(
+        "reset-platform-owner-password",
+        help="Set a new password for a platform owner.",
+    )
+    owner_reset_command.add_argument("--email", required=True)
+    owner_mfa_command = commands.add_parser(
+        "reset-platform-owner-mfa",
+        help="Remove a platform owner's authenticator so it can be enrolled again.",
+    )
+    owner_mfa_command.add_argument("--email", required=True)
     migration_command = commands.add_parser(
         "migrate-sqlite",
         help="Import the current SQLite business data into PostgreSQL once.",
@@ -3790,6 +4517,38 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     initialize_database()
+    if migrate_environment_bamboohr_key():
+        print(
+            "The BambooHR API key from the server environment is now stored "
+            "encrypted for the original business. You can remove it from .env."
+        )
+    if arguments.command == "bootstrap-platform-owner":
+        password = getpass("Platform owner password (14+ characters): ")
+        if password != getpass("Confirm platform owner password: "):
+            parser.error("The passwords do not match.")
+        try:
+            provision_platform_owner(arguments.name, arguments.email, password)
+        except (RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        print("Platform owner created. Sign in at /hub to enroll mandatory MFA.")
+        return
+    if arguments.command == "reset-platform-owner-password":
+        password = getpass("New platform owner password (14+ characters): ")
+        if password != getpass("Confirm new password: "):
+            parser.error("The passwords do not match.")
+        try:
+            reset_platform_owner_password(arguments.email, password)
+        except (RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        print("Password reset. Existing sessions are signed out.")
+        return
+    if arguments.command == "reset-platform-owner-mfa":
+        try:
+            reset_platform_owner_mfa(arguments.email)
+        except (RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        print("MFA reset. Sign in at /hub with the password to scan a new QR code.")
+        return
     if arguments.command == "migrate-sqlite":
         confirmation = input(
             "This imports SQLite data and replaces the target tenant's initial "

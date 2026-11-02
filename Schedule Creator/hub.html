@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Business hub | CBL Schedule</title>
+  <style>
+    :root { color-scheme: light; font-family: Segoe UI, Arial, sans-serif; color: #183044; background: #f3f6f8; }
+    body { margin: 0; padding: 32px 16px; box-sizing: border-box; display: grid; place-items: start center; min-height: 100vh; }
+    main { width: min(100%, 760px); background: white; border-radius: 12px; padding: 32px; box-shadow: 0 8px 32px #1830441a; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    h2 { margin: 0 0 8px; font-size: 1.2rem; }
+    p { line-height: 1.5; }
+    nav { display: flex; gap: 8px; margin: 16px 0 24px; }
+    nav button { margin: 0; background: #e3eef4; color: #183044; }
+    nav button[aria-pressed="true"] { background: #167da8; color: white; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    button { margin-top: 16px; padding: 10px 16px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    button.secondary { background: #5b6b78; }
+    button.good { background: #2c7a2c; }
+    button.bad { background: #a12121; }
+    [hidden] { display: none !important; }
+    .notice { margin-top: 18px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
+    .error { color: #a12121; }
+    .ok { color: #2c7a2c; }
+    .secret { font-family: Consolas, monospace; font-weight: 700; }
+    .business { border: 1px solid #d3dee5; border-radius: 8px; padding: 14px; margin-top: 12px; }
+    .business h3 { margin: 0 0 4px; font-size: 1.05rem; }
+    .business .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .business .actions button { margin-top: 8px; padding: 6px 12px; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; background: #e3eef4; }
+    .badge.pending { background: #fff1c7; }
+    .badge.active { background: #d9f2d0; }
+    .badge.suspended, .badge.rejected { background: #f8d7d7; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CBL Schedule business hub</h1>
+    <nav aria-label="Hub sections">
+      <button id="tabRegister" type="button" aria-pressed="true">Register a business</button>
+      <button id="tabOwner" type="button" aria-pressed="false">Platform owner</button>
+    </nav>
+
+    <section id="registerSection">
+      <p>Register your business to use the scheduler. Your BambooHR credentials are checked right away and stored encrypted. The platform owner reviews each registration, and scheduling is enabled once it is approved.</p>
+      <p id="registrationClosed" class="notice" hidden>Registration is available only when the server runs in multi-business (PostgreSQL) mode.</p>
+      <form id="registerForm">
+        <label for="businessName">Business name</label>
+        <input id="businessName" maxlength="120" required>
+        <label for="subdomain">BambooHR subdomain (the part before .bamboohr.com)</label>
+        <input id="subdomain" maxlength="63" pattern="[A-Za-z0-9][A-Za-z0-9\-]*" required>
+        <label for="apiKey">BambooHR API key</label>
+        <input id="apiKey" type="password" maxlength="4096" autocomplete="off" required>
+        <label for="adminName">Administrator name</label>
+        <input id="adminName" maxlength="120" autocomplete="name" required>
+        <label for="adminEmail">Administrator email</label>
+        <input id="adminEmail" type="email" maxlength="254" autocomplete="username" required>
+        <label for="password">Password (14+ characters)</label>
+        <input id="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+        <button id="registerButton" type="submit">Register business</button>
+      </form>
+      <p id="registered" class="notice ok" hidden>Registration received. Sign in at the <a href="/">scheduler sign-in page</a> to set up your authenticator app and check your approval status.</p>
+    </section>
+
+    <section id="ownerSection" hidden>
+      <form id="ownerForm">
+        <label for="ownerEmail">Platform owner email</label>
+        <input id="ownerEmail" type="email" autocomplete="username" required>
+        <label for="ownerPassword">Password</label>
+        <input id="ownerPassword" type="password" autocomplete="current-password" required>
+        <label for="ownerCode">Authenticator code (leave blank if setting up a new authenticator)</label>
+        <input id="ownerCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+        <button type="submit">Sign in</button>
+      </form>
+      <form id="enrollForm" hidden>
+        <p>Scan this QR code with your authenticator app, then enter the current six-digit code.</p>
+        <img id="qrCode" alt="QR code for the platform owner authenticator" width="220" height="220" style="display:block;margin:12px auto">
+        <details class="notice"><summary>Can't scan? Enter the key manually</summary><p>Secret: <span id="secret" class="secret"></span></p></details>
+        <label for="enrollCode">Six-digit code</label>
+        <input id="enrollCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
+        <button type="submit">Verify and continue</button>
+      </form>
+      <div id="dashboard" hidden>
+        <h2>Registered businesses</h2>
+        <p>Signed in as <span id="ownerName"></span>. <button id="ownerSignOut" class="secondary" type="button">Sign out</button></p>
+        <div id="businesses"></div>
+      </div>
+    </section>
+    <p id="message" class="error" role="alert" aria-live="polite"></p>
+  </main>
+  <script>
+    const $ = selector => document.querySelector(selector);
+    const message = $("#message");
+    let csrfToken = "";
+
+    async function send(path, payload, method = "POST") {
+      const response = await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify(payload ?? {})
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The request failed.");
+      return result;
+    }
+
+    function showTab(name) {
+      message.textContent = "";
+      $("#registerSection").hidden = name !== "register";
+      $("#ownerSection").hidden = name !== "owner";
+      $("#tabRegister").setAttribute("aria-pressed", String(name === "register"));
+      $("#tabOwner").setAttribute("aria-pressed", String(name === "owner"));
+    }
+    $("#tabRegister").addEventListener("click", () => showTab("register"));
+    $("#tabOwner").addEventListener("click", () => showTab("owner"));
+
+    $("#registerForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      const button = $("#registerButton");
+      button.disabled = true;
+      try {
+        await send("/api/hub/register", {
+          businessName: $("#businessName").value,
+          bamboohrSubdomain: $("#subdomain").value,
+          bamboohrApiKey: $("#apiKey").value,
+          adminName: $("#adminName").value,
+          adminEmail: $("#adminEmail").value,
+          password: $("#password").value
+        });
+        $("#registerForm").hidden = true;
+        $("#registered").hidden = false;
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function showEnrollment(result) {
+      csrfToken = result.csrfToken;
+      $("#ownerForm").hidden = true;
+      $("#enrollForm").hidden = false;
+      $("#secret").textContent = result.secret;
+      $("#qrCode").src = result.qrCode;
+    }
+
+    $("#ownerForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      try {
+        const result = await send("/api/hub/owner/login", {
+          email: $("#ownerEmail").value,
+          password: $("#ownerPassword").value,
+          code: $("#ownerCode").value
+        });
+        if (result.mfaEnrollmentRequired) showEnrollment(result);
+        else { csrfToken = result.csrfToken; await showDashboard(); }
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    $("#enrollForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      try {
+        const result = await send("/api/hub/owner/verify-mfa", { code: $("#enrollCode").value });
+        csrfToken = result.csrfToken;
+        await showDashboard();
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    $("#ownerSignOut").addEventListener("click", async () => {
+      try {
+        await send("/api/hub/owner/logout");
+        window.location.reload();
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    function businessCard(business) {
+      const card = document.createElement("div");
+      card.className = "business";
+      const title = document.createElement("h3");
+      title.textContent = business.name;
+      const badge = document.createElement("span");
+      badge.className = `badge ${business.status}`;
+      badge.textContent = business.status;
+      const details = document.createElement("p");
+      details.textContent = `${business.contactEmail || "No contact email"} · ${business.adminCount} active administrator(s) · registered ${business.createdAt}`;
+      const note = document.createElement("input");
+      note.placeholder = "Optional note shown to the business";
+      note.maxLength = 500;
+      note.value = business.note || "";
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const choices = {
+        pending: [["active", "Approve", "good"], ["rejected", "Reject", "bad"]],
+        active: [["suspended", "Suspend", "bad"]],
+        suspended: [["active", "Reactivate", "good"]],
+        rejected: [["pending", "Reopen for review", "secondary"]]
+      }[business.status] || [];
+      for (const [status, label, style] of choices) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = style;
+        button.textContent = label;
+        button.addEventListener("click", async () => {
+          message.textContent = "";
+          try {
+            await send(`/api/hub/businesses/${encodeURIComponent(business.id)}/status`, { status, note: note.value });
+            await loadBusinesses();
+          } catch (error) { message.textContent = error.message; }
+        });
+        actions.append(button);
+      }
+      card.append(title, badge, details, note, actions);
+      return card;
+    }
+
+    async function loadBusinesses() {
+      const response = await fetch("/api/hub/businesses");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The business list could not be loaded.");
+      $("#businesses").replaceChildren(...result.businesses.map(businessCard));
+    }
+
+    async function showDashboard() {
+      $("#ownerForm").hidden = true;
+      $("#enrollForm").hidden = true;
+      $("#dashboard").hidden = false;
+      const state = await (await fetch("/api/hub/state")).json();
+      $("#ownerName").textContent = state.ownerEmail || "";
+      await loadBusinesses();
+    }
+
+    (async () => {
+      try {
+        const state = await (await fetch("/api/hub/state")).json();
+        csrfToken = state.csrfToken;
+        $("#registrationClosed").hidden = state.registrationOpen;
+        $("#registerForm").hidden = !state.registrationOpen;
+        if (state.ownerAuthenticated) { showTab("owner"); await showDashboard(); }
+        else if (!state.ownerConfigured) $("#tabOwner").title = "Create the platform owner with: python scheduler.py bootstrap-platform-owner";
+      } catch {
+        message.textContent = "The hub is unavailable. Restart the scheduler and try again.";
+      }
+    })();
+  </script>
+</body>
+</html>

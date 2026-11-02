@@ -109,6 +109,26 @@ done passed; the notes list what was not covered.
     `bootstrap-admin` (it reads the console, so it can't be scripted), and a
     sign-in and sign-out in a real browser. The checks above used Flask's test client.
 
+## Business registration and SaaS hub (`business-hub`)
+
+Automated results: 44-test SQLite suite passes; PostgreSQL harness
+(`pg_hub_verify.py` in the session `files` folder, run in a disposable schema that
+was dropped afterwards) passed 28 of 28 checks: two businesses registered and
+pending, pending business blocked from the scheduler API, platform-owner sign-in
+with MFA enrolment and approval, approved businesses working, per-business encrypted
+BambooHR keys, row-level isolation of settings between businesses, suspend and
+reactivate affecting only that business, and invalid transitions refused.
+
+Manual steps still needed:
+
+- [ ] Create the platform owner: `python scheduler.py bootstrap-platform-owner --email <email> --name "<name>"`, then sign in at `/hub` and enrol the authenticator.
+- [ ] First start-up copies `BAMBOOHR_API_KEY` from `.env` into the encrypted store for `cbljm`; confirm the default business still loads employees, then remove the key from `.env`.
+- [ ] Register a real business at `/hub` (live BambooHR credential check), sign in as its admin, see the pending page, approve it as the owner, and confirm the scheduler opens with no locations or employees.
+- [ ] As the business's primary admin, add and remove an administrator from Settings, Business administrators.
+- [ ] Suspend and reactivate a business in a real browser.
+- [ ] Not covered: browser UI of `hub.html` and `business-status.html`, and the BambooHR credential check against a real account (mocked in tests).
+- The temporary MFA bypass also applies to the platform-owner sign-in; remove it with the item above.
+
 ## Test evidence and handoff
 
 - [x] PostgreSQL 18.6, server on the local network. The tests ran in
