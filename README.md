@@ -27,10 +27,78 @@ employees and BambooHR schedule locations, and publishing accepted shifts.
    python scheduler.py
    ```
 
-The batch file starts the server on `127.0.0.1:5001`, checks that the current
-app's employee API is responding, and opens the app in Chrome. If port 5001 is
+The batch file starts the server on `127.0.0.1:5001`, checks that the
+authentication API is responding, and opens the app in Chrome. If port 5001 is
 already occupied, close the other server before starting this one. The app is
 available at <http://127.0.0.1:5001/>.
+
+## Administrator sign-in and storage
+
+The app requires a business administrator to sign in before accessing scheduling
+or business APIs. On first launch, create the initial administrator from the
+local computer with a unique password of at least 14 characters. Enroll an
+authenticator app using the displayed setup secret and verify its current
+six-digit code. Administrator MFA is mandatory. Sign out from the application
+header when finished.
+
+Local development uses SQLite at
+`Schedule Creator\data\schedule_creator.sqlite3`. Flask's session-signing key
+and the independent MFA-encryption key are generated in
+`Schedule Creator\data\flask_secret.key` and
+`Schedule Creator\data\mfa_encryption.key`. Keep these files private and
+preserve them with the database; losing the MFA-encryption key prevents existing
+authenticator secrets from being decrypted. They are excluded from Git.
+
+For a PostgreSQL-backed deployment, configure these values in
+`Schedule Creator\.env` (or the process environment):
+
+```dotenv
+SCHEDULE_CREATOR_DATABASE_URL=postgresql://scheduler_app:password@db-host/scheduler
+SCHEDULE_CREATOR_TENANT_ID=business-slug
+FLASK_SECRET_KEY=at-least-32-random-characters
+SCHEDULE_CREATOR_MFA_ENCRYPTION_KEY=another-independent-32-character-secret
+SCHEDULE_CREATOR_TRUSTED_PROXY_HOPS=1
+```
+
+Provision the first PostgreSQL administrator from a trusted server shell
+(passwords are prompted, not included in command history):
+
+```powershell
+python scheduler.py bootstrap-admin --email admin@example.com --name "Business Admin"
+```
+
+The administrator must enroll MFA at their first HTTPS sign-in. PostgreSQL
+bootstrap is deliberately not exposed through the public web setup endpoint.
+
+Use a dedicated PostgreSQL application role without `SUPERUSER` or
+`BYPASSRLS`. The app enables and forces row-level security for schedule,
+employee, configuration, and audit data. PostgreSQL mode requires HTTPS; set
+the trusted-proxy count to the exact number of reverse proxies that set
+`X-Forwarded-Proto` and `X-Forwarded-Host`, and terminate TLS at that trusted
+proxy. Do not expose the Flask development server directly to the internet.
+To install the tables on a new server ahead of time, run
+[`Schedule Creator/schema_postgres.sql`](<Schedule Creator/schema_postgres.sql>)
+as the application role (the file's header lists the role and database setup
+steps). The app also creates the same schema itself on first start.
+`SCHEDULE_CREATOR_TENANT_ID` identifies the app's business tenant and is
+separate from the BambooHR tenant ID in Settings.
+
+To import an existing local CBL database, configure PostgreSQL and the secrets
+above, then run `python scheduler.py migrate-sqlite` from `Schedule Creator`.
+The command defaults to the current SQLite database, prompts for confirmation,
+and imports business schedules, employees, locations, settings, and developer
+change-request data into the configured tenant. It refuses to overwrite a
+target that already has an administrator, accepted schedules, or conflicting
+developer credentials, runs as one transaction, and can be used only once. The
+SQLite source is not modified.
+Imported admin passwords are retained, but all admins must enroll MFA again
+because encryption keys are deployment-specific.
+
+The initial local setup creates one administrator for the configured tenant.
+Business registration, membership approval, and managing additional tenant
+accounts remain separate roadmap work. PostgreSQL schema support is included;
+verify connection, backups, restore procedures, and deployment-specific
+operations in the target environment before production use.
 
 ## BambooHR configuration
 
@@ -122,18 +190,20 @@ setup is restricted to the computer running the app; there is no built-in
 updates, status filters, and dependency checks for starting or completing work.
 
 The approved SaaS roadmap is recorded there, but the Copilot builder is not
-connected yet. The page does not launch agents or apply code changes. The
-current scheduler remains a local single-user app; the planned multi-tenant
-identity, employee portal, shift-trade approval, payment, and Copilot automation
-requests require separate implementation phases.
+connected yet. The page does not launch agents or apply code changes. Tenant
+registration and membership management, manager/employee access, the employee
+portal, shift trades, payment, and Copilot automation remain separate
+implementation phases.
 
 ## Data and tests
 
-Accepted schedules, employee records, schedule locations, and business
-configuration are stored in `Schedule Creator\data\schedule_creator.sqlite3`.
-Scheduling workspace preferences and generated schedules are saved in the
-browser when browser storage is available; use the app's backup feature to
-retain or move a workspace.
+In local development, accepted schedules, employee records, schedule locations,
+and business configuration are stored in
+`Schedule Creator\data\schedule_creator.sqlite3`. PostgreSQL is selected by
+`SCHEDULE_CREATOR_DATABASE_URL`; tenant-owned tables use PostgreSQL row-level
+security. Scheduling workspace preferences and generated schedules are saved
+in the browser when browser storage is available; use the app's backup feature
+to retain or move a workspace.
 
 Run the Flask API tests from `Schedule Creator`:
 

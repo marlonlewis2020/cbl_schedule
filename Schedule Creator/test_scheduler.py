@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
 import base64
 from contextlib import closing
@@ -10,6 +11,103 @@ from urllib.error import HTTPError, URLError
 from unittest.mock import MagicMock, patch
 
 import scheduler
+
+scheduler.MFA_BYPASS = False
+
+def authenticate_test_admin(client):
+    with closing(scheduler.database_connect()) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO tenant_admins
+                (id, tenant_id, email, display_name, password_hash,
+                 mfa_secret, mfa_enabled, active, auth_version)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1)
+            """,
+            (
+                "test-admin",
+                scheduler.DEFAULT_TENANT_ID,
+                "test-admin@example.com",
+                "Test Admin",
+                scheduler.generate_password_hash("test-only-password"),
+                "test-encrypted-secret",
+            ),
+        )
+    with client.session_transaction() as browser_session:
+        browser_session["tenant_admin_id"] = "test-admin"
+        browser_session["tenant_id"] = scheduler.DEFAULT_TENANT_ID
+        browser_session["tenant_admin_email"] = "test-admin@example.com"
+        browser_session["tenant_auth_version"] = 1
+        browser_session["tenant_auth_csrf"] = "test-csrf-token"
+
+
+class TemporaryMfaBypassTests(unittest.TestCase):
+    def test_bypass_signs_in_with_password_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original_path = scheduler.DATABASE_PATH
+            scheduler.DATABASE_PATH = Path(directory) / "bypass.sqlite3"
+            try:
+                scheduler.initialize_database()
+                scheduler.provision_tenant_admin("A", "a@example.com", "test-password-123456")
+                credentials = {"email": "a@example.com", "password": "test-password-123456"}
+                for enabled, expected in ((False, 200), (True, 200)):
+                    client = scheduler.app.test_client()
+                    token = client.get("/api/tenant-auth/state").get_json()["csrfToken"]
+                    with patch.object(scheduler, "MFA_BYPASS", enabled):
+                        response = client.post(
+                            "/api/tenant-auth/login",
+                            headers={"X-CSRF-Token": token},
+                            json=credentials,
+                        )
+                        self.assertEqual(response.status_code, expected)
+                        self.assertEqual(
+                            bool(response.get_json().get("authenticated")), enabled
+                        )
+                        self.assertEqual(
+                            client.get("/api/employees").status_code,
+                            200 if enabled else 401,
+                        )
+            finally:
+                scheduler.DATABASE_PATH = original_path
+
+
+class TemporaryLanHttpTests(unittest.TestCase):
+    def test_plain_http_only_allowed_for_private_clients_when_enabled(self):
+        def probe(enabled, address, forwarded=None):
+            headers = {"X-Forwarded-For": forwarded} if forwarded else {}
+            with patch.object(scheduler, "ALLOW_LAN_HTTP", enabled), patch.object(
+                scheduler, "DATABASE_URL", "postgresql://unused"
+            ), scheduler.app.test_request_context(
+                "/", headers=headers, environ_overrides={"REMOTE_ADDR": address}
+            ):
+                return scheduler.http_allowed_for_client()
+
+        self.assertFalse(probe(False, "192.168.100.73"))
+        self.assertTrue(probe(True, "192.168.100.73"))
+        self.assertTrue(probe(True, "127.0.0.1"))
+        self.assertFalse(probe(True, "8.8.8.8"))
+        self.assertFalse(probe(True, "192.168.100.73", forwarded="8.8.8.8"))
+
+
+class PostgresAdapterTests(unittest.TestCase):
+    def test_sqlite_placeholders_and_conflict_compatibility_are_translated(self):
+        class CaptureConnection:
+            def execute(self, query, parameters):
+                self.query = query
+                self.parameters = parameters
+                return self
+
+        connection = CaptureConnection()
+        adapter = scheduler.PostgresConnection(connection)
+        adapter.execute(
+            "INSERT OR IGNORE INTO values_table (name, value) "
+            "SELECT ?, '?' WHERE ? COLLATE NOCASE = 'beta'",
+            ("alpha", "beta"),
+        )
+        self.assertIn("SELECT %s, '?'", connection.query)
+        self.assertIn("WHERE %s  = 'beta'", connection.query)
+        self.assertIn("ON CONFLICT DO NOTHING", connection.query)
+        self.assertNotIn("NOCASE", connection.query)
+        self.assertEqual(connection.parameters, ("alpha", "beta"))
 
 
 class AcceptedScheduleApiTests(unittest.TestCase):
@@ -20,6 +118,7 @@ class AcceptedScheduleApiTests(unittest.TestCase):
         scheduler.initialize_database()
         scheduler.app.config["TESTING"] = True
         self.client = scheduler.app.test_client()
+        authenticate_test_admin(self.client)
         self.schedule = {
             "id": "pool|2026-11-02|r1",
             "start": "2026-11-02",
@@ -87,6 +186,179 @@ class AcceptedScheduleApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class TenantAuthenticationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.original_database_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.temporary_directory.name) / "schedules.sqlite3"
+        scheduler.initialize_database()
+        scheduler.app.config["TESTING"] = True
+        self.client = scheduler.app.test_client()
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_database_path
+        self.temporary_directory.cleanup()
+
+    def test_existing_sqlite_settings_are_migrated_without_data_loss(self):
+        with closing(scheduler.database_connect()) as legacy_database, legacy_database:
+            legacy_database.execute("DROP TABLE application_settings")
+            legacy_database.execute(
+                """
+                CREATE TABLE application_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL
+                )
+                """
+            )
+            legacy_database.execute(
+                "INSERT INTO application_settings VALUES (?, ?)",
+                ("businessName", "Existing Business"),
+            )
+
+        scheduler.initialize_database()
+
+        with closing(scheduler.database_connect()) as connection:
+            settings = connection.execute(
+                """
+                SELECT setting_value, tenant_id FROM application_settings
+                WHERE setting_key = ?
+                """,
+                ("businessName",),
+            ).fetchone()
+            primary_key = [
+                row[1]
+                for row in sorted(
+                    (
+                        row
+                        for row in connection.execute(
+                            "PRAGMA table_info(application_settings)"
+                        ).fetchall()
+                        if row[5]
+                    ),
+                    key=lambda row: row[5],
+                )
+            ]
+        self.assertEqual(settings, ("Existing Business", scheduler.DEFAULT_TENANT_ID))
+        self.assertEqual(primary_key, ["tenant_id", "setting_key"])
+
+    def test_admin_bootstrap_requires_mfa_and_protects_business_apis(self):
+        login_page = self.client.get("/")
+        self.assertIn(b"Administrator sign-in", login_page.data)
+        login_page.close()
+        self.assertEqual(self.client.get("/api/employees").status_code, 401)
+        auth_state = self.client.get("/api/tenant-auth/state").get_json()
+        self.assertTrue(auth_state["canBootstrap"])
+        self.assertEqual(
+            self.client.post(
+                "/api/tenant-auth/bootstrap",
+                headers={"X-CSRF-Token": auth_state["csrfToken"]},
+                json={
+                    "name": "First Admin",
+                    "email": "admin@example.com",
+                    "password": "a-very-long-test-password",
+                },
+            ).status_code,
+            201,
+        )
+        with closing(scheduler.database_connect()) as connection:
+            audit_event = connection.execute(
+                """
+                SELECT action, route, actor_id FROM tenant_audit_events
+                WHERE route = 'bootstrap_tenant_admin'
+                """
+            ).fetchone()
+        self.assertEqual(audit_event[0:2], ("POST", "bootstrap_tenant_admin"))
+        self.assertTrue(audit_event[2])
+
+        self.client.get("/api/tenant-auth/state")
+        with self.client.session_transaction() as browser_session:
+            pending_csrf = browser_session["tenant_auth_csrf"]
+            pending_admin_id = browser_session["pending_tenant_admin_id"]
+        with closing(scheduler.database_connect()) as connection:
+            encrypted = connection.execute(
+                "SELECT encrypted_secret FROM tenant_mfa_enrollments WHERE admin_id = ?",
+                (pending_admin_id,),
+            ).fetchone()[0]
+        secret = scheduler.mfa_cipher().decrypt(encrypted.encode("ascii")).decode("ascii")
+        code = scheduler.totp_value(secret, int(time.time() // 30))
+        verified = self.client.post(
+            "/api/tenant-auth/verify-mfa",
+            headers={"X-CSRF-Token": pending_csrf},
+            json={"code": code},
+        )
+        self.assertEqual(verified.status_code, 200)
+        self.assertEqual(self.client.get("/api/app-config").status_code, 200)
+        self.assertEqual(
+            self.client.post(
+                "/api/tenant-auth/logout",
+                headers={"X-CSRF-Token": verified.get_json()["csrfToken"]},
+                json={},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.client.get("/api/employees").status_code, 401)
+
+        csrf = self.client.get("/api/tenant-auth/state").get_json()["csrfToken"]
+        invalid_mfa = self.client.post(
+            "/api/tenant-auth/login",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "email": "admin@example.com",
+                "password": "a-very-long-test-password",
+                "code": "invalid",
+            },
+        )
+        self.assertEqual(invalid_mfa.status_code, 401)
+        valid_login = self.client.post(
+            "/api/tenant-auth/login",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "email": "admin@example.com",
+                "password": "a-very-long-test-password",
+                "code": scheduler.totp_value(secret, int(time.time() // 30)),
+            },
+        )
+        self.assertEqual(valid_login.status_code, 200)
+        scheduler_page = self.client.get("/")
+        self.assertIn(b"Scheduling Command Centre", scheduler_page.data)
+        scheduler_page.close()
+        cross_origin = self.client.post(
+            "/api/app-config",
+            headers={"Origin": "https://attacker.example"},
+            json={},
+        )
+        self.assertEqual(cross_origin.status_code, 403)
+
+    def test_mfa_enrollment_verification_is_rate_limited(self):
+        auth_state = self.client.get("/api/tenant-auth/state").get_json()
+        created = self.client.post(
+            "/api/tenant-auth/bootstrap",
+            headers={"X-CSRF-Token": auth_state["csrfToken"]},
+            json={
+                "name": "First Admin",
+                "email": "admin@example.com",
+                "password": "a-very-long-test-password",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        enrollment = created.get_json()
+        self.assertTrue(enrollment["qrCode"].startswith("data:image/svg+xml;base64,"))
+        csrf = enrollment["csrfToken"]
+        for _ in range(5):
+            rejected = self.client.post(
+                "/api/tenant-auth/verify-mfa",
+                headers={"X-CSRF-Token": csrf},
+                json={"code": "invalid"},
+            )
+            self.assertEqual(rejected.status_code, 400)
+        locked = self.client.post(
+            "/api/tenant-auth/verify-mfa",
+            headers={"X-CSRF-Token": csrf},
+            json={"code": "invalid"},
+        )
+        self.assertEqual(locked.status_code, 429)
+
+
 class DirectoryAndBambooApiTests(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -95,6 +367,7 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         scheduler.initialize_database()
         scheduler.app.config["TESTING"] = True
         self.client = scheduler.app.test_client()
+        authenticate_test_admin(self.client)
 
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
@@ -121,6 +394,12 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.get_json()["tenantId"], "acme-hr")
         self.assertEqual(saved.get_json()["teamName"], "Operations")
+        with closing(scheduler.database_connect()) as connection:
+            business_name = connection.execute(
+                "SELECT business_name FROM tenants WHERE tenant_id = ?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            ).fetchone()[0]
+        self.assertEqual(business_name, "Example Business")
         self.assertEqual(scheduler.bamboohr_endpoint("time_off/whos_out"),
                          "https://acme-hr.bamboohr.com/api/v1/time_off/whos_out")
 

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrator sign in | CBL Schedule</title>
+  <style>
+    :root { color-scheme: light; font-family: Segoe UI, Arial, sans-serif; color: #183044; background: #f3f6f8; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+    main { width: min(100%, 430px); background: white; border-radius: 12px; padding: 32px; box-shadow: 0 8px 32px #1830441a; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    p { line-height: 1.5; }
+    label { display: block; margin: 16px 0 6px; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; padding: 11px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    button { width: 100%; margin-top: 20px; padding: 12px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    [hidden] { display: none !important; }
+    .notice { margin-top: 18px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
+    .error { color: #a12121; }
+    .secret { font-family: Consolas, monospace; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CBL Schedule</h1>
+    <p id="intro">Administrator sign-in is required.</p>
+    <form id="accountForm">
+      <label id="nameLabel" for="name" hidden>Administrator name</label>
+      <input id="name" autocomplete="name" maxlength="120" hidden>
+      <label for="email">Administrator email</label>
+      <input id="email" type="email" autocomplete="username" maxlength="254" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <div id="codeField">
+        <label for="code">Authenticator code (leave blank if setting up a new authenticator)</label>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code"         pattern="[0-9 ]{6,7}" maxlength="7">
+      </div>
+      <button id="submitButton" type="submit" disabled>Sign in</button>
+    </form>
+    <form id="mfaForm" hidden>
+      <p>Scan this QR code with your authenticator app, then enter the current six-digit code it shows.</p>
+      <img id="qrCode" alt="QR code for adding this account to an authenticator app" width="220" height="220" style="display:block;margin:12px auto">
+      <details class="notice">
+        <summary>Can't scan? Enter the key manually</summary>
+        <p>Secret: <span id="secret" class="secret"></span></p>
+      </details>
+      <label for="setupCode">Six-digit code</label>
+      <input id="setupCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required>
+      <button type="submit">Verify and continue</button>
+    </form>
+    <p id="message" class="error" role="alert" aria-live="polite"></p>
+  </main>
+  <script>
+    const accountForm = document.querySelector("#accountForm");
+    const mfaForm = document.querySelector("#mfaForm");
+    const message = document.querySelector("#message");
+    let csrfToken = "";
+
+    async function send(path, payload) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The request failed.");
+      return result;
+    }
+
+    function showEnrollment(result) {
+      csrfToken = result.csrfToken;
+      accountForm.hidden = true;
+      mfaForm.hidden = false;
+      document.querySelector("#secret").textContent = result.secret;
+      document.querySelector("#qrCode").src = result.qrCode;
+      document.querySelector("#intro").textContent = "Multi-factor authentication setup is required.";
+      document.querySelector("#setupCode").focus();
+    }
+
+    accountForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      const button = document.querySelector("#submitButton");
+      button.disabled = true;
+      try {
+        const payload = {
+          email: document.querySelector("#email").value,
+          password: document.querySelector("#password").value
+        };
+        const result = accountForm.dataset.bootstrap === "true"
+          ? await send("/api/tenant-auth/bootstrap", {
+              ...payload,
+              name: document.querySelector("#name").value
+            })
+          : await send("/api/tenant-auth/login", {
+              ...payload,
+              code: document.querySelector("#code").value
+            });
+        if (result.mfaEnrollmentRequired) showEnrollment(result);
+        else window.location.assign("/");
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    mfaForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      try {
+        await send("/api/tenant-auth/verify-mfa", {
+          code: document.querySelector("#setupCode").value
+        });
+        window.location.assign("/");
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
+
+    (async () => {
+      try {
+        const response = await fetch("/api/tenant-auth/state");
+        const state = await response.json();
+        csrfToken = state.csrfToken;
+        if (state.authenticated) {
+          window.location.assign("/");
+          return;
+        }
+        if (!state.configured && state.canBootstrap) {
+          accountForm.dataset.bootstrap = "true";
+          document.querySelector("#intro").textContent = "Create the first business administrator account.";
+          document.querySelector("#nameLabel").hidden = false;
+          document.querySelector("#name").hidden = false;
+          document.querySelector("#name").required = true;
+          document.querySelector("#password").autocomplete = "new-password";
+          document.querySelector("#codeField").hidden = true;
+          document.querySelector("#submitButton").textContent = "Create administrator";
+        }
+        document.querySelector("#submitButton").disabled = false;
+      } catch {
+        message.textContent = "The authentication service is unavailable. Restart the scheduler and try again.";
+      }
+    })();
+  </script>
+</body>
+</html>

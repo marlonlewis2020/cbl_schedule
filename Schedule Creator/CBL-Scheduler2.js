@@ -3223,6 +3223,20 @@ async function action(a,element=null){
         return
     }
     try{
+        if(a==='tenantLogout'){
+            let stateResponse=await fetch('/api/tenant-auth/state');
+            let state=await stateResponse.json();
+            if(!stateResponse.ok||!state.csrfToken)throw Error(state.error||'Unable to validate the sign-out session.');
+            let logoutResponse=await fetch('/api/tenant-auth/logout',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrfToken},
+                body:'{}'
+            });
+            let logoutResult=await logoutResponse.json();
+            if(!logoutResponse.ok)throw Error(logoutResult.error||'Sign out failed.');
+            window.location.assign('/');
+            return
+        }
         if(a==='pickBusinessLogo'){
             $('businessLogoFile')?.click();
             return
