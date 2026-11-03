@@ -2145,7 +2145,7 @@ document.addEventListener('click',async e=>{
 }
 );
 let storageMode='unknown',storageReason='';
-let collapsedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
+let expandedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
 let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0;
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -2349,12 +2349,12 @@ function panel(t,body,note=''){
     return `<section class="panel"><h3>${t}</h3>${body}${note?`<p class="note">${note}</p>`:''}</section>`
 }
 function collapsiblePanel(key,t,body,note=''){
-    return `<section class="panel collapsible"><details data-collapse-key="${esc(key)}" ${collapsedPanels.has(key)?'':'open'}><summary><h3>${t}</h3></summary><div class="panel-body">${body}${note?`<p class="note">${note}</p>`:''}</div></details></section>`
+    return `<section class="panel collapsible"><details data-collapse-key="${esc(key)}" ${expandedPanels.has(key)?'open':''}><summary><h3>${t}</h3></summary><div class="panel-body">${body}${note?`<p class="note">${note}</p>`:''}</div></details></section>`
 }
 document.addEventListener('toggle',e=>{
     let key=e.target?.dataset?.collapseKey;
     if(!key)return;
-    if(e.target.open)collapsedPanels.delete(key);else collapsedPanels.add(key)
+    if(e.target.open)expandedPanels.add(key);else expandedPanels.delete(key)
 },true);
 function badge(t,status=''){
     return `<span class="badge ${status}">${esc(t)}</span>`
