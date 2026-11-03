@@ -11,6 +11,8 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-03", "Manager and employee attendance tables now show a Shift time (start) column."),
+    ("2026-11-03", "Manager attendance page: added From/To date filters that default to today."),
     ("2026-11-03", "Sidebar groups are collapsed by default and open one at a time when the group title is selected; Plan schedules is the second-to-last group."),
     ("2026-11-03", "Expanded notification details now include the shift time (start)."),
     ("2026-11-03", "Notification bell: the list pops up below the bell and can be closed; unread alerts are highlighted, selecting one expands its details and marks it read (shown pale)."),
@@ -270,7 +272,7 @@ SECTIONS = [
                     ("h3", "Managers"),
                     ("ul", [
                         "At first sign-in the manager replaces the temporary password (at least 14 characters) and enrols an authenticator app. MFA is mandatory for managers; later sign-ins need the six-digit code (unless the temporary MFA bypass is enabled on the server).",
-                        "The attendance table shows the last 30 days for the manager's own employees. Mark absent is offered for late shifts and needs a reason; it is audited.",
+                        "The attendance page has From and To date filters that default to today (Jamaica time) when it opens; change the dates and select Apply, or Today to reset. The table lists the manager's own employees for that range, with each shift's date and start time. Mark absent is offered for late shifts and needs a reason; it is audited.",
                         "The bell shows the unread count of late and absent alerts for the manager's employees and refreshes every 30 seconds. Select the bell to open a list below it and Close to hide it. Unread alerts are highlighted in amber; select one to expand its details (status, employee, location, shift date, time detected) and it turns pale as read. Mark all read clears the count for that manager only. Alerts appear only in the app; no email is sent.",
                     ]),
                     ("h3", "Employees"),

@@ -21,6 +21,8 @@
     header.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
     .bell { position: relative; font-size: 1.1rem; background: #eef5f8; color: #183044; }
     .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 1px 5px; border-radius: 10px; background: #c62828; color: white; font-size: .75rem; }
+    .filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 8px 0 12px; }
+    .filter label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; }
     #panel { position: absolute; right: 28px; z-index: 20; width: min(400px, 92vw); max-height: 70vh; overflow: auto; margin-top: 4px; padding: 12px; border: 1px solid #9fb4c2; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px #0004; }
     #panel .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     #panel ul { list-style: none; margin: 0; padding: 0; }
@@ -81,8 +83,14 @@
       <ul id="notificationList"></ul>
     </section>
     <p id="summary"></p>
+    <form id="dateFilter" class="filter" hidden>
+      <label for="filterStart">From <input id="filterStart" type="date" required></label>
+      <label for="filterEnd">To <input id="filterEnd" type="date" required></label>
+      <button type="submit">Apply</button>
+      <button id="filterToday" class="secondary" type="button">Today</button>
+    </form>
     <table>
-      <thead><tr><th>Date</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
+      <thead><tr><th>Date</th><th>Shift time</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <p id="appMessage" class="error" role="alert" aria-live="polite"></p>
@@ -119,6 +127,7 @@
       for (const record of records) {
         const row = document.createElement("tr");
         cell(row, record.date);
+        cell(row, record.shiftStart == null ? "" : `${hourLabel(Number(record.shiftStart))} start`);
         cell(row, record.employeeName || record.employeeId);
         cell(row, record.location);
         cell(row, record.role);
@@ -136,8 +145,8 @@
       }
       if (!records.length) {
         const row = document.createElement("tr");
-        const td = cell(row, "No attendance records in the last 30 days.");
-        td.colSpan = 7;
+        const td = cell(row, role === "manager" ? "No attendance records for the selected dates." : "No attendance records in the last 30 days.");
+        td.colSpan = 8;
         body.append(row);
       }
     }
@@ -157,11 +166,21 @@
       }
     }
 
+    function todayInJamaica() {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Jamaica" }).format(new Date());
+    }
+
     async function loadData() {
-      const result = await api(role === "manager" ? "/api/access/manager/attendance" : "/api/access/me/attendance");
+      let path = "/api/access/me/attendance";
+      if (role === "manager") {
+        const start = $("#filterStart").value, end = $("#filterEnd").value;
+        if (!start || !end || end < start) throw new Error("Choose a valid date range.");
+        path = `/api/access/manager/attendance?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+      }
+      const result = await api(path);
       renderRecords(result.records);
       $("#summary").textContent = role === "manager"
-        ? `Showing ${result.start} to ${result.end} for ${result.scopeEmployees} employee(s) at your locations.`
+        ? `Showing ${result.start === result.end ? result.start : result.start + " to " + result.end} for ${result.scopeEmployees} employee(s) at your locations.`
         : `Your attendance from ${result.start} to ${result.end}: ` +
           (Object.entries(result.counts).map(([status, count]) => `${count} ${status.replace("_", " ")}`).join(", ") || "no shifts");
     }
@@ -262,6 +281,10 @@
       $("#subtitle").textContent = `${user.name} · ${user.businessName}`;
       $("#actionHead").hidden = user.role !== "manager";
       $("#bell").hidden = user.role !== "manager";
+      $("#dateFilter").hidden = user.role !== "manager";
+      if (user.role === "manager") {
+        $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
+      }
       try {
         await loadData();
         if (user.role === "manager") {
@@ -273,6 +296,15 @@
       }
     }
 
+    $("#dateFilter").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#appMessage").textContent = "";
+      try { await loadData(); } catch (error) { $("#appMessage").textContent = error.message; }
+    });
+    $("#filterToday").addEventListener("click", () => {
+      $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
+      $("#dateFilter").requestSubmit();
+    });
     $("#bell").addEventListener("click", () => { $("#panel").hidden = !$("#panel").hidden; });
     $("#closePanel").addEventListener("click", () => { $("#panel").hidden = true; });
     $("#markAll").addEventListener("click", async () => {
