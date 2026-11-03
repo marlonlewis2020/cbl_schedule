@@ -68,8 +68,20 @@ aside{
 }
 nav{
     display:grid;
-    gap:3px;
+    gap:12px;
     overflow:auto
+}
+.nav-group{
+    display:grid;
+    gap:3px
+}
+.nav-group-title{
+    padding:0 13px 3px;
+    color:var(--muted);
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:1.2px;
+    text-transform:uppercase
 }
 nav button{
     border:0;
@@ -686,7 +698,14 @@ button:disabled{
     }
     nav{
         display:flex;
+        align-items:flex-start;
         overflow:auto
+    }
+    .nav-group{
+        flex:0 0 auto
+    }
+    .nav-group-title{
+        padding:0 10px 3px
     }
     nav button{
         white-space:nowrap;
@@ -1349,6 +1368,115 @@ td small,th small{
     flex-wrap:wrap;
     margin:14px 0
 }
+.employee-actions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(120px,1fr));
+    gap:8px;
+    min-width:256px;
+    margin:0
+}
+.employee-actions button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    min-height:40px;
+    padding:8px 12px;
+    border:1px solid #087fa8;
+    border-radius:8px;
+    background:#087fa8;
+    color:#fff;
+    text-align:center;
+    line-height:1.25;
+    white-space:normal
+}
+.employee-actions button:hover{
+    background:#066b8d;
+    border-color:#066b8d
+}
+.employee-actions button.danger{
+    background:#b4432b;
+    border-color:#b4432b;
+    color:#fff
+}
+.employee-actions button.danger:hover{
+    background:#963722;
+    border-color:#963722
+}
+[data-theme="dark"] .employee-actions button{
+    background:#087fa8;
+    border-color:#087fa8;
+    color:#fff
+}
+[data-theme="dark"] .employee-actions button:hover{
+    background:#066b8d;
+    border-color:#066b8d
+}
+[data-theme="dark"] .employee-actions button.danger{
+    background:#b4432b;
+    border-color:#b4432b;
+    color:#fff
+}
+[data-theme="dark"] .employee-actions button.danger:hover{
+    background:#963722;
+    border-color:#963722
+}
+.assignment-split{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+    gap:14px;
+    align-items:stretch;
+    margin:18px 0
+}
+.assignment-split section{
+    min-width:0;
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:12px
+}
+.assignment-split h3{
+    font-size:13px;
+    margin:0 0 10px
+}
+.assignment-list{
+    max-height:46vh;
+    overflow:auto
+}
+.assignment-list label{
+    display:flex;
+    align-items:flex-start;
+    gap:9px;
+    padding:9px 5px;
+    border-bottom:1px solid var(--line);
+    font-size:12px
+}
+.assignment-list label span{
+    min-width:0
+}
+.assignment-list small{
+    display:block;
+    color:var(--muted);
+    margin-top:3px
+}
+.assignment-arrows{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:8px
+}
+.assignment-arrows button{
+    font-size:22px;
+    color:var(--blue)
+}
+@media(max-width:720px){
+    .assignment-split{
+        grid-template-columns:1fr
+    }
+    .assignment-arrows{
+        flex-direction:row;
+        justify-content:center
+    }
+}
 .formgrid{
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -1685,6 +1813,20 @@ dialog input[type=checkbox]{
 #emailDeadline{
     font-weight:600;
     color:#176454
+}
+#employeeSyncDialog{
+    width:min(820px,92vw)
+}
+#sourceImportReviewDialog{
+    width:min(1200px,96vw)
+}
+#sourceImportReviewDialog .tablewrap{
+    max-height:58vh;
+    overflow:auto
+}
+#sourceImportReviewDialog select{
+    min-width:125px;
+    max-width:220px
 }
 [data-theme=dark] dialog{
     background:#142e39;
@@ -2121,4 +2263,57 @@ dialog input[type=checkbox]{
 }
 [data-theme=dark] .sharepoint-search{
     border-color:var(--line)
+}
+.shift-options{
+    display:flex;
+    align-items:end;
+    flex-wrap:wrap;
+    gap:8px;
+    min-width:260px
+}
+.shift-options label{
+    min-width:88px;
+    font-size:10px
+}
+.shift-option{
+    display:flex;
+    align-items:end;
+    gap:4px
+}
+.shift-option label{
+    min-width:78px
+}
+.shift-options input{
+    min-width:88px;
+    padding:6px
+}
+.shift-remove{
+    min-width:28px;
+    min-height:30px;
+    padding:4px 8px;
+    color:var(--bad,#a33)
+}
+.accepted-schedule{
+    border-top:1px solid var(--line);
+    padding:12px 0
+}
+.accepted-schedule summary{
+    cursor:pointer;
+    font-weight:600
+}
+.schedule select[data-schedule-shift]{
+    width:100%;
+    min-width:94px;
+    border:0;
+    background:transparent;
+    padding:5px 2px;
+    font-size:11px
+}
+.developer-link{
+    display:block;
+    color:var(--muted);
+    font-size:11px;
+    margin:10px 0;
+    text-decoration:underline;
+    text-underline-offset:3px
 }
