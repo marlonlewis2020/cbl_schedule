@@ -383,6 +383,47 @@ select,input{
     font-size:15px;
     letter-spacing:-.2px
 }
+.sortheader{
+    all:unset;
+    cursor:pointer;
+    font:inherit;
+    color:inherit;
+    white-space:nowrap
+}
+.sortheader:hover,.sortheader:focus-visible{
+    text-decoration:underline
+}
+.panel.collapsible>details>summary{
+    cursor:pointer;
+    list-style:none;
+    display:flex;
+    align-items:center;
+    gap:10px
+}
+.panel.collapsible>details>summary::-webkit-details-marker{
+    display:none
+}
+.panel.collapsible>details>summary::before{
+    content:"▸";
+    color:#59717d
+}
+.panel.collapsible>details[open]>summary::before{
+    content:"▾"
+}
+.panel.collapsible>details>summary h3{
+    margin:0
+}
+.panel.collapsible>details[open]>summary{
+    margin-bottom:18px
+}
+.panel-body>p{
+    font-size:12px;
+    line-height:1.8;
+    color:#59717d
+}
+.panel-body>ul{
+    padding-left:20px
+}
 .panel>p,.panel li{
     font-size:12px;
     line-height:1.8;
@@ -1402,6 +1443,10 @@ td small,th small{
 .employee-actions button.danger:hover{
     background:#963722;
     border-color:#963722
+}
+.employee-actions.attendance-actions{
+    grid-template-columns:minmax(150px,1fr);
+    min-width:170px
 }
 [data-theme="dark"] .employee-actions button{
     background:#087fa8;
