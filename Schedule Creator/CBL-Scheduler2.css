@@ -75,7 +75,15 @@ nav{
     display:grid;
     gap:3px
 }
+.nav-group.collapsed>button{
+    display:none
+}
 .nav-group-title{
+    cursor:pointer;
+    user-select:none;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
     padding:0 13px 3px;
     color:var(--muted);
     font-size:10px;
@@ -2362,3 +2370,21 @@ dialog input[type=checkbox]{
     text-decoration:underline;
     text-underline-offset:3px
 }
+
+.notification-bell{position:relative}
+.notification-badge{position:absolute;top:-6px;right:-6px;min-width:18px;padding:1px 5px;border-radius:10px;background:#c62828;color:#fff;font-size:.75rem}
+.notification-panel{position:fixed;z-index:60;width:min(400px,92vw);max-height:70vh;overflow:auto;padding:12px;border:1px solid #9fb4c2;border-radius:8px;background:#fff;color:#153746;box-shadow:0 8px 24px #0004}
+.notification-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.notification-head .actions{display:flex;gap:6px}
+.notification-panel ul{margin:0;padding:0;list-style:none}
+.notification-item{margin:6px 0;border:1px solid #cfdbe3;border-radius:6px;background:#eef3f6;color:#4f6676}
+.notification-item.unread{background:#fff3c4;border-color:#e0a800;color:#4a3300;font-weight:700}
+.notification-item button.notification-summary{display:block;width:100%;padding:9px 10px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.notification-detail{margin:0;padding:8px 10px 10px;border-top:1px solid #cfdbe3;font-weight:400;color:#153746;background:#f8fbfc;border-radius:0 0 6px 6px}
+.notification-detail dt{font-size:.75rem;text-transform:uppercase;color:#52697a;margin-top:6px}
+.notification-detail dd{margin:0}
+[data-theme="dark"] .notification-panel{background:#14283a;color:#dcebf3;border-color:#4a6478}
+[data-theme="dark"] .notification-item{background:#1c3345;border-color:#314858;color:#8fa6b5}
+[data-theme="dark"] .notification-item.unread{background:#5c4600;border-color:#f0b429;color:#fff4cf}
+[data-theme="dark"] .notification-detail{background:#0e1c28;color:#dcebf3;border-top-color:#314858}
+[data-theme="dark"] .notification-detail dt{color:#9fb7c6}

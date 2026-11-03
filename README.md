@@ -259,6 +259,23 @@ remain Gold/Platinum. Tenant registration and membership management,
 manager/employee access, the employee portal, shift trades, payment, and
 Copilot automation remain separate implementation phases.
 
+## Manager and employee access
+
+Admins create manager and employee accounts in Settings → Manager & employee
+access and share the one-time temporary password (72-hour expiry). Users sign
+in at `/access` with the BambooHR subdomain, email or employee ID and password,
+and must replace the temporary password at first sign-in. Managers must enrol
+an authenticator app (when the temporary `MFA_BYPASS` is enabled, manager
+sign-in needs only the password; remove it before shared use); employees have no
+MFA and need the Silver tier or above (`employeeScheduleAccess`). Managers see
+attendance only for employees at schedule locations whose manager email matches
+theirs and can mark late shifts absent with a reason; employees see only their
+own attendance. Late/absent transitions create in-app notifications (bell,
+30-second polling) for the matching managers and for admins. Manager/employee
+sessions are rejected by all administrator APIs. Accounts live in
+`tenant_users`; notifications in `attendance_notifications` and
+`attendance_notification_reads`.
+
 ## User manual
 
 The user manual is in `Schedule Creator\docs\User-Manual.html` and

@@ -671,7 +671,7 @@ function pageAllowed(p){
 }
 function settingsPage(){
     let s=appSettings();
-    return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
+    return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+accessAccountsPanel()+panel('Upload source',`<p>Current source: <b>${esc(model.sourceName)}</b></p><div class="actions"><button type="button" class="import" data-action="sourcePicker">Upload source</button></div><p class="note">Upload a pre-filled version of the scheduling workbook to replace the configuration basis. Import replaces the editable source configuration and unlocks settings.</p>`)+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
 }
 function attendanceSortHeader(table,key,label){
     let sort=attendanceSort[table],active=sort.key===key,mark=active?(sort.direction==='asc'?' ▲':' ▼'):'';
@@ -748,7 +748,36 @@ function openAttendanceShiftDialog(button){
     dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE CORRECTION</div><h2>Attendance · ${esc(button.dataset.name)}</h2></div><button type="button" data-dialog-close="attendanceOverrideDialog" aria-label="Close">✕</button></div><p>${esc(button.dataset.shiftDate)} · Current status: ${esc(button.dataset.status)}</p><label>Corrected status ${select(options,button.dataset.status,'id="attendanceShiftStatus"')}</label><label>Reason · required<textarea id="attendanceShiftReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" class="primary" data-action="saveAttendanceShiftOverride" data-run-id="${esc(button.dataset.runId)}" data-employee-id="${esc(button.dataset.employeeId)}" data-shift-date="${esc(button.dataset.shiftDate)}">Save correction</button><button type="button" data-dialog-close="attendanceOverrideDialog">Cancel</button></div>`;
     if(!dialog.open)dialog.showModal()
 }
+function setNavGroupOpen(group,open){
+    group.classList.toggle('collapsed',!open);
+    group.querySelector('.nav-group-title')?.setAttribute('aria-expanded',String(open));
+    let title=group.querySelector('.nav-group-title'),caret=title?.querySelector('i');
+    if(caret)caret.textContent=open?'▾':'▸'
+}
+function initNavGroups(){
+    document.querySelectorAll('#appMenu .nav-group').forEach(group=>{
+        let title=group.querySelector('.nav-group-title');
+        if(!title||title.dataset.ready)return;
+        title.dataset.ready='1';
+        title.setAttribute('role','button');
+        title.tabIndex=0;
+        title.insertAdjacentHTML('beforeend','<i aria-hidden="true"></i>');
+        let toggle=()=>{
+            let open=group.classList.contains('collapsed');
+            document.querySelectorAll('#appMenu .nav-group').forEach(other=>setNavGroupOpen(other,open&&other===group))
+        };
+        title.addEventListener('click',toggle);
+        title.addEventListener('keydown',e=>{
+            if(e.key==='Enter'||e.key===' '){
+                e.preventDefault();
+                toggle()
+            }
+        });
+        setNavGroupOpen(group,false)
+    })
+}
 function applyMenuSettings(){
+    initNavGroups();
     if(!pageAllowed(page))page='controls';
     document.querySelectorAll('[data-page]').forEach(e=>{
         e.hidden=!pageAllowed(e.dataset.page)
@@ -757,9 +786,6 @@ function applyMenuSettings(){
     document.querySelectorAll('#appMenu .nav-group').forEach(group=>{
         group.hidden=!group.querySelector('[data-page]:not([hidden])')
     });
-    let upload=$('sourcePickerButton');
-    if(upload)upload.hidden=!pageAllowed('source');
-
 }
 function jamaicaDate(now=new Date()){
     let p=new Intl.DateTimeFormat('en-CA',{
@@ -2173,6 +2199,93 @@ async function directoryRequest(path,options={}){
     if(!response.ok)throw Error(body.error||'Request to '+path+' failed with HTTP '+response.status+'.');
     return body
 }
+let accessAccounts=[],accessAccountsError='',accessTemporaryPassword=null,attendanceNotificationTimer=null;
+async function loadAccessAccounts(){
+    try{
+        accessAccounts=(await directoryRequest('/access-accounts')).accounts;
+        accessAccountsError=''
+    }
+    catch(error){
+        accessAccountsError=error.message
+    }
+    if(page==='settings')render(true)
+}
+function accessAccountsPanel(){
+    let employeeOptions=(employeeDirectory||[]).filter(employee=>employee.active).map(employee=>`<option value="${esc(employee.id)}">${esc(employee.name)} (${esc(employee.id)})</option>`).join('');
+    let rows=accessAccounts.map(account=>`<tr><td>${esc(account.displayName)}</td><td>${esc(account.role)}</td><td>${esc(account.email||account.employeeId||'')}</td><td>${account.active?'Active':'Disabled'}${account.mustChangePassword?' · temporary password':''}${account.role==='manager'?(account.mfaEnabled?' · MFA on':' · MFA pending'):''}${account.role==='manager'&&!account.scopeEmployees?' · no matching schedule location':''}</td><td><div class="actions employee-actions"><button type="button" data-action="resetAccessPassword" data-id="${esc(account.id)}">Reset password</button>${account.role==='manager'?`<button type="button" data-action="resetAccessPassword" data-reset-mfa="true" data-id="${esc(account.id)}">Reset password &amp; MFA</button>`:''}<button type="button" data-action="toggleAccessAccount" data-id="${esc(account.id)}" data-active="${account.active?'false':'true'}">${account.active?'Disable':'Enable'}</button></div></td></tr>`).join('');
+    return panel('Manager &amp; employee access',`${accessAccountsError?`<p class="badtext">${esc(accessAccountsError)}</p>`:''}${accessTemporaryPassword?`<div class="callout" role="status"><b>Temporary password for ${esc(accessTemporaryPassword.name)}:</b> <code>${esc(accessTemporaryPassword.password)}</code><br>Share it securely. It is shown once and expires in ${accessTemporaryPassword.hours} hours. The user must replace it at first sign-in at <code>/access</code>.</div>`:''}<div class="grid"><label>Role<select id="accessRole"><option value="manager">Manager (MFA required)</option><option value="employee">Employee (Silver and above)</option></select></label><label>Name<input id="accessName" maxlength="120"></label><label>Email (required for managers)<input id="accessEmail" type="email" maxlength="254"></label><label>Employee (employee accounts)<select id="accessEmployee"><option value="">—</option>${employeeOptions}</select></label></div><div class="actions"><button type="button" class="primary" data-action="createAccessAccount">Create account</button><button type="button" data-action="reloadAccessAccounts">Refresh</button></div><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Sign-in</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No manager or employee accounts yet.</td></tr>'}</tbody></table></div>`,'Managers see attendance only for employees at schedule locations whose manager email matches their email. Employees see only their own attendance.')
+}
+let attendanceNotifications=[],expandedNotifications=new Set();
+function renderNotificationBadge(){
+    let badge=$('notificationBadge'),unread=attendanceNotifications.filter(item=>!item.read).length;
+    if(!badge)return;
+    badge.textContent=unread;
+    badge.hidden=unread===0
+}
+function notificationDetailHtml(item){
+    let label=item.kind==='absent'?'Absent':'Late';
+    return `<dl class="notification-detail"><dt>Status</dt><dd>${esc(label)}</dd><dt>Employee</dt><dd>${esc(item.employeeName||item.employeeId)} (${esc(item.employeeId)})</dd><dt>Location</dt><dd>${esc(item.location||'Not recorded')}</dd><dt>Shift date</dt><dd>${esc(item.date)}</dd><dt>Shift time</dt><dd>${item.shiftStart==null?'Not recorded':esc(timeLabel(Number(item.shiftStart)))+' start'}</dd><dt>Detected</dt><dd>${esc(item.createdAt)}</dd></dl>`
+}
+function renderNotificationPanel(){
+    let box=$('notificationPanel');
+    if(!box)return;
+    box.innerHTML=`<div class="notification-head"><b>Attendance notifications</b><div class="actions"><button type="button" data-action="readNotifications">Mark all read</button><button type="button" data-action="toggleNotifications" aria-label="Close notifications">Close</button></div></div><ul>${attendanceNotifications.map(item=>{
+        let open=expandedNotifications.has(item.id);
+        return `<li class="notification-item ${item.read?'':'unread'}"><button type="button" class="notification-summary" data-action="openNotification" data-id="${esc(item.id)}" aria-expanded="${open}">${esc(item.date)}: ${esc(item.message)}</button>${open?notificationDetailHtml(item):''}</li>`
+    }).join('')||'<li class="notification-item"><span class="notification-summary">No notifications.</span></li>'}</ul>`
+}
+async function pollAttendanceNotifications(){
+    if(!$('notificationBadge'))return;
+    try{
+        let result=await directoryRequest('/attendance/notifications');
+        attendanceNotifications=result.notifications;
+        renderNotificationBadge();
+        renderNotificationPanel()
+    }
+    catch{}
+}
+async function openNotification(id){
+    let item=attendanceNotifications.find(entry=>entry.id===id);
+    if(!item)return;
+    if(expandedNotifications.has(id))expandedNotifications.delete(id);
+    else expandedNotifications.add(id);
+    if(!item.read){
+        item.read=true;
+        try{
+            await directoryRequest('/attendance/notifications/read',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({ids:[id]})
+            })
+        }
+        catch{
+            item.read=false
+        }
+    }
+    renderNotificationBadge();
+    renderNotificationPanel()
+}
+function toggleNotificationPanel(){
+    let existing=$('notificationPanel');
+    if(existing){
+        existing.remove();
+        return
+    }
+    let box=document.createElement('div'),bell=$('notificationButton').getBoundingClientRect();
+    box.id='notificationPanel';
+    box.className='notification-panel';
+    box.setAttribute('role','dialog');
+    box.setAttribute('aria-label','Attendance notifications');
+    box.style.top=Math.round(bell.bottom+6)+'px';
+    box.style.right=Math.max(8,Math.round(window.innerWidth-bell.right))+'px';
+    document.body.append(box);
+    renderNotificationPanel()
+}
+function startNotificationPolling(){
+    if(attendanceNotificationTimer)clearInterval(attendanceNotificationTimer);
+    attendanceNotificationTimer=setInterval(()=>{
+        if(!document.hidden)pollAttendanceNotifications()
+    },30000);
+    pollAttendanceNotifications()
+}
 function blankRosterProfile(employee,index){
     let pool=model.pools.find(item=>item.location===employee.location&&item.role===employee.role),starts=poolStarts(pool);
     return {
@@ -2376,7 +2489,8 @@ function nav(p){
     }
     page=p;
     closeAppMenu();
-    render()
+    render();
+    if(p==='settings')loadAccessAccounts()
 }
 function closeAppMenu(){
     let menu=$('appMenu'),toggle=$('menuToggle');
@@ -3324,7 +3438,7 @@ document.addEventListener('click',async e=>{
 );
 async function action(a,element=null){
     if(busy)return;
-    if(['backup','restore','sourceInputs','sourcePicker','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
+    if(['backup','restore','sourceInputs','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
         message('Enable Source & backups in Settings first.',true);
         return
     }
@@ -3402,6 +3516,53 @@ async function action(a,element=null){
             if($('bambooTestApiKey'))$('bambooTestApiKey').value='';
             render(true);
             message('Tested BambooHR API key saved (encrypted) for this business.');
+            return
+        }
+        if(a==='reloadAccessAccounts'){
+            await loadAccessAccounts();
+            return
+        }
+        if(a==='createAccessAccount'){
+            let role=$('accessRole').value,employeeId=$('accessEmployee').value,name=$('accessName').value.trim();
+            let result=await directoryRequest('/access-accounts',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({role,displayName:name,email:$('accessEmail').value.trim(),employeeId:role==='employee'?employeeId:undefined})
+            });
+            accessTemporaryPassword={name:result.account.displayName,password:result.temporaryPassword,hours:result.temporaryPasswordHours};
+            await loadAccessAccounts();
+            return
+        }
+        if(a==='resetAccessPassword'){
+            let result=await directoryRequest('/access-accounts/'+encodeURIComponent(element.dataset.id)+'/reset-password',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({resetMfa:element.dataset.resetMfa==='true'})
+            });
+            let account=accessAccounts.find(item=>item.id===element.dataset.id);
+            accessTemporaryPassword={name:account?.displayName||'user',password:result.temporaryPassword,hours:result.temporaryPasswordHours};
+            await loadAccessAccounts();
+            return
+        }
+        if(a==='toggleAccessAccount'){
+            await directoryRequest('/access-accounts/'+encodeURIComponent(element.dataset.id)+'/active',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({active:element.dataset.active==='true'})
+            });
+            await loadAccessAccounts();
+            return
+        }
+        if(a==='toggleNotifications'){
+            toggleNotificationPanel();
+            return
+        }
+        if(a==='openNotification'){
+            await openNotification(element.dataset.id);
+            return
+        }
+        if(a==='readNotifications'){
+            await directoryRequest('/attendance/notifications/read',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({})
+            });
+            await pollAttendanceNotifications();
             return
         }
         if(a==='reloadDirectory'){
@@ -4589,7 +4750,6 @@ $('themeButton').onclick=()=>{
     queueSave()
 }
 ;
-$('print').onclick=()=>window.print();
 async function init(){
     try{
         let encoded=atob($('payload').textContent.trim()),data=JSON.parse(new TextDecoder().decode(await inflate(Uint8Array.from(encoded,c=>c.charCodeAt(0)),'gzip')));
@@ -4623,6 +4783,7 @@ async function init(){
         }
         render();
         startAttendancePolling();
+        startNotificationPolling();
     }
     catch(err){
         $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'
