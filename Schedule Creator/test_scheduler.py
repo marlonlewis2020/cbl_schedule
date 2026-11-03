@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import scheduler
 
+# Unit tests must never use the deployment database loaded from .env.
+scheduler.DATABASE_URL = ""
 scheduler.MFA_BYPASS = False
 
 def authenticate_test_admin(client):
@@ -56,7 +58,7 @@ class TemporaryMfaBypassTests(unittest.TestCase):
                         response = client.post(
                             "/api/tenant-auth/login",
                             headers={"X-CSRF-Token": token},
-                            json=credentials,
+                            json=credentials | {"bamboohrSubdomain": "cbljm"},
                         )
                         self.assertEqual(response.status_code, expected)
                         self.assertEqual(
@@ -139,7 +141,11 @@ class BusinessHubTests(unittest.TestCase):
         login = client.post(
             "/api/tenant-auth/login",
             headers={"X-CSRF-Token": token},
-            json={"email": email, "password": password},
+            json={
+                "bamboohrSubdomain": "acme",
+                "email": email,
+                "password": password,
+            },
         )
         result = login.get_json()
         if result.get("mfaEnrollmentRequired"):
@@ -233,15 +239,144 @@ class BusinessHubTests(unittest.TestCase):
         self.assertEqual(settings["businessName"], "Acme Foods")
         self.assertEqual(settings["tenantId"], "acme")
         self.assertEqual(
+            self.query(
+                "SELECT bamboohr_subdomain FROM tenants WHERE tenant_id = ?",
+                (tenant_id,),
+            )[0][0],
+            "acme",
+        )
+        self.assertEqual(
             self.query("SELECT action FROM hub_audit_events WHERE tenant_id = ?", (tenant_id,)),
             [("register",)],
         )
         duplicate, _ = self.register(businessName="Other Co")
         self.assertEqual(duplicate.status_code, 409)
+        duplicate_domain, domain_check = self.register(
+            businessName="Third Co",
+            bamboohrSubdomain="ACME",
+            adminEmail="third@acme.example",
+        )
+        self.assertEqual(duplicate_domain.status_code, 409)
+        self.assertIn("already registered", duplicate_domain.get_json()["error"])
+        domain_check.assert_not_called()
         self.assertEqual(len(self.query("SELECT 1 FROM tenants")), 2)
 
+    def test_login_uses_subdomain_to_select_same_email_admin(self):
+        first, _ = self.register()
+        second, _ = self.register(
+            businessName="Second Co",
+            bamboohrSubdomain="second",
+        )
+        self.assertEqual((first.status_code, second.status_code), (201, 201))
+        first_tenant = self.tenant_id("Acme Foods")
+        second_tenant = self.tenant_id("Second Co")
+        with closing(scheduler.database_connect()) as connection, connection:
+            first_admin = connection.execute(
+                "SELECT id FROM tenant_admins WHERE tenant_id = ?",
+                (first_tenant,),
+            ).fetchone()[0]
+            second_admin = connection.execute(
+                "SELECT id FROM tenant_admins WHERE tenant_id = ?",
+                (second_tenant,),
+            ).fetchone()[0]
+            _, first_mfa_uri = scheduler.start_mfa_enrollment(
+                connection, first_admin, REGISTRATION["adminEmail"]
+            )
+            _, second_mfa_uri = scheduler.start_mfa_enrollment(
+                connection, second_admin, REGISTRATION["adminEmail"]
+            )
+        self.assertNotEqual(first_mfa_uri, second_mfa_uri)
+
+        first_client, _ = self.sign_in_admin()
+        with first_client.session_transaction() as browser_session:
+            self.assertEqual(browser_session["tenant_id"], first_tenant)
+
+        second_client = scheduler.app.test_client()
+        token = second_client.get("/api/tenant-auth/state").get_json()["csrfToken"]
+        login = second_client.post(
+            "/api/tenant-auth/login",
+            headers={"X-CSRF-Token": token},
+            json={
+                "bamboohrSubdomain": "second",
+                "email": REGISTRATION["adminEmail"],
+                "password": REGISTRATION["password"],
+            },
+        )
+        enrollment = login.get_json()
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(enrollment["mfaEnrollmentRequired"])
+        code = scheduler.totp_value(
+            enrollment["secret"], int(time.time() // 30)
+        )
+        verified = second_client.post(
+            "/api/tenant-auth/verify-mfa",
+            headers={"X-CSRF-Token": enrollment["csrfToken"]},
+            json={"code": code},
+        )
+        self.assertEqual(verified.status_code, 200)
+        with second_client.session_transaction() as browser_session:
+            self.assertEqual(browser_session["tenant_id"], second_tenant)
+
+        wrong_business = scheduler.app.test_client()
+        token = wrong_business.get("/api/tenant-auth/state").get_json()["csrfToken"]
+        wrong = wrong_business.post(
+            "/api/tenant-auth/login",
+            headers={"X-CSRF-Token": token},
+            json={
+                "bamboohrSubdomain": "unknown",
+                "email": REGISTRATION["adminEmail"],
+                "password": REGISTRATION["password"],
+            },
+        )
+        self.assertEqual(wrong.status_code, 401)
+        missing_domain = wrong_business.post(
+            "/api/tenant-auth/login",
+            headers={"X-CSRF-Token": token},
+            json={
+                "email": REGISTRATION["adminEmail"],
+                "password": REGISTRATION["password"],
+            },
+        )
+        self.assertEqual(missing_domain.status_code, 400)
+
+    def test_business_settings_cannot_claim_another_business_domain(self):
+        self.register()
+        self.register(
+            businessName="Second Co",
+            bamboohrSubdomain="second",
+            adminEmail="second@acme.example",
+        )
+        self.make_owner()
+        owner, owner_csrf = self.sign_in_owner()
+        self.assertEqual(
+            self.set_status(owner, owner_csrf, self.tenant_id(), "active").status_code,
+            200,
+        )
+        client, csrf = self.sign_in_admin()
+        config = client.get("/api/app-config").get_json()
+        config["tenantId"] = "SECOND"
+        response = client.put(
+            "/api/app-config",
+            headers={"X-CSRF-Token": csrf},
+            json=config,
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            self.query(
+                "SELECT bamboohr_subdomain FROM tenants WHERE tenant_id = ?",
+                (self.tenant_id(),),
+            )[0][0],
+            "acme",
+        )
+
     def test_registration_attempts_are_rate_limited(self):
-        statuses = [self.register(adminEmail=f"a{index}@acme.example")[0].status_code for index in range(6)]
+        statuses = [
+            self.register(
+                adminEmail=f"a{index}@acme.example",
+                bamboohrSubdomain=f"acme{index}",
+            )[0].status_code
+            for index in range(6)
+        ]
         self.assertEqual(statuses[:5], [201] * 5)
         self.assertEqual(statuses[5], 429)
 
@@ -266,6 +401,110 @@ class BusinessHubTests(unittest.TestCase):
         self.assertEqual(page, (scheduler.APP_DIRECTORY / "business-status.html").read_bytes())
         self.assertNotEqual(page, (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_bytes())
 
+    def test_admin_can_update_own_profile_and_email_change_requires_password(self):
+        self.register()
+        admin, csrf = self.sign_in_admin()
+        state = admin.get("/api/tenant-auth/state").get_json()
+        self.assertEqual(state["displayName"], REGISTRATION["adminName"])
+        self.assertEqual(state["email"], REGISTRATION["adminEmail"])
+        headers = {"X-CSRF-Token": csrf}
+        denied = admin.post(
+            "/api/business/profile",
+            headers=headers,
+            json={"name": "Ada New", "email": "new-ada@acme.example"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        changed = admin.post(
+            "/api/business/profile",
+            headers=headers,
+            json={
+                "name": "Ada New",
+                "email": "new-ada@acme.example",
+                "currentPassword": REGISTRATION["password"],
+            },
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(
+            admin.get("/api/tenant-auth/state").get_json()["displayName"], "Ada New"
+        )
+        self.assertEqual(
+            admin.get("/api/tenant-auth/state").get_json()["email"], "new-ada@acme.example"
+        )
+        self.assertEqual(
+            admin.post(
+                "/api/business/profile",
+                headers=headers,
+                json={"name": " ", "email": "new-ada@acme.example"},
+            ).status_code,
+            400,
+        )
+
+    def test_platform_owner_can_permanently_delete_a_business(self):
+        self.register(
+            businessName="Fraud Co",
+            bamboohrSubdomain="fraud",
+            adminEmail="fraud@example.com",
+        )
+        tenant_id = self.tenant_id("Fraud Co")
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_locations
+                    (id, tenant_id, name, bamboo_schedule_id, location)
+                VALUES ('fraud-location', ?, 'Fraud schedule', 'fraud-schedule', 'Fraud')
+                """,
+                (tenant_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO employees (employee_id, tenant_id, name, location, role)
+                VALUES ('fraud-employee', ?, 'Fraud Employee', 'Fraud', 'Staff')
+                """,
+                (tenant_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO accepted_schedules
+                    (run_id, tenant_id, week_start, location, role, payload)
+                VALUES ('fraud-run', ?, '2026-11-02', 'Fraud', 'Staff', '{}')
+                """,
+                (tenant_id,),
+            )
+        self.make_owner()
+        owner, csrf = self.sign_in_owner()
+        headers = {"X-CSRF-Token": csrf}
+        original = owner.delete(
+            f"/api/hub/businesses/{scheduler.DEFAULT_TENANT_ID}", headers=headers
+        )
+        self.assertEqual(original.status_code, 409)
+        deleted = owner.delete(
+            f"/api/hub/businesses/{tenant_id}", headers=headers
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(
+            self.query("SELECT 1 FROM tenants WHERE tenant_id = ?", (tenant_id,)), []
+        )
+        for table in (
+            "tenant_admins",
+            "employees",
+            "accepted_schedules",
+            "schedule_locations",
+            "application_settings",
+            "tenant_audit_events",
+        ):
+            self.assertEqual(
+                self.query(f"SELECT 1 FROM {table} WHERE tenant_id = ?", (tenant_id,)),
+                [],
+                table,
+            )
+        self.assertEqual(
+            self.query(
+                "SELECT action FROM hub_audit_events WHERE tenant_id = ?",
+                (tenant_id,),
+            ),
+            [("register",), ("business-permanently-deleted",)],
+        )
+
     def test_owner_reviews_businesses_and_status_gates_access(self):
         self.register()
         self.register(businessName="Second Co", adminEmail="bo@second.example", bamboohrSubdomain="second")
@@ -282,7 +521,8 @@ class BusinessHubTests(unittest.TestCase):
         owner, csrf = self.sign_in_owner()
         listing = owner.get("/api/hub/businesses").get_json()["businesses"]
         self.assertEqual([item["status"] for item in listing][:2], ["pending", "pending"])
-        self.assertNotIn("bamboohr", json.dumps(listing).casefold())
+        self.assertNotIn("acme-key-123", json.dumps(listing))
+        self.assertNotIn("bamboohrApiKey", json.dumps(listing))
         self.assertEqual(
             owner.post(
                 f"/api/hub/businesses/{tenant_id}/status", json={"status": "active"}
@@ -314,13 +554,45 @@ class BusinessHubTests(unittest.TestCase):
         rejected_login = client.post(
             "/api/tenant-auth/login",
             headers={"X-CSRF-Token": token},
-            json={"email": "bo@second.example", "password": "correct-horse-battery"},
+            json={
+                "bamboohrSubdomain": "second",
+                "email": "bo@second.example",
+                "password": "correct-horse-battery",
+            },
         )
         self.assertEqual(rejected_login.status_code, 401)
         self.assertEqual(self.set_status(owner, csrf, second, "pending").status_code, 200)
         actions = [row[0] for row in self.query("SELECT action FROM hub_audit_events")]
         self.assertIn("status-pending-to-active", actions)
         self.assertIn("status-active-to-suspended", actions)
+
+    def test_platform_owner_assigns_tiers_and_sees_usage(self):
+        self.register()
+        self.make_owner()
+        owner, csrf = self.sign_in_owner()
+        tenant_id = self.tenant_id()
+        listing = owner.get("/api/hub/businesses").get_json()["businesses"]
+        business = next(item for item in listing if item["id"] == tenant_id)
+        self.assertEqual(business["membership"]["tier"], "bronze")
+        self.assertIn("locations", business["membership"]["usage"])
+        changed = owner.post(
+            f"/api/hub/businesses/{tenant_id}/tier",
+            headers={"X-CSRF-Token": csrf},
+            json={"tier": "gold"},
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.get_json()["membership"]["tier"], "gold")
+        self.assertTrue(
+            changed.get_json()["membership"]["features"]["overtimeForecasting"]
+        )
+        self.assertEqual(
+            owner.post(
+                f"/api/hub/businesses/{tenant_id}/tier",
+                headers={"X-CSRF-Token": csrf},
+                json={"tier": "diamond"},
+            ).status_code,
+            400,
+        )
 
     def test_platform_owner_requires_mfa_enrollment_and_valid_codes(self):
         self.make_owner()
@@ -386,6 +658,14 @@ class BusinessHubTests(unittest.TestCase):
         primary, csrf = self.sign_in_admin()
         headers = {"X-CSRF-Token": csrf}
         new_admin = {"name": "Bo", "email": "bo@acme.example", "password": "temporary-password-1"}
+        self.assertEqual(
+            primary.post(
+                "/api/business/admins",
+                headers=headers,
+                json={"email": "missing-name@acme.example", "password": new_admin["password"]},
+            ).status_code,
+            400,
+        )
         self.assertEqual(primary.post("/api/business/admins", json=new_admin).status_code, 400)
         self.assertEqual(
             primary.post("/api/business/admins", headers=headers, json=new_admin | {"password": "short"}).status_code,
@@ -403,16 +683,92 @@ class BusinessHubTests(unittest.TestCase):
             extra.post("/api/business/admins", headers={"X-CSRF-Token": extra_csrf}, json=new_admin | {"email": "c@acme.example"}).status_code,
             403,
         )
-        admins = primary.get("/api/business/admins").get_json()["admins"]
+        primary_list = primary.get("/api/business/admins").get_json()
+        admins = primary_list["admins"]
+        self.assertTrue(primary_list["isPrimaryAdmin"])
         self.assertEqual([admin["isPrimary"] for admin in admins], [True, False])
         self.assertTrue(all(admin["mfaEnabled"] for admin in admins))
+        self.assertTrue(all(admin["joinedAt"] for admin in admins))
+        extra_list = extra.get("/api/business/admins").get_json()
+        self.assertFalse(extra_list["isPrimaryAdmin"])
+        self.assertEqual(set(extra_list["admins"][0]), {"id", "email", "name", "isPrimary"})
+        self.assertEqual(
+            extra.post(
+                f"/api/business/admins/{created.get_json()['id']}/reset-password",
+                headers={"X-CSRF-Token": extra_csrf},
+                json={},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            extra.post(
+                f"/api/business/admins/{created.get_json()['id']}/reset-mfa",
+                headers={"X-CSRF-Token": extra_csrf},
+                json={},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            extra.put(
+                f"/api/business/admins/{created.get_json()['id']}",
+                headers={"X-CSRF-Token": extra_csrf},
+                json={"name": "Changed", "email": "changed@acme.example"},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            primary.put(
+                f"/api/business/admins/{created.get_json()['id']}",
+                headers=headers,
+                json={"name": "Bo Updated", "email": "bo-updated@acme.example"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            primary.get("/api/business/admins").get_json()["admins"][1]["name"],
+            "Bo Updated",
+        )
+        password_reset = primary.post(
+            f"/api/business/admins/{created.get_json()['id']}/reset-password",
+            headers=headers,
+            json={},
+        )
+        self.assertEqual(password_reset.status_code, 200)
+        temporary_password = password_reset.get_json()["temporaryPassword"]
+        self.assertGreaterEqual(len(temporary_password), 14)
+        self.assertEqual(extra.get("/api/employees").status_code, 401)
+        self.assertTrue(
+            scheduler.check_password_hash(
+                self.query(
+                    "SELECT password_hash FROM tenant_admins WHERE id = ?",
+                    (created.get_json()["id"],),
+                )[0][0],
+                temporary_password,
+            )
+        )
+        self.assertEqual(
+            primary.post(
+                f"/api/business/admins/{created.get_json()['id']}/reset-mfa",
+                headers=headers,
+                json={},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.query(
+                "SELECT mfa_enabled, mfa_secret FROM tenant_admins WHERE id = ?",
+                (created.get_json()["id"],),
+            )[0],
+            (0, None),
+        )
+        self.assertEqual(extra.get("/api/employees").status_code, 401)
         primary_id = admins[0]["id"]
         self.assertEqual(
             primary.delete(f"/api/business/admins/{primary_id}", headers=headers).status_code, 404
         )
         self.assertEqual(
             extra.delete(f"/api/business/admins/{primary_id}", headers={"X-CSRF-Token": extra_csrf}).status_code,
-            403,
+            401,
         )
         self.assertEqual(
             primary.delete(f"/api/business/admins/{created.get_json()['id']}", headers=headers).status_code,
@@ -423,7 +779,8 @@ class BusinessHubTests(unittest.TestCase):
         token = client.get("/api/tenant-auth/state").get_json()["csrfToken"]
         self.assertEqual(
             client.post("/api/tenant-auth/login", headers={"X-CSRF-Token": token},
-                        json={"email": "bo@acme.example", "password": "temporary-password-1"}).status_code,
+                        json={"bamboohrSubdomain": "acme", "email": "bo@acme.example",
+                              "password": "temporary-password-1"}).status_code,
             401,
         )
 
@@ -473,6 +830,245 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertIn("ON CONFLICT DO NOTHING", connection.query)
         self.assertNotIn("NOCASE", connection.query)
         self.assertEqual(connection.parameters, ("alpha", "beta"))
+
+
+class MembershipEntitlementTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.original_database_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.temporary_directory.name) / "tiers.sqlite3"
+        scheduler.initialize_database()
+        scheduler.app.config["TESTING"] = True
+        self.client = scheduler.app.test_client()
+        authenticate_test_admin(self.client)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("DELETE FROM employees")
+            connection.execute("DELETE FROM schedule_locations")
+            connection.execute(
+                "UPDATE tenant_admins SET is_primary = 1 WHERE id = 'test-admin'"
+            )
+            connection.execute(
+                "UPDATE tenants SET membership_tier = 'bronze' WHERE tenant_id = ?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        self.headers = {"X-CSRF-Token": "test-csrf-token"}
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_database_path
+        self.temporary_directory.cleanup()
+
+    def set_tier(self, tier):
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier = ? WHERE tenant_id = ?",
+                (tier, scheduler.DEFAULT_TENANT_ID),
+            )
+
+    def schedule_location(self, name, location, role):
+        return self.client.post(
+            "/api/schedule-locations",
+            headers=self.headers,
+            json={
+                "name": f"{name} schedule",
+                "bambooScheduleId": f"{name}-schedule",
+                "location": location,
+                "roleGroup": role,
+                "managerName": "Manager",
+                "managerEmail": "manager@example.com",
+            },
+        )
+
+    def test_bronze_admin_limit_blocks_only_additions(self):
+        admin = {
+            "name": "Second Admin",
+            "email": "second@example.com",
+            "password": "temporary-password-123",
+        }
+        created = self.client.post(
+            "/api/business/admins", headers=self.headers, json=admin
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(
+            self.client.post(
+                "/api/business/admins",
+                headers=self.headers,
+                json=admin | {"email": "third@example.com"},
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.delete(
+                f"/api/business/admins/{created.get_json()['id']}",
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/business/admins",
+                headers=self.headers,
+                json=admin | {"email": "replacement@example.com"},
+            ).status_code,
+            201,
+        )
+
+    def test_employee_limit_counts_active_records_and_allows_downgrades(self):
+        employee_ids = []
+        for index in range(21):
+            employee_id = f"manual-{index}"
+            employee_ids.append(employee_id)
+            response = self.client.post(
+                "/api/employees",
+                headers=self.headers,
+                json={
+                    "id": employee_id,
+                    "name": f"Employee {index}",
+                    "location": "Store",
+                    "role": "Sales",
+                    "active": False,
+                },
+            )
+            self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            self.client.put(
+                "/api/employees/status",
+                headers=self.headers,
+                json={"employeeIds": employee_ids[:20], "active": True},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(
+                "/api/employees/status",
+                headers=self.headers,
+                json={"employeeIds": [employee_ids[20]], "active": True},
+            ).status_code,
+            409,
+        )
+        self.set_tier("platinum")
+        self.assertEqual(
+            self.client.put(
+                "/api/employees/status",
+                headers=self.headers,
+                json={"employeeIds": [employee_ids[20]], "active": True},
+            ).status_code,
+            200,
+        )
+        self.set_tier("bronze")
+        self.assertEqual(
+            self.client.put(
+                "/api/employees/status",
+                headers=self.headers,
+                json={"employeeIds": [employee_ids[0]], "active": False},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(
+                f"/api/employees/{employee_ids[0]}",
+                headers=self.headers,
+                json={
+                    "id": employee_ids[0],
+                    "bamboohrId": "MANUAL-TEST",
+                    "name": "Updated Employee",
+                    "location": "Store",
+                    "role": "Sales",
+                    "active": True,
+                },
+            ).status_code,
+            409,
+        )
+
+    def test_bronze_team_cap_and_gold_location_cap(self):
+        self.assertEqual(self.schedule_location("first", "Store", "Sales").status_code, 201)
+        self.assertEqual(self.schedule_location("second", "Store", "Service").status_code, 201)
+        self.assertEqual(self.schedule_location("third", "Store", "Warehouse").status_code, 409)
+        self.set_tier("gold")
+        for index in range(2, 7):
+            self.assertEqual(
+                self.schedule_location(f"gold-{index}", f"Store {index}", "Sales").status_code,
+                201,
+            )
+        self.assertEqual(
+            self.schedule_location("gold-over", "Store 7", "Sales").status_code,
+            409,
+        )
+
+    def test_schedule_location_quotas_are_tenant_scoped(self):
+        self.assertEqual(self.schedule_location("first", "Store A", "Sales").status_code, 201)
+        self.assertEqual(self.schedule_location("second", "Store B", "Service").status_code, 201)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_locations
+                    (id, tenant_id, name, bamboo_schedule_id, location, role_group)
+                VALUES ('other-location', 'other-business', 'Other schedule',
+                        'other-schedule', 'Store C', 'Warehouse')
+                """
+            )
+        self.assertEqual(
+            self.schedule_location("third", "Store C", "Warehouse").status_code,
+            409,
+        )
+
+    def test_downgrade_grandfathers_locations_but_blocks_increases(self):
+        self.set_tier("gold")
+        first = self.schedule_location("first", "Store A", "Sales")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(self.schedule_location("second", "Store A", "Service").status_code, 201)
+        third = self.schedule_location("third", "Store B", "Sales")
+        self.assertEqual(third.status_code, 201)
+        self.set_tier("bronze")
+
+        updated_payload = {
+            "name": "third schedule",
+            "bambooScheduleId": "third-schedule",
+            "location": "Store C",
+            "roleGroup": "Sales",
+            "managerName": "Manager",
+            "managerEmail": "manager@example.com",
+        }
+        self.assertEqual(
+            self.client.put(
+                f"/api/schedule-locations/{third.get_json()['id']}",
+                headers=self.headers,
+                json=updated_payload,
+            ).status_code,
+            200,
+        )
+        updated_payload["location"] = "Store D"
+        self.assertEqual(
+            self.client.put(
+                f"/api/schedule-locations/{first.get_json()['id']}",
+                headers=self.headers,
+                json=updated_payload | {
+                    "name": "first schedule",
+                    "bambooScheduleId": "first-schedule",
+                },
+            ).status_code,
+            409,
+        )
+
+    def test_tenant_state_exposes_tier_features_and_limits(self):
+        state = self.client.get("/api/tenant-auth/state").get_json()
+        self.assertEqual(state["membership"]["tier"], "bronze")
+        self.assertEqual(state["membership"]["limits"]["employees"], 20)
+        self.assertEqual(state["membership"]["limits"]["admins"], 2)
+        self.assertEqual(scheduler.MEMBERSHIP_TIERS["silver"]["limits"], {
+            "admins": 3, "teams": 4, "employees": 60, "locations": 4
+        })
+        self.assertEqual(scheduler.MEMBERSHIP_TIERS["gold"]["limits"], {
+            "admins": 4, "teams": None, "employees": None, "locations": 6
+        })
+        self.assertEqual(scheduler.MEMBERSHIP_TIERS["platinum"]["limits"], {
+            "admins": 8, "teams": None, "employees": None, "locations": None
+        })
+        self.assertFalse(state["membership"]["features"]["scheduleHistory"])
+        self.assertFalse(state["membership"]["features"]["shiftTrades"])
+        self.assertFalse(state["membership"]["features"]["overtimeForecasting"])
+        self.set_tier("gold")
+        state = self.client.get("/api/tenant-auth/state").get_json()
+        self.assertTrue(state["membership"]["features"]["overtimeForecasting"])
 
 
 class AcceptedScheduleApiTests(unittest.TestCase):
@@ -563,6 +1159,80 @@ class TenantAuthenticationTests(unittest.TestCase):
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
+
+    def test_sqlite_admin_email_migration_preserves_enrollment_and_scopes_uniqueness(self):
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "INSERT INTO tenants (tenant_id, business_name) VALUES (?, ?)",
+                ("second-business", "Second Business"),
+            )
+            connection.execute(
+                """
+                INSERT INTO tenant_admins
+                    (id, tenant_id, email, display_name, password_hash)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("legacy-admin", scheduler.DEFAULT_TENANT_ID, "shared@example.com", "Admin", "hash"),
+            )
+            connection.execute(
+                """
+                INSERT INTO tenant_mfa_enrollments (admin_id, encrypted_secret)
+                VALUES (?, ?)
+                """,
+                ("legacy-admin", "encrypted-enrollment"),
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX legacy_tenant_admins_email_unique
+                ON tenant_admins (email)
+                """
+            )
+
+        scheduler.initialize_database()
+
+        with closing(scheduler.database_connect()) as connection, connection:
+            enrollment = connection.execute(
+                """
+                SELECT encrypted_secret FROM tenant_mfa_enrollments
+                WHERE admin_id = ?
+                """,
+                ("legacy-admin",),
+            ).fetchone()
+            self.assertEqual(enrollment, ("encrypted-enrollment",))
+            indexes = connection.execute(
+                "PRAGMA index_list(tenant_admins)"
+            ).fetchall()
+            indexed_columns = []
+            for index in indexes:
+                if index[2]:
+                    escaped_name = index[1].replace('"', '""')
+                    indexed_columns.append(
+                        [
+                            row[2]
+                            for row in connection.execute(
+                                f'PRAGMA index_info("{escaped_name}")'
+                            ).fetchall()
+                        ]
+                    )
+            self.assertNotIn(["email"], indexed_columns)
+            self.assertIn(["tenant_id", "email"], indexed_columns)
+            connection.execute(
+                """
+                INSERT INTO tenant_admins
+                    (id, tenant_id, email, display_name, password_hash)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("second-admin", "second-business", "shared@example.com", "Admin 2", "hash"),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO tenant_admins
+                        (id, tenant_id, email, display_name, password_hash)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    ("duplicate-admin", "second-business", "shared@example.com", "Admin 3", "hash"),
+                )
 
     def test_existing_sqlite_settings_are_migrated_without_data_loss(self):
         with closing(scheduler.database_connect()) as legacy_database, legacy_database:
@@ -668,6 +1338,7 @@ class TenantAuthenticationTests(unittest.TestCase):
             "/api/tenant-auth/login",
             headers={"X-CSRF-Token": csrf},
             json={
+                "bamboohrSubdomain": "cbljm",
                 "email": "admin@example.com",
                 "password": "a-very-long-test-password",
                 "code": "invalid",
@@ -678,6 +1349,7 @@ class TenantAuthenticationTests(unittest.TestCase):
             "/api/tenant-auth/login",
             headers={"X-CSRF-Token": csrf},
             json={
+                "bamboohrSubdomain": "cbljm",
                 "email": "admin@example.com",
                 "password": "a-very-long-test-password",
                 "code": scheduler.totp_value(secret, int(time.time() // 30)),
@@ -733,6 +1405,11 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         scheduler.app.config["TESTING"] = True
         self.client = scheduler.app.test_client()
         authenticate_test_admin(self.client)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier = 'platinum' WHERE tenant_id = ?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
 
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
@@ -1726,6 +2403,92 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
 
+    def test_live_attendance_request_migration_refreshes_only_active_requests(self):
+        definitions = {
+            request[0]: request for request in scheduler.DEVELOPER_REQUESTS
+        }
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE developer_change_requests
+                SET title = 'Old title', description = 'Old description',
+                    status = CASE request_id
+                        WHEN 'attendance-automation' THEN 'done'
+                        WHEN 'manager-employee-access' THEN 'in_progress'
+                        ELSE 'pending'
+                    END
+                WHERE request_id IN (
+                    'manager-employee-access', 'schedule-portal',
+                    'attendance-automation', 'workforce-dashboards'
+                )
+                """
+            )
+            connection.execute(
+                "DELETE FROM app_migrations WHERE migration_id = ?",
+                ("live-attendance-dashboard-requests-v1",),
+            )
+        scheduler.initialize_database()
+
+        with closing(scheduler.database_connect()) as connection:
+            refreshed = {
+                row[0]: row[1:]
+                for row in connection.execute(
+                    """
+                    SELECT request_id, title, description, status
+                    FROM developer_change_requests
+                    WHERE request_id IN (
+                        'manager-employee-access', 'schedule-portal',
+                        'attendance-automation', 'workforce-dashboards'
+                    )
+                    """
+                )
+            }
+        for request_id in (
+            "manager-employee-access",
+            "schedule-portal",
+            "workforce-dashboards",
+        ):
+            self.assertEqual(refreshed[request_id][0], definitions[request_id][1])
+            self.assertEqual(refreshed[request_id][1], definitions[request_id][2])
+            self.assertEqual(refreshed[request_id][2], "pending" if request_id != "manager-employee-access" else "in_progress")
+        self.assertEqual(refreshed["attendance-automation"][0], "Old title")
+        self.assertEqual(refreshed["attendance-automation"][1], "Old description")
+        self.assertEqual(refreshed["attendance-automation"][2], "done")
+        self.assertIn("four hours", definitions["manager-employee-access"][2])
+        self.assertIn("All locations", definitions["workforce-dashboards"][2])
+        self.assertIn("location × role team", definitions["schedule-portal"][2])
+
+    def test_business_membership_controls_request_is_seeded_with_prerequisites(self):
+        with closing(scheduler.database_connect()) as connection:
+            request = connection.execute(
+                """
+                SELECT title, description, status
+                FROM developer_change_requests
+                WHERE request_id = ?
+                """,
+                ("business-membership-controls",),
+            ).fetchone()
+            dependencies = {
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT depends_on
+                    FROM developer_change_request_dependencies
+                    WHERE request_id = ?
+                    """,
+                    ("business-membership-controls",),
+                )
+            }
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request[0], "Business admin membership controls")
+        self.assertIn("main business admin", request[1])
+        self.assertIn("pause membership", request[1])
+        self.assertIn("cancel membership", request[1])
+        self.assertIn("change the business membership tier", request[1])
+        self.assertEqual(request[2], "pending")
+        self.assertEqual(dependencies, {"business-hub", "tier-entitlements"})
+
     def setup_developer(self, username="reviewer", password="Strong-Developer-2026!"):
         state = self.client.get("/api/developer/auth-state").get_json()
         response = self.client.post(
@@ -1771,6 +2534,18 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         ).get_json()
         self.assertEqual(done_filter["requests"][0]["id"], "developer-change-log")
         self.assertEqual(done_filter["nextEligible"]["id"], "tenant-identity")
+
+    def test_change_request_listing_uses_stable_seed_order(self):
+        self.setup_developer()
+        listing = self.client.get("/api/developer/change-requests")
+        self.assertEqual(listing.status_code, 200)
+        request_ids = [item["id"] for item in listing.get_json()["requests"]]
+        expected = [
+            item[0]
+            for item in scheduler.DEVELOPER_REQUESTS
+            if item[0] != "developer-change-log"
+        ] + ["developer-change-log"]
+        self.assertEqual(request_ids, expected)
 
     def test_change_request_status_cannot_bypass_blocking_requests(self):
         setup = self.setup_developer()

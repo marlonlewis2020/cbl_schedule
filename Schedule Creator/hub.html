@@ -15,7 +15,7 @@
     nav button { margin: 0; background: #e3eef4; color: #183044; }
     nav button[aria-pressed="true"] { background: #167da8; color: white; }
     label { display: block; margin: 12px 0 6px; font-weight: 600; }
-    input, textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    input, textarea, select { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
     button { margin-top: 16px; padding: 10px 16px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .6; cursor: wait; }
     button.secondary { background: #5b6b78; }
@@ -189,6 +189,48 @@
       badge.textContent = business.status;
       const details = document.createElement("p");
       details.textContent = `${business.contactEmail || "No contact email"} · ${business.adminCount} active administrator(s) · registered ${business.createdAt}`;
+      const membership = business.membership;
+      const usage = document.createElement("p");
+      const usageText = key => membership.limits[key] === null
+        ? `${membership.usage[key]} / unlimited`
+        : `${membership.usage[key]} / ${membership.limits[key]}`;
+      usage.textContent = `Usage · Admin seats ${usageText("admins")} · Teams ${usageText("teams")} · Active employees ${usageText("employees")} · Locations ${usageText("locations")}`;
+      const tierControls = document.createElement("div");
+      tierControls.className = "actions";
+      const tierSelect = document.createElement("select");
+      tierSelect.setAttribute("aria-label", `Membership tier for ${business.name}`);
+      for (const [value, label] of [
+        ["bronze", "Bronze"], ["silver", "Silver"], ["gold", "Gold"], ["platinum", "Platinum"]
+      ]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        tierSelect.append(option);
+      }
+      tierSelect.value = membership.tier;
+      const tierButton = document.createElement("button");
+      tierButton.type = "button";
+      tierButton.className = "secondary";
+      tierButton.textContent = "Save tier";
+      tierButton.addEventListener("click", async () => {
+        message.textContent = "";
+        try {
+          await send(`/api/hub/businesses/${encodeURIComponent(business.id)}/tier`, {
+            tier: tierSelect.value
+          });
+          await loadBusinesses();
+        } catch (error) { message.textContent = error.message; }
+      });
+      tierControls.append(tierSelect, tierButton);
+      const tierFeatures = document.createElement("p");
+      tierFeatures.className = "note";
+      const featureLabels = [
+        ["employeeScheduleAccess", "Employee schedule access"],
+        ["shiftTrades", "Shift trades"],
+        ["scheduleHistory", "Schedule history"],
+        ["overtimeForecasting", "Overtime forecasting"]
+      ];
+      tierFeatures.textContent = `Included: ${featureLabels.filter(([key]) => membership.features[key]).map(([, label]) => label).join(", ") || "core scheduling only"}. Existing over-limit usage is retained; additions remain blocked until usage is within the selected limits.`;
       const note = document.createElement("input");
       note.placeholder = "Optional note shown to the business";
       note.maxLength = 500;
@@ -215,7 +257,25 @@
         });
         actions.append(button);
       }
-      card.append(title, badge, details, note, actions);
+      if (business.id !== "cbljm") {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "bad";
+        remove.textContent = "Delete permanently";
+        remove.addEventListener("click", async () => {
+          const confirmation = window.prompt(
+            `This permanently deletes ${business.name} and its schedules, employees, settings, and administrators. Type the business name to confirm:`
+          );
+          if (confirmation !== business.name) return;
+          message.textContent = "";
+          try {
+            await send(`/api/hub/businesses/${encodeURIComponent(business.id)}`, {}, "DELETE");
+            await loadBusinesses();
+          } catch (error) { message.textContent = error.message; }
+        });
+        actions.append(remove);
+      }
+      card.append(title, badge, details, usage, tierControls, tierFeatures, note, actions);
       return card;
     }
 

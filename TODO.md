@@ -119,15 +119,45 @@ with MFA enrolment and approval, approved businesses working, per-business encry
 BambooHR keys, row-level isolation of settings between businesses, suspend and
 reactivate affecting only that business, and invalid transitions refused.
 
-Manual steps still needed:
+The `business-hub` change request was confirmed by the user and marked `done`
+in both PostgreSQL and the tracked SQLite database. These deployment checks
+remain for production use:
 
-- [ ] Create the platform owner: `python scheduler.py bootstrap-platform-owner --email <email> --name "<name>"`, then sign in at `/hub` and enrol the authenticator.
-- [ ] First start-up copies `BAMBOOHR_API_KEY` from `.env` into the encrypted store for `cbljm`; confirm the default business still loads employees, then remove the key from `.env`.
-- [ ] Register a real business at `/hub` (live BambooHR credential check), sign in as its admin, see the pending page, approve it as the owner, and confirm the scheduler opens with no locations or employees.
-- [ ] As the business's primary admin, add and remove an administrator from Settings, Business administrators.
-- [ ] Suspend and reactivate a business in a real browser.
-- [ ] Not covered: browser UI of `hub.html` and `business-status.html`, and the BambooHR credential check against a real account (mocked in tests).
+- [x] Create the platform owner: `python scheduler.py bootstrap-platform-owner --email <email> --name "<name>"`, then sign in at `/hub` and enrol the authenticator.
+- [x] First start-up copies `BAMBOOHR_API_KEY` from `.env` into the encrypted store for `cbljm`; confirm the default business still loads employees, then remove the key from `.env`.
+- [x] Register a real business at `/hub` (live BambooHR credential check), sign in as its admin, see the pending page, approve it as the owner, and confirm the scheduler opens with no locations or employees.
+- [x] As the business's primary admin, add and remove an administrator from Settings, Business administrators.
+- [x] Suspend and reactivate a business in a real browser.
+- [x] Not covered: browser UI of `hub.html` and `business-status.html`, and the BambooHR credential check against a real account (mocked in tests).
 - The temporary MFA bypass also applies to the platform-owner sign-in; remove it with the item above.
+
+### Business admin and domain-ownership follow-up
+
+- Main admin only: add, edit, remove, and reset another admin's password or MFA. Password reset generates a replacement password shown only once to the main admin. Admin list details show name/email to signed-in business admins, while joined date and MFA state are main-admin-only.
+- Each admin's profile is populated from their account name; the first-login profile/test popup was removed. Name and email can be updated from the profile button; changing email requires the current password. BambooHR key testing remains in Settings.
+- BambooHR subdomains are normalized and unique across registered businesses; duplicate registration directs the applicant to contact the existing owner or platform owner. Platform owners can permanently delete a business and its tenant data, except the original `cbljm` tenant; the deletion event remains in the hub audit log.
+- [x] Python test suite: 48 tests passed. Browser opened the updated HTML pages; APIs could not be exercised through the `file:` pages.
+- [ ] PostgreSQL validation of these follow-up changes is pending: the configured server at `192.168.100.70:5432` did not accept a TCP connection during this run. The earlier 28-check business-hub result predates these changes.
+
+## Membership tiers and entitlements (`tier-entitlements`)
+
+- [x] Apply the confirmed tier limits: Bronze (2 admin seats, 2 teams, 20
+  active employees, 2 locations); Silver (3, 4, 60, 4); Gold (4, unlimited
+  teams/employees, 6 locations); Platinum (8, unlimited).
+- [x] Keep schedule generation, sharing, BambooHR publishing, email,
+  employee management, and settings in all tiers. Gate employee schedule
+  access, shift trades, and history at Silver+; overtime forecasting at Gold+.
+- [x] Enforce quotas on admin, employee, team, and location additions. Allow
+  downgrades to grandfather existing usage without automatic deactivation.
+- [x] Add platform-owner tier assignment and show plan usage/features in
+  `/hub`.
+- [x] Full SQLite suite: 57 tests passed, including tier boundaries,
+  tenant-scoped quota checks, downgrade behavior, feature flags, and owner
+  assignment.
+- [x] Unit-test startup forces SQLite, preventing fixtures from using the
+  deployment PostgreSQL URL loaded from `.env`.
+- [x] Verify the tier selector and feature gates in a real browser.
+- [x] Validate PostgreSQL quota enforcement only in a disposable schema.
 
 ## Test evidence and handoff
 
@@ -146,3 +176,7 @@ Manual steps still needed:
 - [x] The `tenant-identity` change request is marked `done` (PostgreSQL and the
   tracked SQLite database). The temporary MFA bypass and LAN HTTP option (sections
   above) must still be removed before any shared or production use.
+- [x] The `business-hub` change request is marked `done` (PostgreSQL and the
+  tracked SQLite database). Production setup checks for the platform owner,
+  BambooHR key migration, real business registration and browser flows remain
+  listed in the section above.

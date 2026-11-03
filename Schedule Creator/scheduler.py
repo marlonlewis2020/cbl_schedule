@@ -114,19 +114,25 @@ DEVELOPER_REQUESTS = (
     (
         "tier-entitlements",
         "Membership tiers and feature entitlements",
-        "Enforce Bronze (2 admins, 2 separately configured teams, 20 active employees), Silver (3 admins, 4 teams, 60 employees), Gold (4 admins, up to 6 schedule locations), and Platinum (8 admins, unlimited schedule locations). Gold and Platinum have unlimited active employees. All tiers include schedule generation, sharing, BambooHR publishing, email configuration, employee management, and settings. Higher-tier features include employee schedule access, shift trades, schedule history, overtime forecasting, and user licenses; finalize the exact feature-to-tier matrix.",
+        "Enforce Bronze (2 admin seats, 2 teams, 20 active employees, 2 locations), Silver (3 admin seats, 4 teams, 60 active employees, 4 locations), Gold (4 admin seats, unlimited teams and employees, 6 locations), and Platinum (8 admin seats, unlimited teams, employees, and locations). All tiers include schedule generation, sharing, BambooHR publishing, email configuration, employee management, and settings. Employee schedule access, shift trades, and schedule history are Silver and above; overtime forecasting is Gold and above. User licenses are admin seats. Downgrades retain existing over-limit records but block additions; never deactivate records automatically.",
         ("business-hub",),
     ),
     (
+        "business-membership-controls",
+        "Business admin membership controls",
+        "Allow only the designated main business admin to change the business membership tier, pause membership, or cancel membership from the hub. Show the current tier and status, explain the action's access and billing effects when applicable, and require confirmation. Apply existing membership status and tier-entitlement rules consistently, audit each action with its actor and prior/new value, and never delete tenant data as a side effect of cancellation.",
+        ("business-hub", "tier-entitlements"),
+    ),
+    (
         "manager-employee-access",
-        "Manager and employee authentication",
-        "Add verified individual sign-in for admins, schedule-location managers, and employees. Managers may manage/view locations assigned to their verified manager email. Employees authenticate individually and receive only the full schedule for their assigned location and role. Schedule codes are additional checks, not sole credentials.",
+        "Manager/employee authentication and attendance actions",
+        "Add verified individual sign-in for admins, schedule-location managers, and employees. Managers may manage/view only locations assigned to their verified manager email; employees authenticate individually and receive only information for their assigned location and role. Schedule codes are additional checks, not sole credentials. Add an expandable attendance-notifications control beside the app inbox icon. Notify each scoped manager in real time when a team member is late or absent. A manager may mark a late employee absent before automatic classification, with a required absence reason; record who made the change, when, and the reason. Automatically flag a scheduled employee absent four hours after shift start if no valid clock-in has been recorded, excluding approved leave and retaining an auditable correction path. Admins can manage attendance exceptions across their business; managers can act only for assigned teams.",
         ("tenant-identity", "business-hub", "tier-entitlements"),
     ),
     (
         "schedule-portal",
         "Employee schedule portal and access tokens",
-        "Generate cryptographically random, unique, expiring six-digit access codes for each location/role schedule period and include them in manager confirmation messages. The employee portal validates identity, location, role, period, and schedule assignment before revealing the full location/role schedule. Add configurable schedule visibility cadence in weeks and manager access to all assigned locations.",
+        "Generate cryptographically random, unique, expiring six-digit access codes for each location/role schedule period and include them in manager confirmation messages. The employee portal validates identity, location, role, period, and schedule assignment before revealing the full location/role schedule. Add configurable schedule visibility cadence in weeks and manager access to all assigned locations. Include a simplified, read-only attendance dashboard for each signed-in employee, restricted to that employee's own location × role team and the employee attendance/dashboard entitlements.",
         ("manager-employee-access",),
     ),
     (
@@ -155,14 +161,14 @@ DEVELOPER_REQUESTS = (
     ),
     (
         "attendance-automation",
-        "Automatic attendance percentage from BambooHR time tracking",
-        "Priority: Medium. Calculate each employee's attendance automatically as shifts attended (clocked in) divided by shifts scheduled, always averaged over the most recent 30-45 days (configurable within that range, default 30), replacing manual entry. Attendance calculation is included in every membership tier. First verify the tenant's BambooHR API key can read time-tracking clock-in data and that staff actually clock in through BambooHR. Match clock-ins to accepted schedule shifts by employee ID, with a configurable lateness tolerance, an overnight-shift day rule, and exclusion of shifts covered by approved time off. Write the result to each employee's attendance field on a schedule or on demand, keep a manual override, show the period and counts behind each percentage, and leave attendance blank when no data exists. The existing attendance priority bonus then uses the calculated value unchanged.",
+        "Real-time attendance tracking and automation",
+        "Priority: Medium. Verify that each tenant's BambooHR API key can read time-tracking clock-in data and that staff clock in through BambooHR. Ingest attendance updates promptly and match clock-ins to accepted shifts by employee ID, with a configurable lateness tolerance, correct overnight-shift day handling, and exclusion of approved time off. Keep auditable attendance events and exception states (for example sick, absent, late, and vacation), including their source and timestamps; do not infer vacation or sick leave solely from a missing clock-in. If no valid clock-in exists four hours after a scheduled shift starts, flag the employee absent unless approved leave covers the shift; allow an authorized manager or admin to correct the status with a required reason and audit trail. Calculate each employee's attendance as attended shifts divided by scheduled shifts over a configurable 30-45-day period (default 30), retain an auditable manual override, show period and counts, and leave the percentage blank when no data exists. Attendance calculation and operational tracking are included in every tier. The existing attendance priority bonus uses the calculated value unchanged.",
         ("business-hub",),
     ),
     (
         "workforce-dashboards",
-        "Interval snapshot and attendance dashboards",
-        "Priority: Medium. Add two dashboards. (1) Daily interval snapshot dashboard: for a chosen day, show scheduled headcount against demand and shortfall by interval for each location x role team; included in Gold and Platinum only. (2) Attendance dashboard: per-team and per-employee attendance averaged over the last 30-45 days with scheduled vs attended counts; included in Silver, Gold and Platinum. Admins see every location x role team; managers see only teams for locations assigned to their verified manager email, enforced server-side. Finalize the interval length (hourly, 30-minute, or shift-start slots) and snapshot contents before building. Planned coverage comes from accepted schedules; actual attendance depends on the attendance-automation request.",
+        "Live attendance and staffing dashboards",
+        "Priority: Medium. Build a live attendance dashboard from timely attendance events and accepted schedules. Show the selected day's snapshot so far: people expected to have started by now, people who clocked in, attendance percentage, and exception counts and employee names/statuses (including sick, absent, late, and vacation when supported by verified leave data). Break down the live attendance percentage and exceptions by role and shift; preserve the reporting hierarchy location → role → location × role team → shift. Admins have full business-wide access, default to All locations, and see groups by location; filters must not hide the location grouping. Managers see and act only on their assigned locations/teams, and employees see a simplified read-only dashboard for their own location × role team. Show the reporting timestamp/time zone and distinguish approved leave, open/current shifts, and genuine exceptions so live percentages use only employees expected so far. Define the refresh/update mechanism and finalize the interval length (hourly, 30-minute, or shift-start slots) and snapshot contents before building the separate daily staffing-vs-demand interval snapshot. Attendance dashboard access remains Silver+; daily interval staffing snapshots remain Gold and Platinum. Planned coverage comes from accepted schedules; actual attendance and four-hour absence classification depend on attendance-automation.",
         ("attendance-automation", "manager-employee-access", "tier-entitlements"),
     ),
     (
@@ -172,6 +178,72 @@ DEVELOPER_REQUESTS = (
         ("workforce-dashboards",),
     ),
 )
+MEMBERSHIP_TIERS = {
+    "bronze": {
+        "name": "Bronze",
+        "limits": {"admins": 2, "teams": 2, "employees": 20, "locations": 2},
+        "features": {
+            "scheduleGeneration": True,
+            "scheduleSharing": True,
+            "bamboohrPublishing": True,
+            "emailConfiguration": True,
+            "employeeManagement": True,
+            "settings": True,
+            "employeeScheduleAccess": False,
+            "shiftTrades": False,
+            "scheduleHistory": False,
+            "overtimeForecasting": False,
+        },
+    },
+    "silver": {
+        "name": "Silver",
+        "limits": {"admins": 3, "teams": 4, "employees": 60, "locations": 4},
+        "features": {
+            "scheduleGeneration": True,
+            "scheduleSharing": True,
+            "bamboohrPublishing": True,
+            "emailConfiguration": True,
+            "employeeManagement": True,
+            "settings": True,
+            "employeeScheduleAccess": True,
+            "shiftTrades": True,
+            "scheduleHistory": True,
+            "overtimeForecasting": False,
+        },
+    },
+    "gold": {
+        "name": "Gold",
+        "limits": {"admins": 4, "teams": None, "employees": None, "locations": 6},
+        "features": {
+            "scheduleGeneration": True,
+            "scheduleSharing": True,
+            "bamboohrPublishing": True,
+            "emailConfiguration": True,
+            "employeeManagement": True,
+            "settings": True,
+            "employeeScheduleAccess": True,
+            "shiftTrades": True,
+            "scheduleHistory": True,
+            "overtimeForecasting": True,
+        },
+    },
+    "platinum": {
+        "name": "Platinum",
+        "limits": {"admins": 8, "teams": None, "employees": None, "locations": None},
+        "features": {
+            "scheduleGeneration": True,
+            "scheduleSharing": True,
+            "bamboohrPublishing": True,
+            "emailConfiguration": True,
+            "employeeManagement": True,
+            "settings": True,
+            "employeeScheduleAccess": True,
+            "shiftTrades": True,
+            "scheduleHistory": True,
+            "overtimeForecasting": True,
+        },
+    },
+}
 
 
 def load_persistent_secret(environment_name: str, filename: str) -> str:
@@ -368,6 +440,111 @@ def active_tenant_id() -> str:
     return tenant_id or DEFAULT_TENANT_ID
 
 
+def tenant_membership_tier(
+    connection: DatabaseConnection, tenant_id: str | None = None
+) -> str:
+    row = connection.execute(
+        "SELECT membership_tier FROM tenants WHERE tenant_id = ?",
+        (tenant_id or active_tenant_id(),),
+    ).fetchone()
+    tier = row[0] if row else "bronze"
+    return tier if tier in MEMBERSHIP_TIERS else "bronze"
+
+
+def membership_usage(
+    connection: DatabaseConnection, tenant_id: str | None = None
+) -> dict[str, int]:
+    selected_tenant = tenant_id or active_tenant_id()
+    counts = {}
+    for key, table, condition in (
+        ("admins", "tenant_admins", "active = 1"),
+        ("employees", "employees", "active = 1"),
+    ):
+        counts[key] = connection.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE tenant_id = ? AND {condition}",
+            (selected_tenant,),
+        ).fetchone()[0]
+    counts["locations"] = connection.execute(
+        """
+        SELECT COUNT(DISTINCT LOWER(location))
+        FROM schedule_locations WHERE tenant_id = ?
+        """,
+        (selected_tenant,),
+    ).fetchone()[0]
+    if DATABASE_URL:
+        connection.execute(
+            "SELECT set_config('app.tenant_id', ?, false)", (selected_tenant,)
+        )
+    team_rows = connection.execute(
+        """
+        SELECT DISTINCT LOWER(location), LOWER(role_group)
+        FROM schedule_locations
+        WHERE tenant_id = ?
+        """,
+        (selected_tenant,),
+    ).fetchall()
+    counts["teams"] = len(team_rows)
+    if DATABASE_URL:
+        connection.execute(
+            "SELECT set_config('app.tenant_id', ?, false)", (active_tenant_id(),)
+        )
+    return counts
+
+
+def membership_summary(
+    connection: DatabaseConnection, tenant_id: str | None = None
+) -> dict:
+    tier = tenant_membership_tier(connection, tenant_id)
+    policy = MEMBERSHIP_TIERS[tier]
+    return {
+        "tier": tier,
+        "tierName": policy["name"],
+        "limits": policy["limits"],
+        "features": policy["features"],
+        "usage": membership_usage(connection, tenant_id),
+        "userLicenses": policy["limits"]["admins"],
+    }
+
+
+def membership_limit_error(tier: str, resource: str, usage: int, limit: int):
+    labels = {
+        "admins": "active administrator",
+        "employees": "active employee",
+        "locations": "location",
+        "teams": "configured location/role team",
+    }
+    return jsonify(
+        error=(
+            f"The {MEMBERSHIP_TIERS[tier]['name']} "
+            f"plan allows {limit} {labels[resource]}(s); {usage} are already in use. "
+            "Remove or deactivate existing items, or ask the platform owner to change the plan."
+        ),
+        limit=limit,
+        usage=usage,
+        resource=resource,
+    ), 409
+
+
+def membership_quota_response(
+    connection: DatabaseConnection,
+    resource: str,
+    *,
+    additions: int = 1,
+    tenant_id: str | None = None,
+):
+    if additions <= 0:
+        return None
+    selected_tenant = tenant_id or active_tenant_id()
+    tier = tenant_membership_tier(connection, selected_tenant)
+    limit = MEMBERSHIP_TIERS[tier]["limits"][resource]
+    if limit is None:
+        return None
+    usage = membership_usage(connection, selected_tenant)[resource]
+    if usage + additions <= limit:
+        return None
+    return membership_limit_error(tier, resource, usage, limit)
+
+
 def initialize_database() -> None:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with closing(database_connect()) as connection, connection:
@@ -473,12 +650,13 @@ def initialize_database() -> None:
                 tenant_id TEXT PRIMARY KEY,
                 business_name TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                bamboohr_subdomain TEXT
             );
             CREATE TABLE IF NOT EXISTS tenant_admins (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
-                email TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL,
                 display_name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
                 mfa_secret TEXT,
@@ -578,6 +756,8 @@ def initialize_database() -> None:
             ("contact_email", "TEXT NOT NULL DEFAULT ''"),
             ("bamboohr_api_key_encrypted", "TEXT"),
             ("reviewed_at", "TEXT"),
+            ("bamboohr_subdomain", "TEXT"),
+            ("membership_tier", "TEXT NOT NULL DEFAULT 'bronze'"),
         ):
             if column not in tenant_columns:
                 connection.execute(f"ALTER TABLE tenants ADD COLUMN {column} {definition}")
@@ -603,6 +783,106 @@ def initialize_database() -> None:
                 )
                 """
             )
+        if DATABASE_URL:
+            unique_constraints = connection.execute(
+                """
+                SELECT conname, pg_get_constraintdef(oid)
+                FROM pg_constraint
+                WHERE conrelid = 'tenant_admins'::regclass AND contype = 'u'
+                """
+            ).fetchall()
+            for name, definition in unique_constraints:
+                if definition.casefold() == "unique (email)":
+                    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                        raise RuntimeError("Unexpected administrator email constraint name.")
+                    connection.execute(
+                        f'ALTER TABLE tenant_admins DROP CONSTRAINT "{name}"'
+                    )
+        else:
+            legacy_email_unique = False
+            for index in connection.execute(
+                "PRAGMA index_list(tenant_admins)"
+            ).fetchall():
+                if not index[2]:
+                    continue
+                escaped_name = index[1].replace('"', '""')
+                indexed_columns = [
+                    row[2]
+                    for row in connection.execute(
+                        f'PRAGMA index_info("{escaped_name}")'
+                    ).fetchall()
+                ]
+                if indexed_columns == ["email"]:
+                    legacy_email_unique = True
+                    break
+            if legacy_email_unique:
+                connection.execute(
+                    """
+                    CREATE TEMP TABLE tenant_mfa_enrollments_email_migration AS
+                    SELECT admin_id, encrypted_secret, created_at
+                    FROM tenant_mfa_enrollments
+                    """
+                )
+                connection.execute("DROP TABLE tenant_mfa_enrollments")
+                connection.execute(
+                    """
+                    CREATE TABLE tenant_admins_new (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                        email TEXT NOT NULL,
+                        display_name TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        mfa_secret TEXT,
+                        mfa_enabled INTEGER NOT NULL DEFAULT 0
+                            CHECK (mfa_enabled IN (0, 1)),
+                        active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                        auth_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        is_primary INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO tenant_admins_new
+                    SELECT id, tenant_id, email, display_name, password_hash,
+                           mfa_secret, mfa_enabled, active, auth_version,
+                           created_at, updated_at, is_primary
+                    FROM tenant_admins
+                    """
+                )
+                connection.execute("DROP TABLE tenant_admins")
+                connection.execute(
+                    "ALTER TABLE tenant_admins_new RENAME TO tenant_admins"
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE tenant_mfa_enrollments (
+                        admin_id TEXT PRIMARY KEY
+                            REFERENCES tenant_admins(id) ON DELETE CASCADE,
+                        encrypted_secret TEXT NOT NULL,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO tenant_mfa_enrollments
+                        (admin_id, encrypted_secret, created_at)
+                    SELECT admin_id, encrypted_secret, created_at
+                    FROM tenant_mfa_enrollments_email_migration
+                    """
+                )
+                connection.execute(
+                    "DROP TABLE tenant_mfa_enrollments_email_migration"
+                )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS tenant_admins_tenant_email_unique
+            ON tenant_admins (tenant_id, email)
+            """
+        )
         connection.execute(
             "INSERT OR IGNORE INTO tenants (tenant_id, business_name) VALUES (?, ?)",
             (DEFAULT_TENANT_ID, DEFAULT_APP_CONFIG["businessName"]),
@@ -632,6 +912,30 @@ def initialize_database() -> None:
                 """,
                 (refreshed[2], refreshed[0]),
             )
+        if connection.execute(
+            "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
+            ("live-attendance-dashboard-requests-v1",),
+        ).rowcount:
+            refreshed_requests = {
+                row[0]: row
+                for row in DEVELOPER_REQUESTS
+                if row[0]
+                in {
+                    "manager-employee-access",
+                    "schedule-portal",
+                    "attendance-automation",
+                    "workforce-dashboards",
+                }
+            }
+            for request_id, request in refreshed_requests.items():
+                connection.execute(
+                    """
+                    UPDATE developer_change_requests
+                    SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE request_id = ? AND status IN ('pending', 'in_progress', 'blocked')
+                    """,
+                    (request[1], request[2], request_id),
+                )
         for request_id, _, _, dependencies in DEVELOPER_REQUESTS:
             connection.executemany(
                 """
@@ -828,6 +1132,89 @@ def initialize_database() -> None:
             VALUES (?, ?, ?)
             """,
             [(key, value, DEFAULT_TENANT_ID) for key, value in DEFAULT_APP_CONFIG.items()],
+        )
+        if DATABASE_URL:
+            tenant_rows = connection.execute(
+                """
+                SELECT tenant_id, bamboohr_subdomain
+                FROM tenants
+                ORDER BY created_at, tenant_id
+                """
+            ).fetchall()
+            claimed_domains: dict[str, str] = {}
+            for tenant_id, claimed_domain in tenant_rows:
+                if not claimed_domain:
+                    continue
+                normalized_domain = claimed_domain.strip().lower()
+                existing_owner = claimed_domains.get(normalized_domain)
+                if existing_owner and existing_owner != tenant_id:
+                    raise RuntimeError(
+                        f"BambooHR domain '{normalized_domain}' is already claimed by "
+                        f"multiple tenants ({existing_owner} and {tenant_id}). "
+                        "Resolve domain ownership before starting the scheduler."
+                    )
+                claimed_domains[normalized_domain] = tenant_id
+            conflicting_domains: list[tuple[str, str, str]] = []
+            for tenant_id, claimed_domain in tenant_rows:
+                if claimed_domain:
+                    continue
+                connection.execute(
+                    "SELECT set_config('app.tenant_id', ?, false)", (tenant_id,)
+                )
+                domain = connection.execute(
+                    """
+                    SELECT setting_value FROM application_settings
+                    WHERE tenant_id = ? AND setting_key = 'tenantId'
+                    """,
+                    (tenant_id,),
+                ).fetchone()
+                if domain and valid_tenant_id(domain[0]):
+                    normalized_domain = domain[0].strip().lower()
+                    existing_owner = claimed_domains.get(normalized_domain)
+                    if existing_owner and existing_owner != tenant_id:
+                        conflicting_domains.append(
+                            (normalized_domain, existing_owner, tenant_id)
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE tenants SET bamboohr_subdomain = ?
+                            WHERE tenant_id = ? AND bamboohr_subdomain IS NULL
+                            """,
+                            (normalized_domain, tenant_id),
+                        )
+                        claimed_domains[normalized_domain] = tenant_id
+            connection.execute(
+                "SELECT set_config('app.tenant_id', ?, false)", (DEFAULT_TENANT_ID,)
+            )
+            for domain, owner, conflicting_tenant in conflicting_domains:
+                print(
+                    f"Warning: BambooHR domain '{domain}' is claimed by tenant "
+                    f"'{owner}'; tenant '{conflicting_tenant}' has the same legacy "
+                    "setting. That setting was left unchanged and must be resolved."
+                )
+        else:
+            domain = connection.execute(
+                """
+                SELECT setting_value FROM application_settings
+                WHERE tenant_id = ? AND setting_key = 'tenantId'
+                """,
+                (DEFAULT_TENANT_ID,),
+            ).fetchone()
+            if domain and valid_tenant_id(domain[0]):
+                connection.execute(
+                    """
+                    UPDATE tenants SET bamboohr_subdomain = ?
+                    WHERE tenant_id = ? AND bamboohr_subdomain IS NULL
+                    """,
+                    (domain[0].lower(), DEFAULT_TENANT_ID),
+                )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS tenants_bamboohr_subdomain_unique
+            ON tenants (LOWER(bamboohr_subdomain))
+            WHERE bamboohr_subdomain IS NOT NULL AND bamboohr_subdomain != ''
+            """
         )
         connection.execute(
             """
@@ -1407,8 +1794,23 @@ def valid_app_config(payload: object) -> dict[str, str] | None:
     }
 
 
+class BambooDomainConflict(Exception):
+    pass
+
+
 def save_app_config(config: dict[str, str]) -> None:
     with closing(database_connect()) as connection, connection:
+        tenant_id = active_tenant_id()
+        if "tenantId" in config:
+            claimed = connection.execute(
+                """
+                SELECT tenant_id FROM tenants
+                WHERE LOWER(bamboohr_subdomain) = ? AND tenant_id != ?
+                """,
+                (config["tenantId"].lower(), tenant_id),
+            ).fetchone()
+            if claimed:
+                raise BambooDomainConflict
         connection.executemany(
             """
             INSERT INTO application_settings (setting_key, setting_value, tenant_id)
@@ -1418,10 +1820,19 @@ def save_app_config(config: dict[str, str]) -> None:
             """,
             [(key, value, active_tenant_id()) for key, value in config.items()],
         )
-        if "businessName" in config:
+        if "businessName" in config or "tenantId" in config:
+            fields = []
+            parameters = []
+            if "businessName" in config:
+                fields.append("business_name = ?")
+                parameters.append(config["businessName"])
+            if "tenantId" in config:
+                fields.append("bamboohr_subdomain = ?")
+                parameters.append(config["tenantId"].lower())
+            parameters.append(tenant_id)
             connection.execute(
-                "UPDATE tenants SET business_name = ? WHERE tenant_id = ?",
-                (config["businessName"], active_tenant_id()),
+                f"UPDATE tenants SET {', '.join(fields)} WHERE tenant_id = ?",
+                parameters,
             )
 
 
@@ -1627,10 +2038,10 @@ def tenant_auth_csrf_valid() -> bool:
     return bool(supplied and expected and secrets.compare_digest(supplied, expected))
 
 
-def tenant_auth_attempt_key(email: str) -> str:
+def tenant_auth_attempt_key(email: str, bamboohr_subdomain: str) -> str:
     return hmac.new(
         app.config["SECRET_KEY"].encode("utf-8"),
-        f"{request.remote_addr or 'unknown'}\0{email}".encode("utf-8"),
+        f"{request.remote_addr or 'unknown'}\0{bamboohr_subdomain}\0{email}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
@@ -1705,7 +2116,20 @@ def start_mfa_enrollment(
         """,
         (admin_id, mfa_cipher().encrypt(secret.encode("ascii")).decode("ascii")),
     )
-    label = quote(f"CBL Schedule:{email}")
+    account_label = f"CBL Schedule:{email}"
+    if not platform_owner:
+        tenant = connection.execute(
+            """
+            SELECT t.bamboohr_subdomain
+            FROM tenant_admins a
+            JOIN tenants t ON t.tenant_id = a.tenant_id
+            WHERE a.id = ?
+            """,
+            (admin_id,),
+        ).fetchone()
+        if tenant and tenant[0]:
+            account_label = f"{account_label} ({tenant[0]})"
+    label = quote(account_label)
     return secret, f"otpauth://totp/{label}?secret={secret}&issuer=CBL%20Schedule"
 
 
@@ -1808,11 +2232,25 @@ def tenant_auth_state():
             "SELECT 1 FROM tenant_admins WHERE tenant_id = ? LIMIT 1",
             (DEFAULT_TENANT_ID,),
         ).fetchone() is not None
+        profile = (
+            connection.execute(
+                """
+                SELECT display_name FROM tenant_admins
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (session.get("tenant_admin_id"), active_tenant_id()),
+            ).fetchone()
+            if authenticated
+            else None
+        )
+        membership = membership_summary(connection) if authenticated else None
     return jsonify(
         configured=configured,
         authenticated=authenticated,
         email=session.get("tenant_admin_email") if authenticated else None,
+        displayName=profile[0] if profile else None,
         businessStatus=g.tenant_status if authenticated else None,
+        membership=membership,
         csrfToken=csrf_token,
         canBootstrap=(
             not DATABASE_URL
@@ -1820,6 +2258,26 @@ def tenant_auth_state():
             and request.remote_addr in {"127.0.0.1", "::1"}
         ),
     )
+
+
+def membership_features_for_request() -> dict[str, bool]:
+    with closing(database_connect()) as connection:
+        tier = tenant_membership_tier(connection)
+    return MEMBERSHIP_TIERS[tier]["features"]
+
+
+def membership_feature_denied(feature: str):
+    with closing(database_connect()) as connection:
+        tier = tenant_membership_tier(connection)
+    if MEMBERSHIP_TIERS[tier]["features"].get(feature):
+        return None
+    labels = {
+        "scheduleHistory": "Schedule history is included with Silver and above.",
+        "overtimeForecasting": "Overtime forecasting is included with Gold and above.",
+        "shiftTrades": "Shift trades are included with Silver and above.",
+        "employeeScheduleAccess": "Employee schedule access is included with Silver and above.",
+    }
+    return jsonify(error=labels.get(feature, "This feature is not included in the business's membership tier.")), 403
 
 
 @app.post("/api/tenant-auth/bootstrap")
@@ -1890,10 +2348,12 @@ def tenant_admin_login():
         not isinstance(payload, dict)
         or not valid_admin_email(payload.get("email"))
         or not isinstance(payload.get("password"), str)
+        or not valid_tenant_id(payload.get("bamboohrSubdomain"))
     ):
-        return jsonify(error="Enter your administrator email and password."), 400
+        return jsonify(error="Enter your BambooHR subdomain, administrator email, and password."), 400
     email = payload["email"].strip().casefold()
-    login_key = tenant_auth_attempt_key(email)
+    bamboohr_subdomain = payload["bamboohrSubdomain"].strip().lower()
+    login_key = tenant_auth_attempt_key(email, bamboohr_subdomain)
     now = int(time_module.time())
     with closing(database_connect()) as connection, connection:
         attempt_state = tenant_auth_attempt_state(connection, login_key, now)
@@ -1906,9 +2366,9 @@ def tenant_admin_login():
                    a.mfa_enabled, a.auth_version, a.active
             FROM tenant_admins a
             JOIN tenants t ON t.tenant_id = a.tenant_id AND t.status != 'rejected'
-            WHERE a.email = ?
+            WHERE a.email = ? AND LOWER(t.bamboohr_subdomain) = ?
             """,
-            (email,),
+            (email, bamboohr_subdomain),
         ).fetchone()
         password_valid = bool(
             account
@@ -1980,9 +2440,11 @@ def verify_tenant_admin_mfa():
     with closing(database_connect()) as connection, connection:
         enrollment = connection.execute(
             """
-            SELECT e.encrypted_secret, a.email, a.auth_version, a.active
+            SELECT e.encrypted_secret, a.email, a.auth_version, a.active,
+                   t.bamboohr_subdomain
             FROM tenant_mfa_enrollments e
             JOIN tenant_admins a ON a.id = e.admin_id
+            JOIN tenants t ON t.tenant_id = a.tenant_id
             WHERE e.admin_id = ? AND a.tenant_id = ?
             """,
             (admin_id, tenant_id),
@@ -1990,7 +2452,9 @@ def verify_tenant_admin_mfa():
         if not enrollment or not enrollment[3]:
             return jsonify(error="The MFA enrollment session is no longer valid."), 401
         now = int(time_module.time())
-        login_key = tenant_auth_attempt_key(enrollment[1])
+        login_key = tenant_auth_attempt_key(
+            enrollment[1], enrollment[4] or ""
+        )
         attempt_state = tenant_auth_attempt_state(connection, login_key, now)
         if attempt_state is None:
             return jsonify(error="Too many failed verification attempts. Try again later."), 429
@@ -2182,6 +2646,18 @@ def hub_register():
         if attempt_state is None:
             return jsonify(error="Too many registration attempts. Try again later."), 429
         record_tenant_auth_failure(connection, limit_key, *attempt_state, now)
+    with closing(database_connect()) as connection:
+        if connection.execute(
+            "SELECT 1 FROM tenants WHERE LOWER(bamboohr_subdomain) = ?",
+            (subdomain,),
+        ).fetchone():
+            return jsonify(
+                error=(
+                    "This BambooHR domain is already registered. Contact the existing "
+                    "business owner to be added, or contact the platform owner to "
+                    "resolve domain ownership."
+                )
+            ), 409
     failure = check_bamboohr_credentials(subdomain, api_key)
     if failure:
         return jsonify(error=failure[0]), 400 if failure[1] in {401, 403} else failure[1]
@@ -2191,16 +2667,24 @@ def hub_register():
     try:
         with closing(database_connect()) as connection, connection:
             if connection.execute(
-                "SELECT 1 FROM tenant_admins WHERE email = ?", (email,)
+                "SELECT 1 FROM tenants WHERE LOWER(bamboohr_subdomain) = ?",
+                (subdomain,),
             ).fetchone():
-                raise RegistrationConflict
+                raise BambooDomainConflict
             connection.execute(
                 """
                 INSERT INTO tenants
-                    (tenant_id, business_name, status, contact_email, bamboohr_api_key_encrypted)
-                VALUES (?, ?, 'pending', ?, ?)
+                    (tenant_id, business_name, status, contact_email,
+                     bamboohr_api_key_encrypted, bamboohr_subdomain)
+                VALUES (?, ?, 'pending', ?, ?, ?)
                 """,
-                (tenant_id, business_name, email, encrypt_bamboohr_api_key(api_key.strip())),
+                (
+                    tenant_id,
+                    business_name,
+                    email,
+                    encrypt_bamboohr_api_key(api_key.strip()),
+                    subdomain,
+                ),
             )
             connection.execute(
                 """
@@ -2211,9 +2695,30 @@ def hub_register():
                 (admin_id, tenant_id, email, admin_name.strip(), generate_password_hash(password)),
             )
             hub_audit(connection, "register", tenant_id, business_name)
+    except BambooDomainConflict:
+        return jsonify(
+            error=(
+                "This BambooHR domain is already registered. Contact the existing "
+                "business owner to be added, or contact the platform owner to "
+                "resolve domain ownership."
+            )
+        ), 409
     except RegistrationConflict:
         return jsonify(error="An administrator already uses that email address."), 409
     except database_integrity_errors():
+        with closing(database_connect()) as connection:
+            duplicate_domain = connection.execute(
+                "SELECT 1 FROM tenants WHERE LOWER(bamboohr_subdomain) = ?",
+                (subdomain,),
+            ).fetchone()
+        if duplicate_domain:
+            return jsonify(
+                error=(
+                    "This BambooHR domain is already registered. Contact the existing "
+                    "business owner to be added, or contact the platform owner to "
+                    "resolve domain ownership."
+                )
+            ), 409
         return jsonify(error="An administrator already uses that email address."), 409
     g.tenant_id = tenant_id
     try:
@@ -2359,6 +2864,7 @@ def hub_businesses():
             """
             SELECT t.tenant_id, t.business_name, t.status, t.status_note,
                    t.contact_email, t.created_at, t.reviewed_at,
+                   t.membership_tier,
                    (SELECT COUNT(*) FROM tenant_admins a
                     WHERE a.tenant_id = t.tenant_id AND a.active = 1)
             FROM tenants t
@@ -2366,9 +2872,10 @@ def hub_businesses():
                      WHEN 'suspended' THEN 2 ELSE 3 END, t.created_at DESC
             """
         ).fetchall()
-    return jsonify(
-        businesses=[
-            {
+        businesses = []
+        for row in rows:
+            summary = membership_summary(connection, row[0])
+            businesses.append({
                 "id": row[0],
                 "name": row[1],
                 "status": row[2],
@@ -2376,11 +2883,95 @@ def hub_businesses():
                 "contactEmail": row[4],
                 "createdAt": row[5],
                 "reviewedAt": row[6],
-                "adminCount": row[7],
-            }
-            for row in rows
-        ]
-    )
+                "membership": summary,
+                "adminCount": row[8],
+            })
+    return jsonify(businesses=businesses)
+
+
+@app.post("/api/hub/businesses/<tenant_id>/tier")
+def hub_set_business_tier(tenant_id: str):
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    tier = payload.get("tier") if isinstance(payload, dict) else None
+    if tier not in MEMBERSHIP_TIERS:
+        return jsonify(error="Choose Bronze, Silver, Gold, or Platinum."), 400
+    with closing(database_connect()) as connection, connection:
+        tenant = connection.execute(
+            "SELECT business_name, membership_tier FROM tenants WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        if not tenant:
+            return jsonify(error="Business was not found."), 404
+        connection.execute(
+            "UPDATE tenants SET membership_tier = ? WHERE tenant_id = ?",
+            (tier, tenant_id),
+        )
+        hub_audit(
+            connection,
+            "membership-tier-changed",
+            tenant_id,
+            f"{tenant[1]} -> {tier}",
+            session.get("platform_owner_email"),
+        )
+        summary = membership_summary(connection, tenant_id)
+    return jsonify(membership=summary)
+
+
+@app.delete("/api/hub/businesses/<tenant_id>")
+def hub_delete_business(tenant_id: str):
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    if not MULTI_BUSINESS:
+        return jsonify(error="Business deletion requires the PostgreSQL multi-business deployment."), 503
+    if tenant_id == DEFAULT_TENANT_ID:
+        return jsonify(error="The original business cannot be deleted from the hub."), 409
+    with closing(database_connect()) as connection, connection:
+        tenant = connection.execute(
+            "SELECT business_name, bamboohr_subdomain FROM tenants WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        if not tenant:
+            return jsonify(error="Business was not found."), 404
+        hub_audit(
+            connection,
+            "business-permanently-deleted",
+            tenant_id,
+            f"{tenant[0]} ({tenant[1] or 'no BambooHR domain'})",
+            session.get("platform_owner_email"),
+        )
+        if DATABASE_URL:
+            connection.execute(
+                "SELECT set_config('app.tenant_id', ?, false)", (tenant_id,)
+            )
+        for table_name in (
+            "employees",
+            "accepted_schedules",
+            "schedule_locations",
+            "application_settings",
+            "tenant_audit_events",
+        ):
+            connection.execute(
+                f"DELETE FROM {table_name} WHERE tenant_id = ?", (tenant_id,)
+            )
+        connection.execute(
+            """
+            DELETE FROM tenant_mfa_enrollments
+            WHERE admin_id IN (
+                SELECT id FROM tenant_admins WHERE tenant_id = ?
+            )
+            """,
+            (tenant_id,),
+        )
+        connection.execute("DELETE FROM tenant_admins WHERE tenant_id = ?", (tenant_id,))
+        connection.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
+    for token, validation in tuple(_validated_bamboo_keys.items()):
+        if validation[3] == tenant_id:
+            _validated_bamboo_keys.pop(token, None)
+    return jsonify(id=tenant_id, deleted=True)
 
 
 @app.post("/api/hub/businesses/<tenant_id>/status")
@@ -2432,14 +3023,77 @@ def business_status():
             "SELECT is_primary FROM tenant_admins WHERE id = ?",
             (session.get("tenant_admin_id"),),
         ).fetchone()
+        membership = membership_summary(connection)
     return jsonify(
         businessName=row[0],
         status=row[1],
         note=row[2],
+        membership=membership,
         isPrimaryAdmin=bool(admin and admin[0]),
         email=session.get("tenant_admin_email"),
         csrfToken=session.get("tenant_auth_csrf"),
     )
+
+
+@app.post("/api/business/profile")
+def update_business_profile():
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("name"), str)
+        or not 1 <= len(payload["name"].strip()) <= 120
+        or not valid_admin_email(payload.get("email"))
+    ):
+        return jsonify(error="Enter a valid name and email address."), 400
+    email = payload["email"].strip().casefold()
+    try:
+        with closing(database_connect()) as connection, connection:
+            account = connection.execute(
+                """
+                SELECT email, password_hash, auth_version FROM tenant_admins
+                WHERE id = ? AND tenant_id = ? AND active = 1
+                """,
+                (session.get("tenant_admin_id"), active_tenant_id()),
+            ).fetchone()
+            if not account:
+                return jsonify(error="Your administrator account could not be found."), 404
+            if email != account[0]:
+                current_password = payload.get("currentPassword")
+                if not isinstance(current_password, str) or not check_password_hash(
+                    account[1], current_password
+                ):
+                    return jsonify(error="Enter your current password to change your email."), 403
+                existing = connection.execute(
+                    """
+                    SELECT 1 FROM tenant_admins
+                    WHERE tenant_id = ? AND email = ? AND id != ?
+                    """,
+                    (active_tenant_id(), email, session.get("tenant_admin_id")),
+                ).fetchone()
+                if existing:
+                    return jsonify(error="That email address is already in use."), 409
+            connection.execute(
+                """
+                UPDATE tenant_admins
+                SET display_name = ?,
+                    auth_version = auth_version + CASE WHEN email != ? THEN 1 ELSE 0 END,
+                    email = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (
+                    payload["name"].strip(),
+                    email,
+                    email,
+                    session.get("tenant_admin_id"),
+                    active_tenant_id(),
+                ),
+            )
+    except database_integrity_errors():
+        return jsonify(error="That email address is already in use."), 409
+    session["tenant_admin_email"] = email
+    if email != account[0]:
+        session["tenant_auth_version"] = account[2] + 1
+    return jsonify(name=payload["name"].strip(), email=email)
 
 
 def primary_admin_guard():
@@ -2458,24 +3112,39 @@ def primary_admin_guard():
 @app.get("/api/business/admins")
 def list_business_admins():
     with closing(database_connect()) as connection:
+        primary = connection.execute(
+            "SELECT is_primary FROM tenant_admins WHERE id = ? AND tenant_id = ?",
+            (session.get("tenant_admin_id"), active_tenant_id()),
+        ).fetchone()
         rows = connection.execute(
             """
             SELECT id, email, display_name, active, mfa_enabled, is_primary
-            FROM tenant_admins WHERE tenant_id = ?
+                 , created_at,
+                   EXISTS (
+                       SELECT 1 FROM tenant_mfa_enrollments enrollment
+                       WHERE enrollment.admin_id = tenant_admins.id
+                   )
+            FROM tenant_admins
+            WHERE tenant_id = ? AND active = 1
             ORDER BY is_primary DESC, created_at, email
             """,
             (active_tenant_id(),),
         ).fetchall()
+    is_primary = bool(primary and primary[0])
     return jsonify(
+        isPrimaryAdmin=is_primary,
         admins=[
-            {
+            ({
                 "id": row[0],
                 "email": row[1],
                 "name": row[2],
+                "isPrimary": bool(row[5]),
+            } | ({
                 "active": bool(row[3]),
                 "mfaEnabled": bool(row[4]),
-                "isPrimary": bool(row[5]),
-            }
+                "joinedAt": row[6],
+                "mfaEnrollmentPending": bool(row[7]),
+            } if is_primary else {}))
             for row in rows
         ]
     )
@@ -2498,6 +3167,9 @@ def add_business_admin():
         return jsonify(error="Enter a name, a valid email, and a temporary password of at least 14 characters."), 400
     admin_id = secrets.token_urlsafe(18)
     with closing(database_connect()) as connection, connection:
+        limit_response = membership_quota_response(connection, "admins")
+        if limit_response:
+            return limit_response
         created = connection.execute(
             """
             INSERT OR IGNORE INTO tenant_admins
@@ -2533,7 +3205,117 @@ def remove_business_admin(admin_id: str):
         )
         if removed.rowcount == 0:
             return jsonify(error="That administrator was not found or cannot be removed."), 404
+        connection.execute(
+            "DELETE FROM tenant_mfa_enrollments WHERE admin_id = ?", (admin_id,)
+        )
     return jsonify(removed=True)
+
+
+@app.put("/api/business/admins/<admin_id>")
+def update_business_admin(admin_id: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("name"), str)
+        or not 1 <= len(payload["name"].strip()) <= 120
+        or not valid_admin_email(payload.get("email"))
+    ):
+        return jsonify(error="Enter a valid name and email address."), 400
+    email = payload["email"].strip().casefold()
+    try:
+        with closing(database_connect()) as connection, connection:
+            target = connection.execute(
+                """
+                SELECT 1 FROM tenant_admins
+                WHERE id = ? AND tenant_id = ? AND is_primary = 0 AND active = 1
+                """,
+                (admin_id, active_tenant_id()),
+            ).fetchone()
+            if not target:
+                return jsonify(error="That administrator was not found or cannot be edited."), 404
+            existing = connection.execute(
+                """
+                SELECT 1 FROM tenant_admins
+                WHERE tenant_id = ? AND email = ? AND id != ?
+                """,
+                (active_tenant_id(), email, admin_id),
+            ).fetchone()
+            if existing:
+                return jsonify(error="That email address is already in use."), 409
+            connection.execute(
+                """
+                UPDATE tenant_admins
+                SET display_name = ?,
+                    auth_version = auth_version + CASE WHEN email != ? THEN 1 ELSE 0 END,
+                    email = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ? AND is_primary = 0 AND active = 1
+                """,
+                (
+                    payload["name"].strip(),
+                    email,
+                    email,
+                    admin_id,
+                    active_tenant_id(),
+                ),
+            )
+    except database_integrity_errors():
+        return jsonify(error="That email address is already in use."), 409
+    return jsonify(updated=True)
+
+
+@app.post("/api/business/admins/<admin_id>/reset-password")
+def reset_business_admin_password(admin_id: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    if admin_id == session.get("tenant_admin_id"):
+        return jsonify(error="Use your profile to change your own password."), 400
+    temporary_password = secrets.token_urlsafe(24)
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE tenant_admins
+            SET password_hash = ?, auth_version = auth_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ? AND is_primary = 0 AND active = 1
+            """,
+            (
+                generate_password_hash(temporary_password),
+                admin_id,
+                active_tenant_id(),
+            ),
+        )
+        if updated.rowcount == 0:
+            return jsonify(error="That administrator was not found or cannot be reset."), 404
+    return jsonify(temporaryPassword=temporary_password)
+
+
+@app.post("/api/business/admins/<admin_id>/reset-mfa")
+def reset_business_admin_mfa(admin_id: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    if admin_id == session.get("tenant_admin_id"):
+        return jsonify(error="Use account recovery to reset your own authenticator."), 400
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE tenant_admins
+            SET mfa_secret = NULL, mfa_enabled = 0, auth_version = auth_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ? AND is_primary = 0 AND active = 1
+            """,
+            (admin_id, active_tenant_id()),
+        )
+        if updated.rowcount == 0:
+            return jsonify(error="That administrator was not found or cannot be reset."), 404
+        connection.execute(
+            "DELETE FROM tenant_mfa_enrollments WHERE admin_id = ?", (admin_id,)
+        )
+    return jsonify(mfaReset=True)
 
 
 @app.get("/")
@@ -2599,6 +3381,19 @@ def valid_developer_username(value: object) -> bool:
 
 def valid_developer_password(value: object) -> bool:
     return isinstance(value, str) and len(value) >= 14 and len(value) <= 1024
+
+
+def developer_request_order_expression(
+    column: str,
+) -> tuple[str, tuple[str | int, ...]]:
+    request_ids = tuple(item[0] for item in DEVELOPER_REQUESTS)
+    cases = " ".join("WHEN ? THEN ?" for _ in request_ids)
+    parameters = tuple(
+        value
+        for index, request_id in enumerate(request_ids)
+        for value in (request_id, index)
+    ) + (len(request_ids),)
+    return f"CASE {column} {cases} ELSE ? END", parameters
 
 
 @app.get("/developer/change-requests")
@@ -2788,11 +3583,19 @@ def list_developer_change_requests():
             SELECT request_id, title, description, status, created_at, updated_at
             FROM developer_change_requests
         """
-        parameters: tuple[str, ...] = ()
+        parameters: tuple[str | int, ...] = ()
         if status != "all":
             query += " WHERE status = ?"
             parameters = (status,)
-        query += " ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'pending' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, developer_change_requests.rowid"
+        request_order, request_order_parameters = developer_request_order_expression(
+            "developer_change_requests.request_id"
+        )
+        query += (
+            " ORDER BY CASE status WHEN 'in_progress' THEN 0 "
+            "WHEN 'pending' THEN 1 WHEN 'blocked' THEN 2 "
+            f"WHEN 'done' THEN 3 ELSE 4 END, {request_order}"
+        )
+        parameters = (*parameters, *request_order_parameters)
         rows = connection.execute(query, parameters).fetchall()
         dependencies = connection.execute(
             """
@@ -2803,8 +3606,11 @@ def list_developer_change_requests():
               ON prerequisite.request_id = dependency.depends_on
             """
         ).fetchall()
+        next_request_order, next_order_parameters = developer_request_order_expression(
+            "request.request_id"
+        )
         next_request = connection.execute(
-            """
+            f"""
             SELECT request.request_id, request.title
             FROM developer_change_requests AS request
             WHERE request.status = 'pending'
@@ -2816,9 +3622,10 @@ def list_developer_change_requests():
                   WHERE dependency.request_id = request.request_id
                     AND prerequisite.status != 'done'
               )
-            ORDER BY request.rowid
+            ORDER BY {next_request_order}
             LIMIT 1
-            """
+            """,
+            next_order_parameters,
         ).fetchone()
         dependency_map: dict[str, list[dict[str, str]]] = {}
         for request_id, dependency_id, title, dependency_status in dependencies:
@@ -3463,11 +4270,17 @@ def update_employee_statuses():
     with closing(database_connect()) as connection, connection:
         placeholders = ",".join("?" for _ in employee_ids)
         rows = connection.execute(
-            f"SELECT employee_id FROM employees WHERE employee_id IN ({placeholders})",
+            f"SELECT employee_id, active FROM employees WHERE employee_id IN ({placeholders})",
             employee_ids,
         ).fetchall()
         if len(rows) != len(employee_ids):
             return jsonify(error="One or more selected employees were not found."), 404
+        additions = sum(not bool(row[1]) for row in rows) if active else 0
+        limit_response = membership_quota_response(
+            connection, "employees", additions=additions
+        )
+        if limit_response:
+            return limit_response
         connection.executemany(
             "UPDATE employees SET active = ? WHERE employee_id = ?",
             [(int(active), employee_id) for employee_id in employee_ids],
@@ -3791,6 +4604,10 @@ def update_employee(employee_id: str):
             return jsonify(error="Assign a role before making the employee active."), 400
         if payload.get("scheduleLocationId") and not payload["role"].strip():
             return jsonify(error="Assign a role before mapping the employee to a schedule location."), 400
+        if payload["active"] and not existing[5]:
+            limit_response = membership_quota_response(connection, "employees")
+            if limit_response:
+                return limit_response
         try:
             cursor = connection.execute(
                 """
@@ -3880,6 +4697,61 @@ def valid_schedule_location(payload: object) -> bool:
     )
 
 
+def schedule_team_exists(
+    connection: DatabaseConnection,
+    location: str,
+    role_group: str,
+    *,
+    exclude_id: str | None = None,
+) -> bool:
+    query = """
+        SELECT 1 FROM schedule_locations
+        WHERE tenant_id = ? AND LOWER(location) = LOWER(?) AND LOWER(role_group) = LOWER(?)
+    """
+    parameters: tuple[str, ...] = (active_tenant_id(), location, role_group)
+    if exclude_id is not None:
+        query += " AND id != ?"
+        parameters = (*parameters, exclude_id)
+    return connection.execute(query + " LIMIT 1", parameters).fetchone() is not None
+
+
+def schedule_team_count(
+    connection: DatabaseConnection,
+    location: str,
+    role_group: str,
+) -> int:
+    return connection.execute(
+        """
+        SELECT COUNT(*) FROM schedule_locations
+        WHERE tenant_id = ? AND LOWER(location) = LOWER(?) AND LOWER(role_group) = LOWER(?)
+        """,
+        (active_tenant_id(), location, role_group),
+    ).fetchone()[0]
+
+
+def schedule_location_name_exists(
+    connection: DatabaseConnection,
+    location: str,
+    *,
+    exclude_id: str | None = None,
+) -> bool:
+    query = "SELECT 1 FROM schedule_locations WHERE tenant_id = ? AND LOWER(location) = LOWER(?)"
+    parameters: tuple[str, ...] = (active_tenant_id(), location)
+    if exclude_id is not None:
+        query += " AND id != ?"
+        parameters = (*parameters, exclude_id)
+    return connection.execute(query + " LIMIT 1", parameters).fetchone() is not None
+
+
+def schedule_location_name_count(
+    connection: DatabaseConnection, location: str
+) -> int:
+    return connection.execute(
+        "SELECT COUNT(*) FROM schedule_locations WHERE tenant_id = ? AND LOWER(location) = LOWER(?)",
+        (active_tenant_id(), location),
+    ).fetchone()[0]
+
+
 def schedule_location_conflict(error: BaseException):
     return jsonify(error="Schedule name or BambooHR schedule ID is already in use."), 409
 
@@ -3893,6 +4765,18 @@ def create_schedule_location():
         ), 400
     location_id = os.urandom(16).hex()
     with closing(database_connect()) as connection, connection:
+        location = payload["location"].strip()
+        if not schedule_location_name_exists(connection, location):
+            limit_response = membership_quota_response(connection, "locations")
+            if limit_response:
+                return limit_response
+        role_group = str(payload.get("roleGroup", "")).strip()
+        if not schedule_team_exists(
+            connection, location, role_group
+        ):
+            limit_response = membership_quota_response(connection, "teams")
+            if limit_response:
+                return limit_response
         try:
             connection.execute(
                 """
@@ -3906,7 +4790,7 @@ def create_schedule_location():
                     payload["name"].strip(),
                     payload["bambooScheduleId"].strip(),
                     payload["location"].strip(),
-                    str(payload.get("roleGroup", "")).strip(),
+                    role_group,
                     payload["managerName"].strip(),
                     payload["managerEmail"].strip(),
                 ),
@@ -3924,6 +4808,34 @@ def update_schedule_location(location_id: str):
             error="Schedule name, BambooHR schedule ID, app location, manager name, and valid manager email are required."
         ), 400
     with closing(database_connect()) as connection, connection:
+        existing_location = connection.execute(
+            "SELECT location, role_group FROM schedule_locations WHERE id = ?",
+            (location_id,),
+        ).fetchone()
+        if not existing_location:
+            return jsonify(error="Schedule location was not found."), 404
+        new_location = payload["location"].strip()
+        new_role_group = str(payload.get("roleGroup", "")).strip()
+        if not schedule_location_name_exists(
+            connection, new_location, exclude_id=location_id
+        ):
+            if schedule_location_name_count(connection, existing_location[0]) > 1:
+                limit_response = membership_quota_response(connection, "locations")
+                if limit_response:
+                    return limit_response
+        if not schedule_team_exists(
+            connection,
+            new_location,
+            new_role_group,
+            exclude_id=location_id,
+        ):
+            old_team_count = schedule_team_count(
+                connection, existing_location[0], existing_location[1]
+            )
+            if old_team_count > 1:
+                limit_response = membership_quota_response(connection, "teams")
+                if limit_response:
+                    return limit_response
         assigned_roles = connection.execute(
             "SELECT role FROM employees WHERE schedule_location_id = ?",
             (location_id,),
@@ -3989,7 +4901,22 @@ def update_application_config():
     config = valid_app_config(request.get_json(silent=True))
     if config is None:
         return jsonify(error="Provide valid business, team, logo, color, and BambooHR tenant settings."), 400
-    save_app_config(config)
+    try:
+        save_app_config(config)
+    except BambooDomainConflict:
+        return jsonify(error="That BambooHR domain is already registered to another business."), 409
+    except database_integrity_errors():
+        with closing(database_connect()) as connection:
+            claimed = connection.execute(
+                """
+                SELECT 1 FROM tenants
+                WHERE LOWER(bamboohr_subdomain) = ? AND tenant_id != ?
+                """,
+                (config["tenantId"].lower(), active_tenant_id()),
+            ).fetchone()
+        if claimed:
+            return jsonify(error="That BambooHR domain is already registered to another business."), 409
+        raise
     return jsonify(current_app_config())
 
 
@@ -4322,6 +5249,13 @@ def promote_bamboohr_key():
         )
     try:
         save_app_config({"tenantId": validation[0]})
+    except BambooDomainConflict:
+        with closing(database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET bamboohr_api_key_encrypted = ? WHERE tenant_id = ?",
+                (previous[0] if previous else None, active_tenant_id()),
+            )
+        return jsonify(error="That BambooHR domain is already registered to another business; the key change was rolled back."), 409
     except database_errors():
         with closing(database_connect()) as connection, connection:
             connection.execute(

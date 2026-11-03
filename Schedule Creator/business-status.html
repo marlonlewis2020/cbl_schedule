@@ -23,8 +23,16 @@
     .badge.suspended { background: #f8d7d7; }
     .note { margin-top: 14px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
     .error { color: #a12121; }
+    .success { color: #236d2b; }
     ul { list-style: none; padding: 0; margin: 0; }
-    li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e3eaef; overflow-wrap: anywhere; }
+    li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e3eaef; overflow-wrap: anywhere; }
+    details.admins { margin: 12px 0 20px; border: 1px solid #d3dee5; border-radius: 8px; padding: 12px; }
+    details.admins summary { cursor: pointer; font-weight: 700; }
+    .admin-details { flex: 1; }
+    .admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .admin-actions button, .admin-edit button { margin: 0; padding: 6px 10px; }
+    .admin-edit { width: 100%; padding: 12px; background: #f3f6f8; border-radius: 6px; }
+    .temporary-password { margin: 12px 0; padding: 12px; background: #e6f4e7; border-radius: 6px; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
@@ -38,13 +46,17 @@
     <section id="adminSection" hidden>
       <h2>Administrators</h2>
       <p>Every administrator must set up an authenticator app the first time they sign in.</p>
-      <ul id="adminList"></ul>
+      <details class="admins" id="adminDetails">
+        <summary id="adminSummary">View administrators</summary>
+        <ul id="adminList"></ul>
+      </details>
+      <p id="temporaryPassword" class="temporary-password" hidden></p>
       <form id="adminForm" hidden>
         <label for="adminName">Name</label>
         <input id="adminName" maxlength="120" required>
         <label for="adminEmail">Email</label>
         <input id="adminEmail" type="email" maxlength="254" required>
-        <label for="adminPassword">Temporary password (14+ characters, share it privately)</label>
+        <label for="adminPassword">Initial password (14+ characters, share it privately)</label>
         <input id="adminPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
         <button type="submit">Add administrator</button>
       </form>
@@ -77,12 +89,98 @@
     function renderAdmins(admins) {
       const list = $("#adminList");
       list.replaceChildren();
-      for (const admin of admins.filter(item => item.active)) {
+      $("#adminSummary").textContent = `View administrators (${admins.length})`;
+      for (const admin of admins) {
         const row = document.createElement("li");
-        const text = document.createElement("span");
-        text.textContent = `${admin.name} · ${admin.email}${admin.isPrimary ? " · main administrator" : ""}${admin.mfaEnabled ? "" : " · authenticator not set up yet"}`;
-        row.append(text);
+        const details = document.createElement("span");
+        details.className = "admin-details";
+        details.textContent = `${admin.name} · ${admin.email}${admin.isPrimary ? " · main administrator" : ""}`;
+        if (isPrimary) {
+          const mfaStatus = admin.mfaEnabled
+            ? "authenticator set up"
+            : admin.mfaEnrollmentPending
+              ? "authenticator setup pending"
+              : "authenticator not set up";
+          details.textContent += ` · joined ${admin.joinedAt} · ${mfaStatus}`;
+        }
+        row.append(details);
         if (isPrimary && !admin.isPrimary) {
+          const actions = document.createElement("span");
+          actions.className = "admin-actions";
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "secondary";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", () => {
+            const existingForm = row.querySelector(".admin-edit");
+            if (existingForm) {
+              existingForm.remove();
+              return;
+            }
+            const form = document.createElement("form");
+            form.className = "admin-edit";
+            const nameLabel = document.createElement("label");
+            nameLabel.textContent = "Name";
+            const nameInput = document.createElement("input");
+            nameInput.required = true;
+            nameInput.maxLength = 120;
+            nameInput.value = admin.name;
+            nameLabel.append(nameInput);
+            const emailLabel = document.createElement("label");
+            emailLabel.textContent = "Email";
+            const emailInput = document.createElement("input");
+            emailInput.type = "email";
+            emailInput.required = true;
+            emailInput.maxLength = 254;
+            emailInput.value = admin.email;
+            emailLabel.append(emailInput);
+            const save = document.createElement("button");
+            save.type = "submit";
+            save.textContent = "Save details";
+            form.append(nameLabel, emailLabel, save);
+            form.addEventListener("submit", async event => {
+              event.preventDefault();
+              try {
+                await request(`/api/business/admins/${encodeURIComponent(admin.id)}`, {
+                  method: "PUT",
+                  body: JSON.stringify({ name: nameInput.value, email: emailInput.value })
+                });
+                await load();
+              } catch (error) { message.textContent = error.message; }
+            });
+            row.append(form);
+          });
+          actions.append(edit);
+
+          const resetPassword = document.createElement("button");
+          resetPassword.type = "button";
+          resetPassword.className = "secondary";
+          resetPassword.textContent = "Reset password";
+          resetPassword.addEventListener("click", async () => {
+            if (!window.confirm(`Reset the password for ${admin.name}? A new password will be shown here once.`)) return;
+            try {
+              const result = await request(`/api/business/admins/${encodeURIComponent(admin.id)}/reset-password`, { method: "POST", body: "{}" });
+              $("#temporaryPassword").hidden = false;
+              $("#temporaryPassword").textContent = `New password for ${admin.name}: ${result.temporaryPassword}. Copy it now and share it privately; it cannot be viewed again.`;
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          actions.append(resetPassword);
+
+          const resetMfa = document.createElement("button");
+          resetMfa.type = "button";
+          resetMfa.className = "secondary";
+          resetMfa.textContent = "Reset MFA";
+          resetMfa.disabled = admin.mfaEnabled !== true && admin.mfaEnrollmentPending !== true;
+          resetMfa.addEventListener("click", async () => {
+            if (!window.confirm(`Reset the authenticator for ${admin.name}? They will enroll again at their next sign-in.`)) return;
+            try {
+              await request(`/api/business/admins/${encodeURIComponent(admin.id)}/reset-mfa`, { method: "POST", body: "{}" });
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          actions.append(resetMfa);
+
           const remove = document.createElement("button");
           remove.type = "button";
           remove.className = "danger";
@@ -94,7 +192,8 @@
               await load();
             } catch (error) { message.textContent = error.message; }
           });
-          row.append(remove);
+          actions.append(remove);
+          row.append(actions);
         }
         list.append(row);
       }
@@ -114,7 +213,8 @@
       $("#openApp").hidden = status.status !== "active";
       $("#adminSection").hidden = false;
       $("#adminForm").hidden = !isPrimary;
-      renderAdmins((await (await fetch("/api/business/admins")).json()).admins);
+      const adminResult = await (await fetch("/api/business/admins")).json();
+      renderAdmins(adminResult.admins);
     }
 
     $("#adminForm").addEventListener("submit", async event => {
@@ -129,9 +229,9 @@
             password: $("#adminPassword").value
           })
         });
-        event.target.reset();
-        await load();
-      } catch (error) { message.textContent = error.message; }
+            event.target.reset();
+            await load();
+          } catch (error) { message.textContent = error.message; }
     });
 
     $("#signOut").addEventListener("click", async () => {

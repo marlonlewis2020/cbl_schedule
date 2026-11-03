@@ -1368,6 +1368,59 @@ td small,th small{
     flex-wrap:wrap;
     margin:14px 0
 }
+.employee-actions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(120px,1fr));
+    gap:8px;
+    min-width:256px;
+    margin:0
+}
+.employee-actions button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    min-height:40px;
+    padding:8px 12px;
+    border:1px solid #087fa8;
+    border-radius:8px;
+    background:#087fa8;
+    color:#fff;
+    text-align:center;
+    line-height:1.25;
+    white-space:normal
+}
+.employee-actions button:hover{
+    background:#066b8d;
+    border-color:#066b8d
+}
+.employee-actions button.danger{
+    background:#b4432b;
+    border-color:#b4432b;
+    color:#fff
+}
+.employee-actions button.danger:hover{
+    background:#963722;
+    border-color:#963722
+}
+[data-theme="dark"] .employee-actions button{
+    background:#087fa8;
+    border-color:#087fa8;
+    color:#fff
+}
+[data-theme="dark"] .employee-actions button:hover{
+    background:#066b8d;
+    border-color:#066b8d
+}
+[data-theme="dark"] .employee-actions button.danger{
+    background:#b4432b;
+    border-color:#b4432b;
+    color:#fff
+}
+[data-theme="dark"] .employee-actions button.danger:hover{
+    background:#963722;
+    border-color:#963722
+}
 .assignment-split{
     display:grid;
     grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);

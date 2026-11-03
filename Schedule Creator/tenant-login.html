@@ -27,6 +27,8 @@
     <form id="accountForm">
       <label id="nameLabel" for="name" hidden>Administrator name</label>
       <input id="name" autocomplete="name" maxlength="120" hidden>
+      <label id="bamboohrSubdomainLabel" for="bamboohrSubdomain">BambooHR subdomain</label>
+      <input id="bamboohrSubdomain" autocomplete="organization" maxlength="63" required>
       <label for="email">Administrator email</label>
       <input id="email" type="email" autocomplete="username" maxlength="254" required>
       <label for="password">Password</label>
@@ -85,6 +87,7 @@
       button.disabled = true;
       try {
         const payload = {
+          bamboohrSubdomain: document.querySelector("#bamboohrSubdomain").value.trim(),
           email: document.querySelector("#email").value,
           password: document.querySelector("#password").value
         };
@@ -131,6 +134,9 @@
         if (!state.configured && state.canBootstrap) {
           accountForm.dataset.bootstrap = "true";
           document.querySelector("#intro").textContent = "Create the first business administrator account.";
+          document.querySelector("#bamboohrSubdomainLabel").hidden = true;
+          document.querySelector("#bamboohrSubdomain").hidden = true;
+          document.querySelector("#bamboohrSubdomain").required = false;
           document.querySelector("#nameLabel").hidden = false;
           document.querySelector("#name").hidden = false;
           document.querySelector("#name").required = true;

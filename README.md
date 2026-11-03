@@ -38,8 +38,11 @@ The app requires a business administrator to sign in before accessing scheduling
 or business APIs. On first launch, create the initial administrator from the
 local computer with a unique password of at least 14 characters. Enroll an
 authenticator app using the displayed setup secret and verify its current
-six-digit code. Administrator MFA is mandatory. Sign out from the application
-header when finished.
+six-digit code. At each sign-in, enter the BambooHR subdomain for the business
+you want to access, along with that business's administrator email and password.
+The same email can be an administrator for multiple businesses; credentials and
+MFA enrollment are managed separately for each business. Administrator MFA is
+mandatory. Sign out from the application header when finished.
 
 Local development uses SQLite at
 `Schedule Creator\data\schedule_creator.sqlite3`. Flask's session-signing key
@@ -95,10 +98,36 @@ Imported admin passwords are retained, but all admins must enroll MFA again
 because encryption keys are deployment-specific.
 
 The initial local setup creates one administrator for the configured tenant.
-Business registration, membership approval, and managing additional tenant
-accounts remain separate roadmap work. PostgreSQL schema support is included;
+Multi-business registration, membership approval, and tenant account management
+are available through the Business Hub. PostgreSQL schema support is included;
 verify connection, backups, restore procedures, and deployment-specific
 operations in the target environment before production use.
+
+## Membership tiers and entitlements
+
+New businesses start on Bronze. The platform owner assigns or changes a tier
+from the Businesses panel at `/hub`. Admin seats are the user-license limit;
+teams are distinct location/role groups, and the location limit counts distinct
+locations.
+
+| Tier | Admin seats | Teams | Active employees | Locations |
+|---|---:|---:|---:|---:|
+| Bronze | 2 | 2 | 20 | 2 |
+| Silver | 3 | 4 | 60 | 4 |
+| Gold | 4 | Unlimited | Unlimited | 6 |
+| Platinum | 8 | Unlimited | Unlimited | Unlimited |
+
+Schedule generation, sharing, BambooHR publishing, email configuration,
+employee management, and settings are included in every tier. Employee schedule
+access, shift trades, and schedule history are available with Silver and above;
+overtime forecasting is available with Gold and above. The app returns
+entitlements with the authenticated tenant state and hides unavailable UI
+features. API additions that exceed an account's quotas are rejected.
+
+Downgrades do not deactivate or delete existing data. Existing over-limit
+usage is grandfathered, but new additions that exceed the selected tier are
+blocked until usage falls within its limits. Removals, deactivations, and
+changes that do not increase over-limit usage remain available.
 
 ## BambooHR configuration
 
@@ -190,10 +219,19 @@ setup is restricted to the computer running the app; there is no built-in
 updates, status filters, and dependency checks for starting or completing work.
 
 The approved SaaS roadmap is recorded there, but the Copilot builder is not
-connected yet. The page does not launch agents or apply code changes. Tenant
-registration and membership management, manager/employee access, the employee
-portal, shift trades, payment, and Copilot automation remain separate
-implementation phases.
+connected yet. The page does not launch agents or apply code changes. The
+attendance roadmap now includes timely BambooHR clock-in tracking, a live
+day-so-far dashboard with expected/attended counts and attendance percentages,
+role/shift and location-to-team breakdowns, and named absence/late/leave
+exceptions. Managers receive scoped in-app notifications and can record an
+absence with a reason; a missing clock-in becomes absent four hours after
+shift start unless approved leave applies. Admins see all business locations
+by default, while managers and employees are restricted to their authorized
+teams. Employees get a simplified read-only dashboard for their own team.
+Attendance dashboards remain Silver+, and daily staffing interval snapshots
+remain Gold/Platinum. Tenant registration and membership management,
+manager/employee access, the employee portal, shift trades, payment, and
+Copilot automation remain separate implementation phases.
 
 ## Data and tests
 
@@ -210,3 +248,8 @@ Run the Flask API tests from `Schedule Creator`:
 ```powershell
 python -m unittest -v test_scheduler.py
 ```
+
+The test module forces SQLite before running fixtures so the suite cannot
+connect to the deployment PostgreSQL database loaded from `.env`. Run
+PostgreSQL integration checks only with a disposable schema and an explicitly
+isolated test harness.
