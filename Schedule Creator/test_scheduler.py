@@ -3998,6 +3998,31 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         self.assertEqual(client.get("/api/access/notifications").get_json()["unread"], 0)
         self.assertEqual(self.admin.get("/api/attendance/notifications").get_json()["unread"], 2)
 
+    def test_archiving_notifications_is_per_reader_and_viewable_in_archive(self):
+        client, _, _ = self.sign_in_manager()
+        item = client.get("/api/access/notifications").get_json()["notifications"][0]
+        no_token = client.post("/api/access/notifications/archive", json={"ids": [item["id"]]})
+        self.assertEqual(no_token.status_code, 400)
+        none = client.post("/api/access/notifications/archive", headers=self.csrf, json={})
+        self.assertEqual(none.get_json()["archived"], 0)
+        done = client.post(
+            "/api/access/notifications/archive", headers=self.csrf, json={"ids": [item["id"]]}
+        )
+        self.assertEqual(done.get_json()["archived"], 1)
+        active = client.get("/api/access/notifications").get_json()
+        self.assertEqual((active["unread"], active["notifications"]), (0, []))
+        archived = client.get("/api/access/notifications?archived=1").get_json()
+        self.assertEqual([entry["id"] for entry in archived["notifications"]], [item["id"]])
+        self.assertTrue(archived["notifications"][0]["archived"])
+        again = client.post(
+            "/api/access/notifications/archive", headers=self.csrf, json={"ids": [item["id"]]}
+        )
+        self.assertEqual(again.get_json()["archived"], 0)
+        admin_view = self.admin.get("/api/attendance/notifications").get_json()
+        self.assertEqual(admin_view["unread"], 2)
+        archived_admin = self.admin.get("/api/attendance/notifications?archived=1").get_json()
+        self.assertEqual(archived_admin["notifications"], [])
+
     def test_manager_can_mark_late_absent_only_within_scope(self):
         client, _, _ = self.sign_in_manager()
         shift = {"runId": "run-1", "date": "2026-11-02", "reason": "No call, no show"}

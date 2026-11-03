@@ -2216,7 +2216,7 @@ function accessAccountsPanel(){
     let rows=accessAccounts.map(account=>`<tr><td>${esc(account.displayName)}</td><td>${esc(account.role)}</td><td>${esc(account.email||account.employeeId||'')}</td><td>${account.active?'Active':'Disabled'}${account.mustChangePassword?' · temporary password':''}${account.role==='manager'?(account.mfaEnabled?' · MFA on':' · MFA pending'):''}${account.role==='manager'&&!account.scopeEmployees?' · no matching schedule location':''}</td><td><div class="actions employee-actions"><button type="button" data-action="resetAccessPassword" data-id="${esc(account.id)}">Reset password</button>${account.role==='manager'?`<button type="button" data-action="resetAccessPassword" data-reset-mfa="true" data-id="${esc(account.id)}">Reset password &amp; MFA</button>`:''}<button type="button" data-action="toggleAccessAccount" data-id="${esc(account.id)}" data-active="${account.active?'false':'true'}">${account.active?'Disable':'Enable'}</button></div></td></tr>`).join('');
     return panel('Manager &amp; employee access',`${accessAccountsError?`<p class="badtext">${esc(accessAccountsError)}</p>`:''}${accessTemporaryPassword?`<div class="callout" role="status"><b>Temporary password for ${esc(accessTemporaryPassword.name)}:</b> <code>${esc(accessTemporaryPassword.password)}</code><br>Share it securely. It is shown once and expires in ${accessTemporaryPassword.hours} hours. The user must replace it at first sign-in at <code>/access</code>.</div>`:''}<div class="grid"><label>Role<select id="accessRole"><option value="manager">Manager (MFA required)</option><option value="employee">Employee (Silver and above)</option></select></label><label>Name<input id="accessName" maxlength="120"></label><label>Email (required for managers)<input id="accessEmail" type="email" maxlength="254"></label><label>Employee (employee accounts)<select id="accessEmployee"><option value="">—</option>${employeeOptions}</select></label></div><div class="actions"><button type="button" class="primary" data-action="createAccessAccount">Create account</button><button type="button" data-action="reloadAccessAccounts">Refresh</button></div><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Sign-in</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No manager or employee accounts yet.</td></tr>'}</tbody></table></div>`,'Managers see attendance only for employees at schedule locations whose manager email matches their email. Employees see only their own attendance.')
 }
-let attendanceNotifications=[],expandedNotifications=new Set();
+let attendanceNotifications=[],archivedNotifications=[],notificationView='active',expandedNotifications=new Set();
 function renderNotificationBadge(){
     let badge=$('notificationBadge'),unread=attendanceNotifications.filter(item=>!item.read).length;
     if(!badge)return;
@@ -2230,10 +2230,29 @@ function notificationDetailHtml(item){
 function renderNotificationPanel(){
     let box=$('notificationPanel');
     if(!box)return;
-    box.innerHTML=`<div class="notification-head"><b>Attendance notifications</b><div class="actions"><button type="button" data-action="readNotifications">Mark all read</button><button type="button" data-action="toggleNotifications" aria-label="Close notifications">Close</button></div></div><ul>${attendanceNotifications.map(item=>{
+    let archive=notificationView==='archive',items=archive?archivedNotifications:attendanceNotifications;
+    let list=items.map(item=>{
         let open=expandedNotifications.has(item.id);
-        return `<li class="notification-item ${item.read?'':'unread'}"><button type="button" class="notification-summary" data-action="openNotification" data-id="${esc(item.id)}" aria-expanded="${open}">${esc(item.date)}: ${esc(item.message)}</button>${open?notificationDetailHtml(item):''}</li>`
-    }).join('')||'<li class="notification-item"><span class="notification-summary">No notifications.</span></li>'}</ul>`
+        return `<li class="notification-item ${item.read||archive?'':'unread'}"><div class="notification-row"><button type="button" class="notification-summary" data-action="openNotification" data-id="${esc(item.id)}" aria-expanded="${open}">${esc(item.date)}: ${esc(item.message)}</button>${archive?'':`<button type="button" class="notification-remove" data-action="archiveNotification" data-id="${esc(item.id)}" aria-label="Remove notification" title="Remove (moves to archives)">✕</button>`}</div>${open?notificationDetailHtml(item):''}</li>`
+    }).join('')||`<li class="notification-item"><span class="notification-summary">${archive?'No archived notifications.':'No notifications.'}</span></li>`;
+    box.innerHTML=`<div class="notification-head"><b>${archive?'Archived notifications':'Attendance notifications'}</b><div class="actions">${archive?'':'<button type="button" data-action="readNotifications">Mark all read</button>'}<button type="button" data-action="toggleNotifications" aria-label="Close notifications">Close</button></div></div><ul>${list}</ul><div class="notification-foot"><button type="button" data-action="${archive?'showActiveNotifications':'showNotificationArchive'}">${archive?'← Back to notifications':'View archives'}</button></div>`
+}
+async function showNotificationArchive(){
+    let result=await directoryRequest('/attendance/notifications?archived=1');
+    archivedNotifications=result.notifications;
+    notificationView='archive';
+    renderNotificationPanel()
+}
+function showActiveNotifications(){
+    notificationView='active';
+    renderNotificationPanel()
+}
+async function archiveNotification(id){
+    await directoryRequest('/attendance/notifications/archive',{
+        method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({ids:[id]})
+    });
+    expandedNotifications.delete(id);
+    await pollAttendanceNotifications()
 }
 async function pollAttendanceNotifications(){
     if(!$('notificationBadge'))return;
@@ -2246,11 +2265,11 @@ async function pollAttendanceNotifications(){
     catch{}
 }
 async function openNotification(id){
-    let item=attendanceNotifications.find(entry=>entry.id===id);
+    let item=attendanceNotifications.find(entry=>entry.id===id)||archivedNotifications.find(entry=>entry.id===id);
     if(!item)return;
     if(expandedNotifications.has(id))expandedNotifications.delete(id);
     else expandedNotifications.add(id);
-    if(!item.read){
+    if(!item.read&&!item.archived){
         item.read=true;
         try{
             await directoryRequest('/attendance/notifications/read',{
@@ -2271,6 +2290,7 @@ function toggleNotificationPanel(){
         return
     }
     let box=document.createElement('div'),bell=$('notificationButton').getBoundingClientRect();
+    notificationView='active';
     box.id='notificationPanel';
     box.className='notification-panel';
     box.setAttribute('role','dialog');
@@ -3557,6 +3577,18 @@ async function action(a,element=null){
         }
         if(a==='openNotification'){
             await openNotification(element.dataset.id);
+            return
+        }
+        if(a==='archiveNotification'){
+            await archiveNotification(element.dataset.id);
+            return
+        }
+        if(a==='showNotificationArchive'){
+            await showNotificationArchive();
+            return
+        }
+        if(a==='showActiveNotifications'){
+            showActiveNotifications();
             return
         }
         if(a==='readNotifications'){

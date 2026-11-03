@@ -731,6 +731,7 @@ def initialize_database() -> None:
                 notification_id TEXT NOT NULL,
                 reader_key TEXT NOT NULL,
                 read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                archived INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (tenant_id, notification_id, reader_key)
             );
             CREATE TABLE IF NOT EXISTS tenant_audit_events (
@@ -1422,6 +1423,17 @@ def initialize_database() -> None:
                 connection.execute(
                     f"ALTER TABLE schedule_locations ADD COLUMN {column} {definition}"
                 )
+        notification_read_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(attendance_notification_reads)"
+            )
+        }
+        if "archived" not in notification_read_columns:
+            connection.execute(
+                "ALTER TABLE attendance_notification_reads "
+                "ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+            )
         shift_record_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(attendance_shift_records)")
         }
@@ -3969,6 +3981,7 @@ def notifications_for_reader(
     tenant_id: str,
     reader_key: str,
     employee_ids: set[str] | None,
+    archived: bool = False,
 ) -> dict[str, object]:
     rows = connection.execute(
         """
@@ -3980,16 +3993,21 @@ def notifications_for_reader(
                (SELECT s.shift_start FROM attendance_shift_records s
                 WHERE s.tenant_id = n.tenant_id AND s.employee_id = n.employee_id
                   AND s.shift_date = n.shift_date
-                ORDER BY s.updated_at DESC LIMIT 1)
+                ORDER BY s.updated_at DESC LIMIT 1),
+               (SELECT r.archived FROM attendance_notification_reads r
+                WHERE r.tenant_id = n.tenant_id AND r.notification_id = n.id
+                  AND r.reader_key = ?)
         FROM attendance_notifications n
         WHERE n.tenant_id = ?
         ORDER BY n.created_at DESC, n.id
         LIMIT 500
         """,
-        (reader_key, tenant_id),
+        (reader_key, reader_key, tenant_id),
     ).fetchall()
     visible = [
-        row for row in rows if employee_ids is None or row[2] in employee_ids
+        row for row in rows
+        if (employee_ids is None or row[2] in employee_ids)
+        and bool(row[10]) == archived
     ]
     return {
         "unread": sum(1 for row in visible if not row[8]),
@@ -3998,11 +4016,38 @@ def notifications_for_reader(
                 "id": row[0], "kind": row[1], "employeeId": row[2],
                 "employeeName": row[3], "location": row[4], "date": row[5],
                 "message": row[6], "createdAt": row[7], "read": bool(row[8]),
-                                "shiftStart": row[9],
-                            }
+                "shiftStart": row[9], "archived": archived,
+            }
             for row in visible[:50]
         ],
     }
+
+
+def archive_notifications(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    reader_key: str,
+    employee_ids: set[str] | None,
+    ids: object,
+) -> int:
+    visible = notifications_for_reader(connection, tenant_id, reader_key, employee_ids)
+    allowed = {item["id"] for item in visible["notifications"]}
+    if isinstance(ids, list):
+        allowed &= {item for item in ids if isinstance(item, str)}
+    else:
+        allowed = set()
+    for notification_id in allowed:
+        connection.execute(
+            """
+            INSERT INTO attendance_notification_reads
+                (tenant_id, notification_id, reader_key, archived)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT (tenant_id, notification_id, reader_key)
+            DO UPDATE SET archived = 1
+            """,
+            (tenant_id, notification_id, reader_key),
+        )
+    return len(allowed)
 
 
 def mark_notifications_read(
@@ -4186,8 +4231,23 @@ def admin_attendance_notifications():
             **notifications_for_reader(
                 connection, active_tenant_id(),
                 f"admin:{session.get('tenant_admin_id')}", None,
+                archived=request.args.get("archived") == "1",
             )
         )
+
+
+@app.post("/api/attendance/notifications/archive")
+def admin_archive_attendance_notifications():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        archived = archive_notifications(
+            connection, active_tenant_id(),
+            f"admin:{session.get('tenant_admin_id')}", None,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(archived=archived)
 
 
 @app.post("/api/attendance/notifications/read")
@@ -4402,9 +4462,25 @@ def access_notifications():
         scope = manager_employee_ids(connection, user["tenantId"], user["email"])
         return jsonify(
             **notifications_for_reader(
-                connection, user["tenantId"], f"user:{user['id']}", scope
+                connection, user["tenantId"], f"user:{user['id']}", scope,
+                archived=request.args.get("archived") == "1",
             )
         )
+
+
+@app.post("/api/access/notifications/archive")
+def access_archive_notifications():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        archived = archive_notifications(
+            connection, user["tenantId"], f"user:{user['id']}", scope,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(archived=archived)
 
 
 @app.post("/api/access/notifications/read")

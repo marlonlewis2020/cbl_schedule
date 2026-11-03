@@ -11,6 +11,7 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-03", "Notifications can be removed with ✕; removed items move to a per-user archive viewable with View archives at the bottom of the list (admin and manager)."),
     ("2026-11-03", "Attendance validation: a shift is attended only if the timesheet covers at least 60 minutes of it; early departures are recorded and notify the manager; overtime beyond the shift end is highlighted on the admin and manager attendance tables."),
     ("2026-11-03", "Manager and employee attendance tables now show a Shift time (start) column."),
     ("2026-11-03", "Manager attendance page: added From/To date filters that default to today."),
@@ -276,7 +277,7 @@ SECTIONS = [
                     ("ul", [
                         "At first sign-in the manager replaces the temporary password (at least 14 characters) and enrols an authenticator app. MFA is mandatory for managers; later sign-ins need the six-digit code (unless the temporary MFA bypass is enabled on the server).",
                         "The attendance page has From and To date filters that default to today (Jamaica time) when it opens; change the dates and select Apply, or Today to reset. The table lists the manager's own employees for that range, with each shift's date and start time. Mark absent is offered for late shifts and needs a reason; it is audited.",
-                        "The bell shows the unread count of late and absent alerts for the manager's employees and refreshes every 30 seconds. Select the bell to open a list below it and Close to hide it. Unread alerts are highlighted in amber; select one to expand its details (status, employee, location, shift date, time detected) and it turns pale as read. Mark all read clears the count for that manager only. Alerts appear only in the app; no email is sent.",
+                        "The bell shows the unread count of late and absent alerts for the manager's employees and refreshes every 30 seconds. Select the bell to open a list below it and Close to hide it. Unread alerts are highlighted in amber; select one to expand its details (status, employee, location, shift date, time detected) and it turns pale as read. Mark all read clears the count for that manager only. Select the ✕ beside an alert to remove it: it moves to the archives (for that manager only) and stops counting. Select View archives at the bottom of the list to see removed alerts, and Back to notifications to return. Alerts appear only in the app; no email is sent.",
                     ]),
                     ("h3", "Employees"),
                     ("p", "Employees replace the temporary password at first sign-in (no MFA) and then see only their own attendance for the last 30 days with a status summary."),

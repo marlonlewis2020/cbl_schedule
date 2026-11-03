@@ -36,6 +36,11 @@
     .nitem dl { margin: 0; padding: 8px 10px 10px; border-top: 1px solid #cfdbe3; background: #f8fbfc; color: #183044; font-weight: 400; border-radius: 0 0 6px 6px; }
     .nitem dt { font-size: .75rem; text-transform: uppercase; color: #52697a; margin-top: 6px; }
     .nitem dd { margin: 0; }
+    .nrow { display: flex; align-items: stretch; }
+    .nrow .summary { flex: 1; }
+    .nitem .remove { width: auto; margin: 0; padding: 0 12px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+    .nitem .remove:hover { color: #a33a12; }
+    #panel .foot { margin-top: 8px; text-align: center; }
     table { width: 100%; border-collapse: collapse; font-size: .92rem; }
     th, td { padding: 8px; border-bottom: 1px solid #e0e7ec; text-align: left; vertical-align: top; }
     .status { text-transform: capitalize; font-weight: 600; }
@@ -83,8 +88,9 @@
       </div>
     </header>
     <section id="panel" hidden>
-      <div class="head"><b>Attendance notifications</b><div><button id="markAll" class="secondary" type="button">Mark all read</button> <button id="closePanel" class="secondary" type="button" aria-label="Close notifications">Close</button></div></div>
+      <div class="head"><b id="panelTitle">Attendance notifications</b><div><button id="markAll" class="secondary" type="button">Mark all read</button> <button id="closePanel" class="secondary" type="button" aria-label="Close notifications">Close</button></div></div>
       <ul id="notificationList"></ul>
+      <div class="foot"><button id="archiveToggle" class="secondary" type="button">View archives</button></div>
     </section>
     <p id="summary"></p>
     <form id="dateFilter" class="filter" hidden>
@@ -208,6 +214,8 @@
     }
 
     let notifications = [];
+    let archivedNotifications = [];
+    let notificationView = "active";
     const expanded = new Set();
 
     function renderBadge() {
@@ -247,10 +255,17 @@
     function renderNotifications() {
       renderBadge();
       const list = $("#notificationList");
+      const archive = notificationView === "archive";
+      const items = archive ? archivedNotifications : notifications;
       list.replaceChildren();
-      for (const item of notifications) {
+      $("#panelTitle").textContent = archive ? "Archived notifications" : "Attendance notifications";
+      $("#markAll").hidden = archive;
+      $("#archiveToggle").textContent = archive ? "← Back to notifications" : "View archives";
+      for (const item of items) {
         const li = document.createElement("li");
-        li.className = "nitem" + (item.read ? "" : " unread");
+        li.className = "nitem" + (item.read || archive ? "" : " unread");
+        const row = document.createElement("div");
+        row.className = "nrow";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "summary";
@@ -258,22 +273,57 @@
         button.textContent = `${item.date}: ${item.message}`;
         button.setAttribute("aria-expanded", String(expanded.has(item.id)));
         button.addEventListener("click", () => openNotification(item));
-        li.append(button);
+        row.append(button);
+        if (!archive) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "remove";
+          remove.textContent = "✕";
+          remove.title = "Remove (moves to archives)";
+          remove.setAttribute("aria-label", "Remove notification");
+          remove.addEventListener("click", () => archiveNotification(item));
+          row.append(remove);
+        }
+        li.append(row);
         if (expanded.has(item.id)) li.append(detailList(item));
         list.append(li);
       }
-      if (!notifications.length) {
+      if (!items.length) {
         const li = document.createElement("li");
         li.className = "nitem";
-        li.textContent = "No notifications.";
+        li.textContent = archive ? "No archived notifications." : "No notifications.";
         li.style.padding = "9px 10px";
         list.append(li);
       }
     }
 
+    async function archiveNotification(item) {
+      try {
+        await api("/api/access/notifications/archive", "POST", { ids: [item.id] });
+        expanded.delete(item.id);
+        await pollNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    async function toggleArchive() {
+      try {
+        if (notificationView === "archive") {
+          notificationView = "active";
+        } else {
+          archivedNotifications = (await api("/api/access/notifications?archived=1")).notifications;
+          notificationView = "archive";
+        }
+        renderNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
     async function openNotification(item) {
       if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
-      if (!item.read) {
+      if (!item.read && !item.archived) {
         item.read = true;
         try {
           await api("/api/access/notifications/read", "POST", { ids: [item.id] });
@@ -327,8 +377,12 @@
       $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
       $("#dateFilter").requestSubmit();
     });
-    $("#bell").addEventListener("click", () => { $("#panel").hidden = !$("#panel").hidden; });
+    $("#bell").addEventListener("click", () => {
+      $("#panel").hidden = !$("#panel").hidden;
+      if (!$("#panel").hidden && notificationView === "archive") { notificationView = "active"; renderNotifications(); }
+    });
     $("#closePanel").addEventListener("click", () => { $("#panel").hidden = true; });
+    $("#archiveToggle").addEventListener("click", toggleArchive);
     $("#markAll").addEventListener("click", async () => {
       await api("/api/access/notifications/read", "POST", {});
       await pollNotifications();

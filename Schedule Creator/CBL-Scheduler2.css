@@ -2397,3 +2397,8 @@ tr.early-row>td{background:#fde8e0}
 [data-theme="dark"] tr.early-row>td{background:#4a2517}
 [data-theme="dark"] .overtime-flag{color:#ffd166}
 [data-theme="dark"] .early-flag{color:#ff9d7a}
+.notification-row{display:flex;align-items:stretch}
+.notification-row .notification-summary{flex:1}
+.notification-remove{border:0;background:transparent;color:inherit;padding:0 12px;cursor:pointer;font-size:14px;border-radius:0 6px 6px 0}
+.notification-remove:hover,.notification-remove:focus-visible{background:#0001;color:#a33a12}
+.notification-foot{margin-top:8px;text-align:center}
