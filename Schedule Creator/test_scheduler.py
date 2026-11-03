@@ -3255,6 +3255,64 @@ class AttendanceAutomationTests(unittest.TestCase):
         self.assertEqual(repeated["classifiedChanges"], 0)
         self.assertEqual(audit_count, 3)
 
+    def test_timesheet_must_cover_an_hour_and_flags_early_leave_and_overtime(self):
+        self.seed_attendance_schedule()
+        now = scheduler.datetime(2026, 11, 2, 16, 0, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+
+        def entry(entry_id, bamboohr_id, start_hour, end_hour):
+            return {
+                "id": entry_id, "bamboohrId": bamboohr_id, "date": "2026-11-02",
+                "start": f"2026-11-02T{start_hour}:00+00:00",
+                "end": f"2026-11-02T{end_hour}:00+00:00",
+                "timezone": "America/Jamaica", "approved": False,
+            }
+
+        clock_entries = [
+            entry("1", "111", "11:00", "11:30"),
+            entry("2", "222", "11:00", "17:00"),
+            entry("3", "333", "11:00", "20:30"),
+        ]
+        with closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection, clock_entries, [], now=now)
+            rows = {
+                row[0]: row[1:]
+                for row in connection.execute(
+                    """
+                    SELECT employee_id, status, worked_minutes, early_minutes,
+                           overtime_minutes, reason
+                    FROM attendance_shift_records
+                    """
+                ).fetchall()
+            }
+            notifications = connection.execute(
+                "SELECT employee_id, kind FROM attendance_notifications"
+            ).fetchall()
+        self.assertEqual(rows["attendance-111"][0], "absent")
+        self.assertEqual(rows["attendance-111"][1], 30)
+        self.assertIn("at least 60", rows["attendance-111"][4])
+        self.assertEqual(rows["attendance-222"][:4], ("attended", 360, 120, 0))
+        self.assertIn("Left 120 minutes", rows["attendance-222"][4])
+        self.assertEqual(rows["attendance-333"][:4], ("attended", 480, 0, 90))
+        self.assertIn(("attendance-222", "early_leave"), notifications)
+        self.assertNotIn(("attendance-333", "early_leave"), notifications)
+
+    def test_overnight_overlap_under_an_hour_does_not_count_for_next_shift(self):
+        zone = scheduler.ATTENDANCE_TIMEZONE
+        start = scheduler.datetime(2026, 11, 3, 0, 0, tzinfo=zone)
+        end = start + scheduler.timedelta(hours=8)
+        previous_night = {
+            "start": "2026-11-02T16:00:00-05:00",
+            "end": "2026-11-03T00:40:00-05:00",
+        }
+        now = end + scheduler.timedelta(hours=1)
+        result = scheduler.evaluate_shift_timesheet([previous_night], start, end, now)
+        self.assertFalse(result["qualifies"])
+        self.assertEqual(result["workedMinutes"], 40)
+        long_overlap = {**previous_night, "end": "2026-11-03T01:30:00-05:00"}
+        self.assertTrue(
+            scheduler.evaluate_shift_timesheet([long_overlap], start, end, now)["qualifies"]
+        )
+
     def test_attendance_api_returns_historical_day_and_rejects_future_dates(self):
         base_datetime = scheduler.datetime
 
@@ -3791,6 +3849,294 @@ class DeveloperChangeRequestTests(unittest.TestCase):
             },
         )
         self.assertEqual(new_login.status_code, 200)
+
+
+class ManagerEmployeeAccessTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.original_database_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.temporary_directory.name) / "access.sqlite3"
+        scheduler.initialize_database()
+        scheduler.app.config["TESTING"] = True
+        self.admin = scheduler.app.test_client()
+        authenticate_test_admin(self.admin)
+        tenant = scheduler.DEFAULT_TENANT_ID
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET bamboohr_subdomain = 'acme', status = 'active', "
+                "membership_status = 'active', membership_tier = 'silver' WHERE tenant_id = ?",
+                (tenant,),
+            )
+            for location_id, name, manager in (
+                ("loc1", "Kingston", "mgr@acme.example"),
+                ("loc2", "Montego Bay", "other@acme.example"),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO schedule_locations
+                        (id, tenant_id, name, bamboo_schedule_id, location, manager_email)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (location_id, tenant, name, "sched-" + location_id, name, manager),
+                )
+            for employee_id, name, location_id, location in (
+                ("emp-a", "Ann Kingston", "loc1", "Kingston"),
+                ("emp-b", "Bob Montego", "loc2", "Montego Bay"),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id, tenant_id, name, location, role, active,
+                         schedule_location_id, source_type)
+                    VALUES (?, ?, ?, ?, 'Cashier', 1, ?, 'manual')
+                    """,
+                    (employee_id, tenant, name, location, location_id),
+                )
+            for employee_id, name, location in (
+                ("emp-a", "Ann Kingston", "Kingston"),
+                ("emp-b", "Bob Montego", "Montego Bay"),
+            ):
+                scheduler.record_attendance_status(
+                    connection, run_id="run-1", employee_id=employee_id,
+                    shift_date="2026-11-02", shift_start=1.0, status="late",
+                    source="attendance_rule", reason="", employee_name=name,
+                    location=location, role="Cashier", clock_in_at=None,
+                    clock_in_timezone="", existing={},
+                )
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_database_path
+        self.temporary_directory.cleanup()
+
+    def create_account(self, **fields):
+        response = self.admin.post(
+            "/api/access-accounts", headers={"X-CSRF-Token": "test-csrf-token"}, json=fields
+        )
+        return response
+
+    def new_client(self):
+        client = scheduler.app.test_client()
+        self.csrf = {"X-CSRF-Token": client.get("/api/access/state").get_json()["csrfToken"]}
+        return client
+
+    def sign_in_manager(self):
+        created = self.create_account(
+            role="manager", displayName="Mary Manager", email="mgr@acme.example"
+        ).get_json()
+        client = self.new_client()
+        credentials = {
+            "bamboohrSubdomain": "acme", "identifier": "MGR@acme.example",
+            "password": created["temporaryPassword"],
+        }
+        first = client.post("/api/access/login", headers=self.csrf, json=credentials)
+        self.assertTrue(first.get_json()["passwordChangeRequired"])
+        enrolling = client.post(
+            "/api/access/login", headers=self.csrf,
+            json=credentials | {"newPassword": "Manager-New-Password-2026!"},
+        ).get_json()
+        self.assertTrue(enrolling["mfaEnrollmentRequired"])
+        self.csrf = {"X-CSRF-Token": enrolling["csrfToken"]}
+        done = client.post(
+            "/api/access/verify-mfa", headers=self.csrf,
+            json={"code": scheduler.totp_value(enrolling["secret"], int(time.time() // 30))},
+        )
+        self.assertEqual(done.status_code, 200)
+        self.csrf = {"X-CSRF-Token": done.get_json()["csrfToken"]}
+        return client, enrolling["secret"], created
+
+    def test_manager_sees_only_their_locations_and_cannot_use_admin_api(self):
+        client, _, _ = self.sign_in_manager()
+        records = client.get("/api/access/manager/attendance?start=2026-11-01&end=2026-11-30")
+        self.assertEqual(records.status_code, 200)
+        self.assertEqual(
+            [record["employeeId"] for record in records.get_json()["records"]], ["emp-a"]
+        )
+        self.assertEqual(client.get("/api/attendance").status_code, 401)
+        self.assertEqual(client.get("/api/access-accounts").status_code, 401)
+
+    def test_temporary_password_cannot_be_reused_and_mfa_is_required_on_return(self):
+        client, secret, created = self.sign_in_manager()
+        self.assertEqual(client.post("/api/access/logout", headers=self.csrf, json={}).status_code, 200)
+        again = self.new_client()
+        old = again.post(
+            "/api/access/login", headers=self.csrf,
+            json={"bamboohrSubdomain": "acme", "identifier": "mgr@acme.example",
+                  "password": created["temporaryPassword"]},
+        )
+        self.assertEqual(old.status_code, 401)
+        credentials = {"bamboohrSubdomain": "acme", "identifier": "mgr@acme.example",
+                       "password": "Manager-New-Password-2026!"}
+        self.assertTrue(
+            again.post("/api/access/login", headers=self.csrf, json=credentials).get_json()["mfaCodeRequired"]
+        )
+        bad = again.post("/api/access/login", headers=self.csrf, json=credentials | {"code": "000000"})
+        self.assertEqual(bad.status_code, 401)
+        good = again.post(
+            "/api/access/login", headers=self.csrf,
+            json=credentials | {"code": scheduler.totp_value(secret, int(time.time() // 30))},
+        )
+        self.assertTrue(good.get_json()["authenticated"])
+
+    def test_notifications_are_scoped_deduplicated_and_markable(self):
+        client, _, _ = self.sign_in_manager()
+        notifications = client.get("/api/access/notifications").get_json()
+        self.assertEqual(notifications["unread"], 1)
+        self.assertIn("Ann Kingston", notifications["notifications"][0]["message"])
+        with closing(scheduler.database_connect()) as connection, connection:
+            scheduler.record_attendance_status(
+                connection, run_id="run-1", employee_id="emp-a", shift_date="2026-11-02",
+                shift_start=1.0, status="late", source="attendance_rule", reason="",
+                employee_name="Ann Kingston", location="Kingston", role="Cashier",
+                clock_in_at=None, clock_in_timezone="",
+                existing={("run-1", "emp-a", "2026-11-02"): ("scheduled", "schedule", "")},
+            )
+        self.assertEqual(client.get("/api/access/notifications").get_json()["unread"], 1)
+        admin_view = self.admin.get("/api/attendance/notifications").get_json()
+        self.assertEqual(admin_view["unread"], 2)
+        marked = client.post("/api/access/notifications/read", headers=self.csrf, json={})
+        self.assertEqual(marked.get_json()["marked"], 1)
+        self.assertEqual(client.get("/api/access/notifications").get_json()["unread"], 0)
+        self.assertEqual(self.admin.get("/api/attendance/notifications").get_json()["unread"], 2)
+
+    def test_archiving_notifications_is_per_reader_and_viewable_in_archive(self):
+        client, _, _ = self.sign_in_manager()
+        item = client.get("/api/access/notifications").get_json()["notifications"][0]
+        no_token = client.post("/api/access/notifications/archive", json={"ids": [item["id"]]})
+        self.assertEqual(no_token.status_code, 400)
+        none = client.post("/api/access/notifications/archive", headers=self.csrf, json={})
+        self.assertEqual(none.get_json()["archived"], 0)
+        done = client.post(
+            "/api/access/notifications/archive", headers=self.csrf, json={"ids": [item["id"]]}
+        )
+        self.assertEqual(done.get_json()["archived"], 1)
+        active = client.get("/api/access/notifications").get_json()
+        self.assertEqual((active["unread"], active["notifications"]), (0, []))
+        archived = client.get("/api/access/notifications?archived=1").get_json()
+        self.assertEqual([entry["id"] for entry in archived["notifications"]], [item["id"]])
+        self.assertTrue(archived["notifications"][0]["archived"])
+        again = client.post(
+            "/api/access/notifications/archive", headers=self.csrf, json={"ids": [item["id"]]}
+        )
+        self.assertEqual(again.get_json()["archived"], 0)
+        admin_view = self.admin.get("/api/attendance/notifications").get_json()
+        self.assertEqual(admin_view["unread"], 2)
+        archived_admin = self.admin.get("/api/attendance/notifications?archived=1").get_json()
+        self.assertEqual(archived_admin["notifications"], [])
+
+    def test_manager_can_mark_late_absent_only_within_scope(self):
+        client, _, _ = self.sign_in_manager()
+        shift = {"runId": "run-1", "date": "2026-11-02", "reason": "No call, no show"}
+        outside = client.post(
+            "/api/access/manager/mark-absent", headers=self.csrf, json=shift | {"employeeId": "emp-b"}
+        )
+        self.assertEqual(outside.status_code, 403)
+        missing_reason = client.post(
+            "/api/access/manager/mark-absent", headers=self.csrf,
+            json=shift | {"employeeId": "emp-a", "reason": " "},
+        )
+        self.assertEqual(missing_reason.status_code, 400)
+        no_token = client.post(
+            "/api/access/manager/mark-absent", json=shift | {"employeeId": "emp-a"}
+        )
+        self.assertEqual(no_token.status_code, 400)
+        done = client.post(
+            "/api/access/manager/mark-absent", headers=self.csrf, json=shift | {"employeeId": "emp-a"}
+        )
+        self.assertEqual(done.status_code, 200)
+        again = client.post(
+            "/api/access/manager/mark-absent", headers=self.csrf, json=shift | {"employeeId": "emp-a"}
+        )
+        self.assertEqual(again.status_code, 409)
+        with closing(scheduler.database_connect()) as connection:
+            audit = connection.execute(
+                "SELECT status, actor_email FROM attendance_shift_audit_events "
+                "WHERE employee_id = 'emp-a' ORDER BY created_at DESC, id LIMIT 5"
+            ).fetchall()
+        self.assertIn(("absent", "mgr@acme.example"), audit)
+
+    def test_employee_sees_only_own_attendance_and_needs_silver(self):
+        created = self.create_account(role="employee", employeeId="emp-a").get_json()
+        client = self.new_client()
+        credentials = {"bamboohrSubdomain": "acme", "identifier": "emp-a",
+                       "password": created["temporaryPassword"]}
+        signed_in = client.post(
+            "/api/access/login", headers=self.csrf,
+            json=credentials | {"newPassword": "Employee-New-Password-26!"},
+        )
+        self.assertTrue(signed_in.get_json()["authenticated"])
+        self.csrf = {"X-CSRF-Token": signed_in.get_json()["csrfToken"]}
+        own = client.get("/api/access/me/attendance?start=2026-11-01&end=2026-11-30").get_json()
+        self.assertEqual({record["employeeId"] for record in own["records"]}, {"emp-a"})
+        self.assertEqual(own["counts"], {"late": 1})
+        self.assertEqual(client.get("/api/access/manager/attendance").status_code, 403)
+        self.assertEqual(client.get("/api/access/notifications").status_code, 403)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier = 'bronze' WHERE tenant_id = ?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        self.assertEqual(client.get("/api/access/me/attendance").status_code, 403)
+        denied = self.admin.post(
+            "/api/access-accounts", headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"role": "employee", "employeeId": "emp-b"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_temporary_mfa_bypass_applies_to_managers(self):
+        created = self.create_account(
+            role="manager", displayName="Mary Manager", email="mgr@acme.example"
+        ).get_json()
+        with patch.object(scheduler, "MFA_BYPASS", True):
+            client = self.new_client()
+            signed_in = client.post(
+                "/api/access/login", headers=self.csrf,
+                json={"bamboohrSubdomain": "acme", "identifier": "mgr@acme.example",
+                      "password": created["temporaryPassword"],
+                      "newPassword": "Manager-New-Password-2026!"},
+            )
+            self.assertTrue(signed_in.get_json()["authenticated"])
+            self.assertEqual(client.get("/api/access/manager/attendance").status_code, 200)
+        self.assertEqual(client.get("/api/access/manager/attendance").status_code, 401)
+
+    def test_disabling_an_account_ends_its_session(self):
+        created = self.create_account(role="employee", employeeId="emp-a").get_json()
+        client = self.new_client()
+        signed_in = client.post(
+            "/api/access/login", headers=self.csrf,
+            json={"bamboohrSubdomain": "acme", "identifier": "emp-a",
+                  "password": created["temporaryPassword"],
+                  "newPassword": "Employee-New-Password-26!"},
+        )
+        self.assertTrue(signed_in.get_json()["authenticated"])
+        self.assertEqual(client.get("/api/access/me/attendance").status_code, 200)
+        disabled = self.admin.post(
+            f"/api/access-accounts/{created['account']['id']}/active",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={"active": False},
+        )
+        self.assertEqual(disabled.status_code, 200)
+        self.assertEqual(client.get("/api/access/me/attendance").status_code, 401)
+
+    def test_admin_account_creation_validates_input_and_reset_issues_new_password(self):
+        self.assertEqual(self.create_account(role="manager", displayName="No Email").status_code, 400)
+        self.assertEqual(self.create_account(role="employee", employeeId="missing").status_code, 400)
+        first = self.create_account(role="manager", displayName="M", email="m@acme.example")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(
+            self.create_account(role="manager", displayName="M2", email="M@acme.example").status_code, 409
+        )
+        account_id = first.get_json()["account"]["id"]
+        reset = self.admin.post(
+            f"/api/access-accounts/{account_id}/reset-password",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={"resetMfa": True},
+        )
+        self.assertEqual(reset.status_code, 200)
+        self.assertNotEqual(reset.get_json()["temporaryPassword"], first.get_json()["temporaryPassword"])
+        self.assertEqual(
+            self.admin.post("/api/access-accounts", json={"role": "manager"}).status_code, 400
+        )
+        listed = self.admin.get("/api/access-accounts").get_json()["accounts"]
+        self.assertNotIn("passwordHash", listed[0])
+        self.assertNotIn("temporaryPassword", listed[0])
 
 
 class UserManualTests(unittest.TestCase):

@@ -690,6 +690,50 @@ def initialize_database() -> None:
                 encrypted_secret TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS tenant_users (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                role TEXT NOT NULL CHECK (role IN ('manager', 'employee')),
+                email TEXT,
+                employee_id TEXT,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                must_change_password INTEGER NOT NULL DEFAULT 1 CHECK (must_change_password IN (0, 1)),
+                temp_password_expires_at INTEGER NOT NULL DEFAULT 0,
+                mfa_secret TEXT,
+                mfa_enabled INTEGER NOT NULL DEFAULT 0 CHECK (mfa_enabled IN (0, 1)),
+                mfa_pending_secret TEXT,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                auth_version INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_email_unique
+            ON tenant_users (tenant_id, email);
+            CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_employee_unique
+            ON tenant_users (tenant_id, employee_id);
+            CREATE TABLE IF NOT EXISTS attendance_notifications (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                dedupe_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                employee_name TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                shift_date TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (tenant_id, dedupe_key)
+            );
+            CREATE TABLE IF NOT EXISTS attendance_notification_reads (
+                tenant_id TEXT NOT NULL,
+                notification_id TEXT NOT NULL,
+                reader_key TEXT NOT NULL,
+                read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                archived INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, notification_id, reader_key)
+            );
             CREATE TABLE IF NOT EXISTS tenant_audit_events (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL DEFAULT {tenant_default},
@@ -725,6 +769,10 @@ def initialize_database() -> None:
                 role TEXT NOT NULL DEFAULT '',
                 clock_in_at TEXT,
                 clock_in_timezone TEXT NOT NULL DEFAULT '',
+                clock_out_at TEXT,
+                worked_minutes INTEGER,
+                early_minutes INTEGER NOT NULL DEFAULT 0,
+                overtime_minutes INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (tenant_id, schedule_run_id, employee_id, shift_date)
             );
@@ -1235,6 +1283,8 @@ def initialize_database() -> None:
                 "attendance_reconciliation_audit_events",
                 "attendance_score_overrides",
                 "attendance_score_audit_events",
+                "attendance_notifications",
+                "attendance_notification_reads",
             ):
                 connection.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
                 connection.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
@@ -1372,6 +1422,30 @@ def initialize_database() -> None:
             if column not in location_columns:
                 connection.execute(
                     f"ALTER TABLE schedule_locations ADD COLUMN {column} {definition}"
+                )
+        notification_read_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(attendance_notification_reads)"
+            )
+        }
+        if "archived" not in notification_read_columns:
+            connection.execute(
+                "ALTER TABLE attendance_notification_reads "
+                "ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+            )
+        shift_record_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(attendance_shift_records)")
+        }
+        for column, definition in (
+            ("clock_out_at", "TEXT"),
+            ("worked_minutes", "INTEGER"),
+            ("early_minutes", "INTEGER NOT NULL DEFAULT 0"),
+            ("overtime_minutes", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in shift_record_columns:
+                connection.execute(
+                    f"ALTER TABLE attendance_shift_records ADD COLUMN {column} {definition}"
                 )
         employee_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(employees)")
@@ -2441,8 +2515,10 @@ def enforce_tenant_authentication():
         if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
             return jsonify(error="Cross-origin requests are not allowed."), 403
         return None
-    if request.path.startswith("/api/developer/") or request.path.startswith(
-        "/api/tenant-auth/"
+    if (
+        request.path.startswith("/api/developer/")
+        or request.path.startswith("/api/tenant-auth/")
+        or request.path.startswith("/api/access/")
     ):
         return None
     if request.path.startswith("/api/"):
@@ -2472,7 +2548,7 @@ def audit_tenant_mutation(response):
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
     if request.path == "/" or request.path.startswith(
-        ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub")
+        ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub", "/api/access", "/access")
     ):
         response.headers["Cache-Control"] = "no-store"
     actor_id = session.get("tenant_admin_id") or session.get("pending_tenant_admin_id")
@@ -3279,10 +3355,13 @@ def hub_delete_business(tenant_id: str):
             "attendance_reconciliation_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
+            "attendance_notifications",
+            "attendance_notification_reads",
         ):
             connection.execute(
                 f"DELETE FROM {table_name} WHERE tenant_id = ?", (tenant_id,)
             )
+        connection.execute("DELETE FROM tenant_users WHERE tenant_id = ?", (tenant_id,))
         connection.execute(
             """
             DELETE FROM tenant_mfa_enrollments
@@ -3726,6 +3805,791 @@ def reset_business_admin_mfa(admin_id: str):
             "DELETE FROM tenant_mfa_enrollments WHERE admin_id = ?", (admin_id,)
         )
     return jsonify(mfaReset=True)
+
+
+ACCESS_TEMP_PASSWORD_SECONDS = 72 * 3600
+ACCESS_SESSION_KEYS = (
+    "access_user_id", "access_tenant_id", "access_auth_version", "access_csrf",
+    "pending_access_user_id", "pending_access_tenant_id",
+)
+ATTENDANCE_RECORD_COLUMNS = (
+    "schedule_run_id, employee_id, shift_date, shift_start, status, source, reason, "
+    "employee_name, location, role, clock_in_at"
+)
+ATTENDANCE_TIMESHEET_COLUMNS = (
+    ATTENDANCE_RECORD_COLUMNS
+    + ", clock_out_at, worked_minutes, early_minutes, overtime_minutes"
+)
+
+
+def attendance_record_json(row) -> dict[str, object]:
+    return {
+        "runId": row[0], "employeeId": row[1], "date": row[2], "shiftStart": row[3],
+        "status": row[4], "source": row[5], "reason": row[6], "employeeName": row[7],
+        "location": row[8], "role": row[9], "clockInAt": row[10],
+        "clockOutAt": row[11], "workedMinutes": row[12],
+        "earlyMinutes": row[13] or 0, "overtimeMinutes": row[14] or 0,
+    }
+
+
+def access_csrf_valid() -> bool:
+    supplied = request.headers.get("X-CSRF-Token", "")
+    expected = session.get("access_csrf", "")
+    return bool(supplied and expected and secrets.compare_digest(supplied, expected))
+
+
+def access_user() -> dict[str, object] | None:
+    """Return the signed-in manager/employee, or None (clearing a stale session)."""
+    user_id = session.get("access_user_id")
+    tenant_id = session.get("access_tenant_id")
+    version = session.get("access_auth_version")
+    if (
+        not isinstance(user_id, str)
+        or not isinstance(tenant_id, str)
+        or not isinstance(version, int)
+    ):
+        return None
+    g.tenant_id = tenant_id
+    with closing(database_connect()) as connection:
+        row = connection.execute(
+            """
+            SELECT u.role, u.email, u.employee_id, u.display_name, u.auth_version,
+                   u.active, u.mfa_enabled, u.must_change_password, t.status,
+                   t.membership_status, t.business_name
+            FROM tenant_users u
+            JOIN tenants t ON t.tenant_id = u.tenant_id
+            WHERE u.id = ? AND u.tenant_id = ? AND t.status != 'rejected'
+            """,
+            (user_id, tenant_id),
+        ).fetchone()
+    if (
+        not row
+        or row[4] != version
+        or not row[5]
+        or row[7]
+        or (row[0] == "manager" and not row[6] and not MFA_BYPASS)
+    ):
+        session.clear()
+        g.tenant_id = DEFAULT_TENANT_ID
+        return None
+    g.tenant_status, g.tenant_membership_status = row[8], row[9]
+    return {
+        "id": user_id, "tenantId": tenant_id, "role": row[0], "email": row[1],
+        "employeeId": row[2], "name": row[3], "businessName": row[10],
+    }
+
+
+def access_guard(roles: set[str]):
+    """Authenticate a manager/employee request; returns (user, error_response)."""
+    user = access_user()
+    if user is None:
+        return None, (jsonify(error="Sign in to continue."), 401)
+    if user["role"] not in roles:
+        return None, (jsonify(error="Your account cannot use this feature."), 403)
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        if cross_origin_request():
+            return None, (jsonify(error="Cross-origin requests are not allowed."), 403)
+        if not access_csrf_valid():
+            return None, (jsonify(error="The request token is invalid. Reload the page and retry."), 400)
+    if g.tenant_status != "active" or g.tenant_membership_status != "active":
+        return None, (jsonify(error="This business membership is not active."), 403)
+    if user["role"] == "employee":
+        denied = membership_feature_denied("employeeScheduleAccess")
+        if denied:
+            return None, denied
+    return user, None
+
+
+def access_audit(
+    connection: DatabaseConnection, user: dict[str, object], action: str
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO tenant_audit_events
+            (id, tenant_id, actor_id, actor_email, action, route, response_status)
+        VALUES (?, ?, ?, ?, ?, ?, 200)
+        """,
+        (
+            secrets.token_urlsafe(18), user["tenantId"], user["id"],
+            user["email"] or user["employeeId"], action, request.endpoint or "unknown",
+        ),
+    )
+
+
+def manager_employee_ids(
+    connection: DatabaseConnection, tenant_id: str, email: str | None
+) -> set[str]:
+    """Employees assigned to schedule locations whose manager email matches."""
+    if not email:
+        return set()
+    rows = connection.execute(
+        """
+        SELECT e.employee_id
+        FROM employees e
+        JOIN schedule_locations sl
+          ON sl.id = e.schedule_location_id AND sl.tenant_id = e.tenant_id
+        WHERE e.tenant_id = ? AND LOWER(sl.manager_email) = ?
+        """,
+        (tenant_id, email.casefold()),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def attendance_window() -> tuple[str, str] | None:
+    today = date.today()
+    start_text = request.args.get("start") or (today - timedelta(days=30)).isoformat()
+    end_text = request.args.get("end") or today.isoformat()
+    try:
+        start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+    except ValueError:
+        return None
+    if (
+        start.isoformat() != start_text
+        or end.isoformat() != end_text
+        or end < start
+        or (end - start).days > 366
+    ):
+        return None
+    return start_text, end_text
+
+
+def scoped_attendance_records(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    start: str,
+    end: str,
+    employee_ids: set[str] | None,
+) -> list[dict[str, object]]:
+    rows = connection.execute(
+        f"""
+        SELECT {ATTENDANCE_TIMESHEET_COLUMNS}
+        FROM attendance_shift_records
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        ORDER BY shift_date DESC, shift_start DESC, employee_name
+        """,
+        (tenant_id, start, end),
+    ).fetchall()
+    return [
+        attendance_record_json(row)
+        for row in rows
+        if employee_ids is None or row[1] in employee_ids
+    ]
+
+
+def notifications_for_reader(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    reader_key: str,
+    employee_ids: set[str] | None,
+    archived: bool = False,
+) -> dict[str, object]:
+    rows = connection.execute(
+        """
+        SELECT n.id, n.kind, n.employee_id, n.employee_name, n.location,
+               n.shift_date, n.message, n.created_at,
+               (SELECT 1 FROM attendance_notification_reads r
+                WHERE r.tenant_id = n.tenant_id AND r.notification_id = n.id
+                  AND r.reader_key = ?),
+               (SELECT s.shift_start FROM attendance_shift_records s
+                WHERE s.tenant_id = n.tenant_id AND s.employee_id = n.employee_id
+                  AND s.shift_date = n.shift_date
+                ORDER BY s.updated_at DESC LIMIT 1),
+               (SELECT r.archived FROM attendance_notification_reads r
+                WHERE r.tenant_id = n.tenant_id AND r.notification_id = n.id
+                  AND r.reader_key = ?)
+        FROM attendance_notifications n
+        WHERE n.tenant_id = ?
+        ORDER BY n.created_at DESC, n.id
+        LIMIT 500
+        """,
+        (reader_key, reader_key, tenant_id),
+    ).fetchall()
+    visible = [
+        row for row in rows
+        if (employee_ids is None or row[2] in employee_ids)
+        and bool(row[10]) == archived
+    ]
+    return {
+        "unread": sum(1 for row in visible if not row[8]),
+        "notifications": [
+            {
+                "id": row[0], "kind": row[1], "employeeId": row[2],
+                "employeeName": row[3], "location": row[4], "date": row[5],
+                "message": row[6], "createdAt": row[7], "read": bool(row[8]),
+                "shiftStart": row[9], "archived": archived,
+            }
+            for row in visible[:50]
+        ],
+    }
+
+
+def archive_notifications(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    reader_key: str,
+    employee_ids: set[str] | None,
+    ids: object,
+) -> int:
+    visible = notifications_for_reader(connection, tenant_id, reader_key, employee_ids)
+    allowed = {item["id"] for item in visible["notifications"]}
+    if isinstance(ids, list):
+        allowed &= {item for item in ids if isinstance(item, str)}
+    else:
+        allowed = set()
+    for notification_id in allowed:
+        connection.execute(
+            """
+            INSERT INTO attendance_notification_reads
+                (tenant_id, notification_id, reader_key, archived)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT (tenant_id, notification_id, reader_key)
+            DO UPDATE SET archived = 1
+            """,
+            (tenant_id, notification_id, reader_key),
+        )
+    return len(allowed)
+
+
+def mark_notifications_read(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    reader_key: str,
+    employee_ids: set[str] | None,
+    ids: object,
+) -> int:
+    visible = notifications_for_reader(connection, tenant_id, reader_key, employee_ids)
+    allowed = {item["id"] for item in visible["notifications"] if not item["read"]}
+    if isinstance(ids, list):
+        allowed &= {item for item in ids if isinstance(item, str)}
+    for notification_id in allowed:
+        connection.execute(
+            """
+            INSERT INTO attendance_notification_reads
+                (tenant_id, notification_id, reader_key)
+            VALUES (?, ?, ?)
+            ON CONFLICT (tenant_id, notification_id, reader_key) DO NOTHING
+            """,
+            (tenant_id, notification_id, reader_key),
+        )
+    return len(allowed)
+
+
+def serialize_access_account(row) -> dict[str, object]:
+    return {
+        "id": row[0], "role": row[1], "email": row[2], "employeeId": row[3],
+        "displayName": row[4], "active": bool(row[5]), "mfaEnabled": bool(row[6]),
+        "mustChangePassword": bool(row[7]), "createdAt": row[8],
+    }
+
+
+ACCESS_ACCOUNT_COLUMNS = (
+    "id, role, email, employee_id, display_name, active, mfa_enabled, "
+    "must_change_password, created_at"
+)
+
+
+@app.get("/api/access-accounts")
+def list_access_accounts():
+    with closing(database_connect()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {ACCESS_ACCOUNT_COLUMNS} FROM tenant_users
+            WHERE tenant_id = ? ORDER BY role, display_name
+            """,
+            (active_tenant_id(),),
+        ).fetchall()
+        accounts = []
+        for row in rows:
+            account = serialize_access_account(row)
+            if account["role"] == "manager":
+                account["scopeEmployees"] = len(
+                    manager_employee_ids(connection, active_tenant_id(), account["email"])
+                )
+            accounts.append(account)
+    return jsonify(accounts=accounts)
+
+
+@app.post("/api/access-accounts")
+def create_access_account():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("role") not in {"manager", "employee"}:
+        return jsonify(error="Choose manager or employee."), 400
+    role = payload["role"]
+    email = payload.get("email")
+    email = email.strip().casefold() if isinstance(email, str) and email.strip() else None
+    if (role == "manager" or email) and not valid_admin_email(email):
+        return jsonify(error="Enter a valid email address."), 400
+    employee_id = payload.get("employeeId") if role == "employee" else None
+    display_name = payload.get("displayName")
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        if role == "employee":
+            denied = membership_feature_denied("employeeScheduleAccess")
+            if denied:
+                return denied
+            employee = connection.execute(
+                "SELECT name FROM employees WHERE tenant_id = ? AND employee_id = ? AND active = 1",
+                (tenant_id, employee_id if isinstance(employee_id, str) else ""),
+            ).fetchone()
+            if not employee:
+                return jsonify(error="Choose an active employee."), 400
+            if not isinstance(display_name, str) or not display_name.strip():
+                display_name = employee[0]
+        if not isinstance(display_name, str) or not 1 <= len(display_name.strip()) <= 120:
+            return jsonify(error="Enter a name of 1 to 120 characters."), 400
+        temporary_password = secrets.token_urlsafe(15)
+        user_id = secrets.token_urlsafe(18)
+        try:
+            connection.execute(
+                """
+                INSERT INTO tenant_users
+                    (id, tenant_id, role, email, employee_id, display_name,
+                     password_hash, must_change_password, temp_password_expires_at,
+                     created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    user_id, tenant_id, role, email, employee_id, display_name.strip(),
+                    generate_password_hash(temporary_password),
+                    int(time_module.time()) + ACCESS_TEMP_PASSWORD_SECONDS,
+                    session.get("tenant_admin_id"),
+                ),
+            )
+        except database_integrity_errors():
+            return jsonify(error="An account already exists for that email or employee."), 409
+        row = connection.execute(
+            f"SELECT {ACCESS_ACCOUNT_COLUMNS} FROM tenant_users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return jsonify(
+        account=serialize_access_account(row),
+        temporaryPassword=temporary_password,
+        temporaryPasswordHours=ACCESS_TEMP_PASSWORD_SECONDS // 3600,
+    ), 201
+
+
+@app.post("/api/access-accounts/<user_id>/reset-password")
+def reset_access_account_password(user_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    reset_mfa = isinstance(payload, dict) and payload.get("resetMfa") is True
+    temporary_password = secrets.token_urlsafe(15)
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE tenant_users
+            SET password_hash = ?, must_change_password = 1,
+                temp_password_expires_at = ?, auth_version = auth_version + 1,
+                mfa_secret = CASE WHEN ? = 1 THEN NULL ELSE mfa_secret END,
+                mfa_enabled = CASE WHEN ? = 1 THEN 0 ELSE mfa_enabled END,
+                mfa_pending_secret = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (
+                generate_password_hash(temporary_password),
+                int(time_module.time()) + ACCESS_TEMP_PASSWORD_SECONDS,
+                int(reset_mfa), int(reset_mfa), user_id, active_tenant_id(),
+            ),
+        )
+        if updated.rowcount == 0:
+            return jsonify(error="Account not found."), 404
+    return jsonify(
+        temporaryPassword=temporary_password,
+        temporaryPasswordHours=ACCESS_TEMP_PASSWORD_SECONDS // 3600,
+    )
+
+
+@app.post("/api/access-accounts/<user_id>/active")
+def set_access_account_active(user_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("active"), bool):
+        return jsonify(error="Specify whether the account is active."), 400
+    with closing(database_connect()) as connection, connection:
+        updated = connection.execute(
+            """
+            UPDATE tenant_users
+            SET active = ?, auth_version = auth_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (int(payload["active"]), user_id, active_tenant_id()),
+        )
+        if updated.rowcount == 0:
+            return jsonify(error="Account not found."), 404
+    return jsonify(updated=True)
+
+
+@app.get("/api/attendance/notifications")
+def admin_attendance_notifications():
+    with closing(database_connect()) as connection:
+        return jsonify(
+            **notifications_for_reader(
+                connection, active_tenant_id(),
+                f"admin:{session.get('tenant_admin_id')}", None,
+                archived=request.args.get("archived") == "1",
+            )
+        )
+
+
+@app.post("/api/attendance/notifications/archive")
+def admin_archive_attendance_notifications():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        archived = archive_notifications(
+            connection, active_tenant_id(),
+            f"admin:{session.get('tenant_admin_id')}", None,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(archived=archived)
+
+
+@app.post("/api/attendance/notifications/read")
+def admin_read_attendance_notifications():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        marked = mark_notifications_read(
+            connection, active_tenant_id(),
+            f"admin:{session.get('tenant_admin_id')}", None,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(marked=marked)
+
+
+def start_access_session(user_id: str, tenant_id: str, version: int) -> str:
+    session.clear()
+    session.permanent = True
+    session["access_user_id"] = user_id
+    session["access_tenant_id"] = tenant_id
+    session["access_auth_version"] = version
+    session["access_csrf"] = secrets.token_urlsafe(32)
+    g.tenant_id = tenant_id
+    return session["access_csrf"]
+
+
+@app.get("/api/access/state")
+def access_state():
+    user = access_user()
+    if not isinstance(session.get("access_csrf"), str):
+        session["access_csrf"] = secrets.token_urlsafe(32)
+    return jsonify(
+        authenticated=user is not None,
+        csrfToken=session["access_csrf"],
+        user=user and {
+            "role": user["role"], "name": user["name"], "email": user["email"],
+            "employeeId": user["employeeId"], "businessName": user["businessName"],
+        },
+    )
+
+
+@app.post("/api/access/login")
+def access_login():
+    if not access_csrf_valid():
+        return jsonify(error="The sign-in session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    identifier = payload.get("identifier") if isinstance(payload, dict) else None
+    password = payload.get("password") if isinstance(payload, dict) else None
+    if (
+        not isinstance(identifier, str)
+        or not 1 <= len(identifier.strip()) <= 254
+        or not isinstance(password, str)
+        or not valid_tenant_id(payload.get("bamboohrSubdomain"))
+    ):
+        return jsonify(error="Enter your BambooHR subdomain, email or employee ID, and password."), 400
+    identifier = identifier.strip()
+    subdomain = payload["bamboohrSubdomain"].strip().lower()
+    new_password = payload.get("newPassword")
+    code = payload.get("code")
+    login_key = tenant_auth_attempt_key(f"user:{identifier.casefold()}", subdomain)
+    now = int(time_module.time())
+    with closing(database_connect()) as connection, connection:
+        state = tenant_auth_attempt_state(connection, login_key, now)
+        if state is None:
+            return jsonify(error="Too many failed sign-in attempts. Try again later."), 429
+        failures, window_started_at = state
+        rows = connection.execute(
+            """
+            SELECT u.id, u.tenant_id, u.role, u.email, u.password_hash,
+                   u.must_change_password, u.temp_password_expires_at,
+                   u.mfa_secret, u.mfa_enabled, u.auth_version, u.active
+            FROM tenant_users u
+            JOIN tenants t ON t.tenant_id = u.tenant_id AND t.status != 'rejected'
+            WHERE LOWER(t.bamboohr_subdomain) = ?
+              AND (u.email = ? OR u.employee_id = ?)
+            """,
+            (subdomain, identifier.casefold(), identifier),
+        ).fetchall()
+        account = rows[0] if len(rows) == 1 else None
+        valid = bool(
+            account and account[10] and check_password_hash(account[4], password)
+        )
+        if valid and account[5] and account[6] < now:
+            record_tenant_auth_failure(connection, login_key, failures, window_started_at, now)
+            return jsonify(error="The temporary password has expired. Ask an administrator to reset it."), 401
+        if not valid:
+            record_tenant_auth_failure(connection, login_key, failures, window_started_at, now)
+            return jsonify(error="The sign-in details are incorrect."), 401
+        user_id, tenant_id, role, email = account[0], account[1], account[2], account[3]
+        g.tenant_id = tenant_id
+        if role == "employee":
+            tier = tenant_membership_tier(connection, tenant_id)
+            if not MEMBERSHIP_TIERS[tier]["features"].get("employeeScheduleAccess"):
+                return jsonify(error="Employee access is not included in this business's membership."), 403
+        if account[5]:
+            if not isinstance(new_password, str):
+                return jsonify(passwordChangeRequired=True)
+            if not 14 <= len(new_password) <= 1024 or new_password == password:
+                return jsonify(error="Choose a new password of at least 14 characters that differs from the temporary one."), 400
+        if role == "manager" and account[8] and not MFA_BYPASS:
+            if not isinstance(code, str) or not code.strip():
+                return jsonify(mfaCodeRequired=True)
+            try:
+                secret = mfa_cipher().decrypt(account[7].encode("ascii")).decode("ascii")
+            except (AttributeError, InvalidToken, UnicodeDecodeError):
+                return jsonify(error="MFA data is unavailable; contact an administrator."), 503
+            if not verify_totp(secret, code):
+                record_tenant_auth_failure(connection, login_key, failures, window_started_at, now)
+                return jsonify(error="The sign-in details are incorrect."), 401
+        version = account[9]
+        if account[5]:
+            version += 1
+            connection.execute(
+                """
+                UPDATE tenant_users
+                SET password_hash = ?, must_change_password = 0,
+                    temp_password_expires_at = 0, auth_version = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (generate_password_hash(new_password), version, user_id, tenant_id),
+            )
+        connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+        if role == "manager" and not account[8] and not MFA_BYPASS:
+            secret = new_totp_secret()
+            connection.execute(
+                "UPDATE tenant_users SET mfa_pending_secret = ? WHERE id = ? AND tenant_id = ?",
+                (
+                    mfa_cipher().encrypt(secret.encode("ascii")).decode("ascii"),
+                    user_id, tenant_id,
+                ),
+            )
+            otp_uri = (
+                f"otpauth://totp/{quote(f'CBL Schedule:{email} ({subdomain})')}"
+                f"?secret={secret}&issuer=CBL%20Schedule"
+            )
+            session.clear()
+            session["pending_access_user_id"] = user_id
+            session["pending_access_tenant_id"] = tenant_id
+            session["access_csrf"] = secrets.token_urlsafe(32)
+            return jsonify(
+                mfaEnrollmentRequired=True, secret=secret, otpAuthUri=otp_uri,
+                qrCode=otp_qr_data_uri(otp_uri), csrfToken=session["access_csrf"],
+            )
+    return jsonify(authenticated=True, csrfToken=start_access_session(user_id, tenant_id, version))
+
+
+@app.post("/api/access/verify-mfa")
+def access_verify_mfa():
+    if not access_csrf_valid():
+        return jsonify(error="The setup session expired. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    user_id = session.get("pending_access_user_id")
+    tenant_id = session.get("pending_access_tenant_id")
+    if not isinstance(payload, dict) or not isinstance(user_id, str) or not isinstance(tenant_id, str):
+        return jsonify(error="Restart sign-in to continue MFA setup."), 401
+    g.tenant_id = tenant_id
+    with closing(database_connect()) as connection, connection:
+        row = connection.execute(
+            """
+            SELECT u.mfa_pending_secret, u.email, u.auth_version, u.active,
+                   t.bamboohr_subdomain
+            FROM tenant_users u JOIN tenants t ON t.tenant_id = u.tenant_id
+            WHERE u.id = ? AND u.tenant_id = ? AND u.role = 'manager'
+            """,
+            (user_id, tenant_id),
+        ).fetchone()
+        if not row or not row[0] or not row[3]:
+            return jsonify(error="The MFA enrollment session is no longer valid."), 401
+        now = int(time_module.time())
+        login_key = tenant_auth_attempt_key(f"user:{(row[1] or '').casefold()}", row[4] or "")
+        state = tenant_auth_attempt_state(connection, login_key, now)
+        if state is None:
+            return jsonify(error="Too many failed verification attempts. Try again later."), 429
+        try:
+            secret = mfa_cipher().decrypt(row[0].encode("ascii")).decode("ascii")
+        except (InvalidToken, UnicodeDecodeError):
+            return jsonify(error="MFA enrollment data is unavailable; contact an administrator."), 503
+        if not verify_totp(secret, payload.get("code")):
+            record_tenant_auth_failure(connection, login_key, state[0], state[1], now)
+            return jsonify(error="Enter the current six-digit code from your authenticator."), 400
+        connection.execute(
+            """
+            UPDATE tenant_users
+            SET mfa_secret = mfa_pending_secret, mfa_pending_secret = NULL,
+                mfa_enabled = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (user_id, tenant_id),
+        )
+        connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+    return jsonify(authenticated=True, csrfToken=start_access_session(user_id, tenant_id, row[2]))
+
+
+@app.post("/api/access/logout")
+def access_logout():
+    if access_user() is None:
+        return jsonify(error="Sign in first."), 401
+    if not access_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    session.clear()
+    return jsonify(loggedOut=True)
+
+
+@app.get("/api/access/notifications")
+def access_notifications():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    with closing(database_connect()) as connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        return jsonify(
+            **notifications_for_reader(
+                connection, user["tenantId"], f"user:{user['id']}", scope,
+                archived=request.args.get("archived") == "1",
+            )
+        )
+
+
+@app.post("/api/access/notifications/archive")
+def access_archive_notifications():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        archived = archive_notifications(
+            connection, user["tenantId"], f"user:{user['id']}", scope,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(archived=archived)
+
+
+@app.post("/api/access/notifications/read")
+def access_read_notifications():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection, connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        marked = mark_notifications_read(
+            connection, user["tenantId"], f"user:{user['id']}", scope,
+            payload.get("ids") if isinstance(payload, dict) else None,
+        )
+    return jsonify(marked=marked)
+
+
+@app.get("/api/access/manager/attendance")
+def manager_attendance():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    window = attendance_window()
+    if window is None:
+        return jsonify(error="Provide a valid date range of at most 366 days."), 400
+    with closing(database_connect()) as connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        records = scoped_attendance_records(
+            connection, user["tenantId"], window[0], window[1], scope
+        )
+    return jsonify(
+        start=window[0], end=window[1], scopeEmployees=len(scope), records=records
+    )
+
+
+@app.post("/api/access/manager/mark-absent")
+def manager_mark_absent():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="An attendance correction is required."), 400
+    run_id, employee_id = payload.get("runId"), payload.get("employeeId")
+    shift_text, reason = payload.get("date"), payload.get("reason")
+    if (
+        not isinstance(run_id, str) or not run_id
+        or not isinstance(employee_id, str) or not employee_id
+        or not isinstance(shift_text, str)
+        or not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500
+    ):
+        return jsonify(error="Provide the shift and a reason of 1 to 500 characters."), 400
+    try:
+        valid_date = date.fromisoformat(shift_text).isoformat() == shift_text
+    except ValueError:
+        valid_date = False
+    if not valid_date:
+        return jsonify(error="Provide a valid shift date in YYYY-MM-DD format."), 400
+    with closing(database_connect()) as connection, connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        if employee_id not in scope:
+            return jsonify(error="That employee is outside your locations."), 403
+        row = connection.execute(
+            f"""
+            SELECT {ATTENDANCE_RECORD_COLUMNS}, clock_in_timezone
+            FROM attendance_shift_records
+            WHERE tenant_id = ? AND schedule_run_id = ? AND employee_id = ?
+                AND shift_date = ?
+            """,
+            (user["tenantId"], run_id, employee_id, shift_text),
+        ).fetchone()
+        if not row:
+            return jsonify(error="The attendance record was not found."), 404
+        if row[4] != "late":
+            return jsonify(error="Only late shifts can be marked absent."), 409
+        record_attendance_status(
+            connection, run_id=run_id, employee_id=employee_id,
+            shift_date=shift_text, shift_start=row[3], status="absent",
+            source="manual", reason=reason.strip(), employee_name=row[7],
+            location=row[8], role=row[9], clock_in_at=row[10],
+            clock_in_timezone=row[11],
+            existing={(run_id, employee_id, shift_text): (row[4], row[5], row[6])},
+            preserve_manual=False, actor_id=user["id"], actor_email=user["email"],
+        )
+        access_audit(connection, user, "manager-mark-absent")
+    return jsonify(updated=True, status="absent")
+
+
+@app.get("/api/access/me/attendance")
+def employee_attendance():
+    user, failure = access_guard({"employee"})
+    if failure:
+        return failure
+    window = attendance_window()
+    if window is None:
+        return jsonify(error="Provide a valid date range of at most 366 days."), 400
+    with closing(database_connect()) as connection:
+        records = scoped_attendance_records(
+            connection, user["tenantId"], window[0], window[1], {user["employeeId"]}
+        )
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record["status"]] = counts.get(record["status"], 0) + 1
+    return jsonify(start=window[0], end=window[1], counts=counts, records=records)
+
+
+@app.get("/access")
+def access_page():
+    return send_from_directory(APP_DIRECTORY, "access.html")
 
 
 @app.get("/")
@@ -5766,6 +6630,73 @@ def schedule_shift_datetime(shift_date: date, start: object) -> datetime:
     )
 
 
+ATTENDANCE_MIN_WORKED_MINUTES = 60
+ATTENDANCE_EARLY_OVERTIME_GRACE_MINUTES = 60
+ATTENDANCE_ABSENT_AFTER_HOURS = 4
+
+
+def evaluate_shift_timesheet(
+    entries: list[dict[str, object]],
+    shift_start: datetime,
+    shift_end: datetime,
+    now: datetime,
+) -> dict[str, object]:
+    """Measure how much of a scheduled shift the clock entries actually cover."""
+    worked = 0.0
+    first_entry = None
+    first_start = None
+    last_end = None
+    open_entry = False
+    for entry in entries:
+        started = datetime.fromisoformat(str(entry["start"]))
+        ended = datetime.fromisoformat(str(entry["end"])) if entry["end"] else None
+        overlap = (
+            min(ended or max(now, started), shift_end) - max(started, shift_start)
+        ).total_seconds() / 60
+        if overlap <= 0:
+            continue
+        worked += overlap
+        if first_start is None or started < first_start:
+            first_entry, first_start = entry, started
+        if ended is None:
+            open_entry = True
+        elif last_end is None or ended > last_end:
+            last_end = ended
+    shift_minutes = (shift_end - shift_start).total_seconds() / 60
+    required = min(ATTENDANCE_MIN_WORKED_MINUTES, shift_minutes)
+    qualifies = first_entry is not None and worked + 1e-6 >= required
+    early = overtime = 0
+    if qualifies:
+        if open_entry:
+            if now > shift_end:
+                overtime = int((now - shift_end).total_seconds() // 60)
+        elif last_end is not None:
+            if last_end > shift_end:
+                overtime = int((last_end - shift_end).total_seconds() // 60)
+            elif now >= shift_end or now >= last_end + timedelta(
+                minutes=ATTENDANCE_MIN_WORKED_MINUTES
+            ):
+                early = int((shift_end - last_end).total_seconds() // 60)
+    grace = ATTENDANCE_EARLY_OVERTIME_GRACE_MINUTES
+    worked_minutes = int(round(worked))
+    return {
+        "first": first_entry,
+        "workedMinutes": worked_minutes,
+        "requiredMinutes": int(required),
+        "qualifies": qualifies,
+        "inProgress": (
+            first_entry is not None and not qualifies and open_entry and now < shift_end
+        ),
+        "clockOutAt": (
+            last_end.isoformat() if last_end is not None and not open_entry else None
+        ),
+        "earlyMinutes": early if early > grace else 0,
+        "overtimeMinutes": overtime if overtime > grace else 0,
+        "partial": qualifies and worked_minutes + grace < shift_minutes,
+        "shiftMinutes": int(shift_minutes),
+    }
+
+
 def record_attendance_status(
     connection: DatabaseConnection,
     *,
@@ -5785,6 +6716,7 @@ def record_attendance_status(
     preserve_manual: bool = True,
     actor_id: str | None = None,
     actor_email: str | None = None,
+    timesheet: dict[str, object] | None = None,
 ) -> bool:
     tenant_id = active_tenant_id()
     key = (run_id, employee_id, shift_date)
@@ -5814,6 +6746,39 @@ def record_attendance_status(
         ),
     )
     existing[key] = (status, source, reason)
+    if timesheet is not None:
+        connection.execute(
+            """
+            UPDATE attendance_shift_records
+            SET clock_out_at = ?, worked_minutes = ?, early_minutes = ?,
+                overtime_minutes = ?
+            WHERE tenant_id = ? AND schedule_run_id = ? AND employee_id = ?
+                AND shift_date = ?
+            """,
+            (
+                timesheet["clockOutAt"], timesheet["workedMinutes"],
+                timesheet["earlyMinutes"], timesheet["overtimeMinutes"],
+                tenant_id, run_id, employee_id, shift_date,
+            ),
+        )
+        if timesheet["earlyMinutes"]:
+            connection.execute(
+                """
+                INSERT INTO attendance_notifications
+                    (id, tenant_id, dedupe_key, kind, employee_id, employee_name,
+                     location, shift_date, message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
+                """,
+                (
+                    secrets.token_urlsafe(18), tenant_id,
+                    f"{run_id}|{employee_id}|{shift_date}|early_leave", "early_leave",
+                    employee_id, employee_name, location, shift_date,
+                    f"{employee_name or employee_id} left {timesheet['earlyMinutes']} "
+                    f"minutes before the end of the {shift_date} shift"
+                    f"{' at ' + location if location else ''}.",
+                ),
+            )
     if status in {"scheduled"} or (prior_status == status and prior_source == source):
         return False
     connection.execute(
@@ -5829,6 +6794,24 @@ def record_attendance_status(
             actor_id, actor_email,
         ),
     )
+    if status in {"late", "absent"} and prior_status != status:
+        label = "absent" if status == "absent" else "late"
+        connection.execute(
+            """
+            INSERT INTO attendance_notifications
+                (id, tenant_id, dedupe_key, kind, employee_id, employee_name,
+                 location, shift_date, message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id,
+                f"{run_id}|{employee_id}|{shift_date}|{status}", status,
+                employee_id, employee_name, location, shift_date,
+                f"{employee_name or employee_id} is {label} for the {shift_date} shift"
+                f"{' at ' + location if location else ''}.",
+            ),
+        )
     return prior_status != status
 
 
@@ -5854,7 +6837,8 @@ def attendance_payload(
         """
         SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
                source, reason, employee_name, location, role, clock_in_at,
-               clock_in_timezone
+               clock_in_timezone, clock_out_at, worked_minutes, early_minutes,
+               overtime_minutes
         FROM attendance_shift_records
         WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
         ORDER BY shift_date, location, role, shift_start, employee_name
@@ -5881,6 +6865,10 @@ def attendance_payload(
             "role": row[9],
             "clockIn": row[10],
             "clockInTimezone": row[11],
+            "clockOut": row[12],
+            "workedMinutes": row[13],
+            "earlyMinutes": row[14] or 0,
+            "overtimeMinutes": row[15] or 0,
         }
         current_shifts.append(item)
         if row[4] in {"approved_leave", "sick", "vacation"}:
@@ -6858,14 +7846,23 @@ def sync_attendance_data(
                         bamboohr_id, []
                     )
                 )
-                clock_in = matching_entries[0] if matching_entries else None
+                timesheet = evaluate_shift_timesheet(
+                    matching_entries, shift_start, shift_end, now
+                )
+                clock_in = timesheet["first"]
+                absent_point = min(
+                    shift_end,
+                    shift_start + timedelta(hours=ATTENDANCE_ABSENT_AFTER_HOURS),
+                )
+                recorded_entry = None
                 if on_leave:
                     status, source, reason = (
                         "approved_leave",
                         "bamboohr",
                         "Approved BambooHR time off.",
                     )
-                elif clock_in:
+                elif clock_in and (timesheet["qualifies"] or timesheet["inProgress"]):
+                    recorded_entry = clock_in
                     clock_time = datetime.fromisoformat(str(clock_in["start"]))
                     status = (
                         "late"
@@ -6875,8 +7872,40 @@ def sync_attendance_data(
                         )).astimezone(timezone.utc)
                         else "attended"
                     )
-                    source, reason = "bamboohr", ""
-                elif now >= shift_start + timedelta(hours=4):
+                    if timesheet["inProgress"]:
+                        if status == "attended":
+                            status = "scheduled"
+                        source, reason = (
+                            "bamboohr",
+                            "Clocked in; attendance is confirmed after "
+                            f"{timesheet['requiredMinutes']} minutes worked within the shift.",
+                        )
+                    else:
+                        notes = []
+                        if timesheet["earlyMinutes"]:
+                            notes.append(
+                                f"Left {timesheet['earlyMinutes']} minutes before the shift ended."
+                            )
+                        elif timesheet["partial"]:
+                            notes.append(
+                                f"Partial shift: worked {timesheet['workedMinutes']} of "
+                                f"{timesheet['shiftMinutes']} minutes."
+                            )
+                        if timesheet["overtimeMinutes"]:
+                            notes.append(
+                                f"Worked {timesheet['overtimeMinutes']} minutes past the shift end."
+                            )
+                        source, reason = "bamboohr", " ".join(notes)
+                elif clock_in and now >= absent_point:
+                    status, source, reason = (
+                        "absent",
+                        "attendance_rule",
+                        f"Timesheet covers only {timesheet['workedMinutes']} minutes of the "
+                        f"shift; at least {timesheet['requiredMinutes']} are required.",
+                    )
+                elif now >= shift_start + timedelta(
+                    hours=ATTENDANCE_ABSENT_AFTER_HOURS
+                ):
                     status, source, reason = (
                         "absent",
                         "attendance_rule",
@@ -6910,9 +7939,12 @@ def sync_attendance_data(
                         scheduled_employee.get("location") or employee["location"]
                     ),
                     role=str(scheduled_employee.get("role") or employee["role"]),
-                    clock_in_at=str(clock_in["start"]) if clock_in else None,
-                    clock_in_timezone=str(clock_in["timezone"]) if clock_in else "",
+                    clock_in_at=str(recorded_entry["start"]) if recorded_entry else None,
+                    clock_in_timezone=(
+                        str(recorded_entry["timezone"]) if recorded_entry else ""
+                    ),
                     existing=existing,
+                    timesheet=timesheet,
                 )
     for key in existing.keys() - active_keys:
         connection.execute(

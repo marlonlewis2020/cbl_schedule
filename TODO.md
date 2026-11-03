@@ -243,6 +243,32 @@ remain for production use:
   pagination, both resolution directions, and mocked partial BambooHR writes.
   No production schedule writes were made during implementation.
 
+## Manager and employee access (`manager-employee-access`) — implemented, status not yet updated in the database
+
+- [x] Admins create manager and employee accounts in Settings → Manager &
+  employee access. A one-time temporary password (72-hour expiry) is shown to
+  the admin; the user must replace it at first sign-in at `/access`. Admins can
+  reset passwords (optionally MFA) and disable/enable accounts, which ends the
+  account's sessions.
+- [x] Sign in with BambooHR subdomain plus email or employee ID and password.
+  MFA (enrolled at first sign-in, unless the temporary `MFA_BYPASS` is on, which
+  now also applies to managers and must be removed with the admin bypass); employees have no
+  MFA.
+- [x] Managers see attendance only for employees at schedule locations whose
+  manager email matches theirs, and can mark a late shift absent with a reason
+  (audited). Employees see only their own attendance. Employee accounts require
+  the `employeeScheduleAccess` tier feature (Silver and above).
+- [x] In-app notifications (bell with unread count, 30-second polling) are
+  created once per late/absent transition, scoped per manager; admins have a
+  bell covering the whole business. No email or push delivery.
+- [x] Focused tests: `ManagerEmployeeAccessTests` (SQLite). User sessions are
+  rejected from admin APIs.
+- [ ] Verify in disposable PostgreSQL (new tables `tenant_users`,
+  `attendance_notifications`, `attendance_notification_reads` and RLS) once the
+  database host is reachable, then mark the change request `done`.
+- [ ] The SQLite→PostgreSQL import does not copy the three new tables (they
+  have no legacy data).
+
 ## Test evidence and handoff
 
 - [x] PostgreSQL 18.6, server on the local network. The tests ran in
