@@ -2,9 +2,9 @@
 setlocal
 cd /d "%~dp0"
 
-python -c "import flask" >nul 2>nul
+python -c "import cryptography, flask, psycopg, segno" >nul 2>nul
 if errorlevel 1 (
-    echo Flask is not installed for the active Python interpreter.
+    echo Application dependencies are not installed for the active Python interpreter.
     echo Install the project dependencies with:
     echo python -m pip install -r requirements.txt
     pause
@@ -35,7 +35,7 @@ exit /b 1
 :start_server
 start "Schedule Creator Server" python "%~dp0scheduler.py"
 
-powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(30); do { try { $response=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5001/api/employees' -TimeoutSec 1; if ($response.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $deadline); exit 1"
+powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(30); do { try { $response=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5001/api/tenant-auth/state' -TimeoutSec 1; if ($response.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $deadline); exit 1"
 if errorlevel 1 (
     echo The updated Schedule Creator API did not respond. Check the server window for startup errors.
     pause

@@ -172,7 +172,7 @@ function modelIssues(m){
 
     }
 
-    if(typeof overtimeIssues==='function')errors.push(...overtimeIssues(m));
+    if(membershipFeatureEnabled('overtimeForecasting')&&typeof overtimeIssues==='function')errors.push(...overtimeIssues(m));
     return {
         errors:[...new Set(errors)],warnings:[...new Set(warnings)]
     }
@@ -561,13 +561,13 @@ function exportTables(runs=model.results){
     let weekly=[['Week commencing','Week ending','Location','Role','Revision','ID','Employee',...DAYS,'Shifts','Paid hours','Missing shifts']];
     for(let r of runs)for(let e of r.employees)weekly.push([r.start,r.end,r.location,r.role,r.revision,e.id,e.name,...e.slots.map((s,i)=>s===null?(e.timeOff?.[i]?'time-off':'OFF'):shiftLabel(s,r.controls.span)+(e.types[i]==='Make-up'?' +':'')),e.slots.filter(s=>s!==null).length,e.slots.filter(s=>s!==null).length*r.controls.hours,Math.max(0,r.controls.shifts-e.slots.filter(s=>s!==null).length)]);
     return {
-        'Weekly Schedules':weekly,...sheets,...(typeof overtimeRows==='function'?{
+        'Weekly Schedules':weekly,...sheets,...(membershipFeatureEnabled('overtimeForecasting')&&typeof overtimeRows==='function'?{
             'Overtime Estimates':overtimeRows(runs)
         }
         :{
 
         }
-        ),...(typeof tradeLogRows==='function'?{
+        ),...(membershipFeatureEnabled('shiftTrades')&&typeof tradeLogRows==='function'?{
             'Shift Trades':tradeLogRows(runs)
         }
         :{
@@ -608,7 +608,7 @@ function inputTables(){
     for(let l of model.locations)meta.push([l.name,...l.intensity,sum(l.intensity.map(x=>x||0)),...l.open,sum(l.open)]);
     for(let p of model.pools)pools.push([p.location,p.role,poolRoster(model,p).length,...p.shares,p.enabled?1:0]);
     return {
-        ...(typeof overtimeInputTables==='function'?overtimeInputTables():{
+        ...(membershipFeatureEnabled('overtimeForecasting')&&typeof overtimeInputTables==='function'?overtimeInputTables():{
 
         }
         ),Roster:roster,'Location Roles':pools,META:meta,Controls:controls,'Read me':[['Description','Value'],['Export type','Input values snapshot. Original Excel engine formulas are not included.'],['Reimport','Use workspace JSON backup for exact reimport. Upload original-layout source workbooks through Upload source.'],['Source',model.sourceName]]
@@ -621,7 +621,7 @@ function downloadInputs(){
 const MENU_GROUPS=[
     {label:'Workspace',pages:[['home','Overview']]},
     {label:'Plan schedules',pages:[['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['meta','META · operating days'],['schedules','Weekly schedules']]},
-    {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations']]},
+    {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations'],['attendance','Attendance']]},
     {label:'Integrations',pages:[['publish','Publish to BambooHR'],['links','Workforce Links']]},
     {label:'Data & settings',pages:[['source','Source & backups']]}
 ];
@@ -664,7 +664,7 @@ function applyBranding(){
 }
 function businessSettingsPanel(){
     let c=businessConfig;
-    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs a read-only request to the tenant’s time-off endpoint. Only after a successful test can you explicitly promote the key; promotion updates the app server’s ignored .env file and the running process.</p>`)
+    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs read-only requests to the tenant’s time-off and time-tracking endpoints. Only after both requests succeed can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business membership & administrators',`<p>Manage your business membership and administrators.</p><a class="button" href="/business">Manage membership &amp; administrators</a>`)
 }
 function pageAllowed(p){
     return p==='settings'||['controls','schedules'].includes(p)||PAGE_OPTIONS.some(([id])=>id===p&&appSettings().menus[id]!==false)
@@ -672,6 +672,66 @@ function pageAllowed(p){
 function settingsPage(){
     let s=appSettings();
     return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
+}
+function attendancePage(){
+    let data=attendanceData,settings=data?.settings||{latenessToleranceMinutes:15,scorePeriodDays:30},selectedDate=data?.date||attendanceSelectedDate,currentDate=data?.currentDate||selectedDate,sourceInfo=data?.shiftSource||{selected:'app',unresolvedDiscrepancies:null};
+    let allShifts=data?.shifts||[],allScores=(data?.scores||[]).filter(item=>item.active);
+    let locations=[...new Set([...allShifts,...allScores].map(item=>item.location).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    let roles=[...new Set([...allShifts,...allScores].map(item=>item.role).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    if(!locations.includes(attendanceLocationFilter))attendanceLocationFilter='All';
+    if(!roles.includes(attendanceRoleFilter))attendanceRoleFilter='All';
+    let matchesFilter=item=>(attendanceLocationFilter==='All'||item.location===attendanceLocationFilter)&&(attendanceRoleFilter==='All'||item.role===attendanceRoleFilter);
+    let shifts=allShifts.filter(matchesFilter),scores=allScores.filter(matchesFilter);
+    let summary={expected:0,clockedIn:0,late:0,absent:0,approvedLeave:0,attendancePercent:null};
+    for(let item of shifts){
+        if(['approved_leave','sick','vacation'].includes(item.status)){
+            summary.approvedLeave++;
+            continue
+        }
+        summary.expected++;
+        if(['attended','late'].includes(item.status))summary.clockedIn++;
+        if(item.status==='late')summary.late++;
+        if(item.status==='absent')summary.absent++
+    }
+    if(summary.expected)summary.attendancePercent=summary.clockedIn*100/summary.expected;
+    let shiftRows=shifts.length?shifts.map(item=>`<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${esc(new Date(item.shiftStart).toLocaleTimeString())}</td><td>${item.clockIn?esc(new Date(item.clockIn).toLocaleTimeString()):'—'}</td><td>${badge(item.status,item.status==='absent'?'bad':item.status==='late'?'warn':item.status==='attended'?'good':'')}</td><td>${esc(item.reason||'')}</td><td><button type="button" data-action="editAttendanceShift" data-run-id="${esc(item.runId)}" data-employee-id="${esc(item.employeeId)}" data-shift-date="${esc(item.date)}" data-status="${esc(item.status)}" data-name="${esc(item.name)}">Correct</button></td></tr>`).join(''):(allShifts.length?'<tr><td colspan="9">No shifts match these filters.</td></tr>':'<tr><td colspan="9">No attendance records are available for this period.</td></tr>');
+    let scoreRows=scores.map(item=>`<tr><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${item.attended} / ${item.scheduled}</td><td>${item.computedScore===null?'No data':f(item.computedScore,2)+'%'}</td><td>${item.manualOverride?badge('Manual override','warn'):badge(item.score===null?'No data':f(item.score,2)+'%')}</td><td><button type="button" data-action="editAttendanceScore" data-employee-id="${esc(item.employeeId)}" data-score="${item.score??''}" data-name="${esc(item.name)}" data-manual="${item.manualOverride?'true':'false'}">Set override</button></td></tr>`).join('');
+    let discrepancies=(sourceInfo.unresolvedDiscrepancies||[]).filter(matchesFilter);
+    let discrepancyRows=discrepancies.map(item=>{
+        let formatShift=shift=>esc(new Date(shift.start).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}))+'–'+esc(new Date(shift.end).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}))+' · '+esc(shift.location);
+        let appShifts=item.appShifts.map(formatShift).join('<br>')||'No accepted app shift';
+        let bambooShifts=item.bamboohrShifts.map(formatShift).join('<br>')||'No BambooHR shift';
+        return `<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.location)} · ${esc(item.role)}</small></td><td>${appShifts}</td><td>${bambooShifts}</td><td><div class="actions">${item.canApplyApp?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="app_to_bamboohr" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use app shift</button>`:'<span class="note">App→BambooHR unavailable</span>'}${item.canApplyBambooHR?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="bamboohr_to_app" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use BambooHR shift</button>`:'<span class="note">BambooHR→app unavailable</span>'}</div></td></tr>`
+    }).join('');
+    let sourceControl=panel('Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" ${sourceInfo.selected==='bamboohr'?'selected':''}>BambooHR shifts</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}. BambooHR clock events remain the source of attendance evidence.</p>`)+(sourceInfo.selected==='bamboohr'?panel('Unresolved BambooHR shift discrepancies',sourceInfo.bamboohrAvailable===true?(discrepancies.length?`<p>${discrepancies.length} unresolved difference${discrepancies.length===1?'':'s'} match the current filters. Differences are rechecked before each resolution.</p><div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Accepted app shift</th><th>BambooHR shift</th><th>Resolution</th></tr></thead><tbody>${discrepancyRows}</tbody></table></div>`:'<p>No unresolved shift discrepancies match the current filters.</p>'):'<p class="badtext">BambooHR shifts could not be checked. Refresh the attendance page before relying on this comparison.</p>'):'');
+    return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+
+        panel('BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
+        sourceControl+
+        panel('Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
+        panel('Attendance rules',`<div class="formgrid"><label>Lateness tolerance · minutes<input id="attendanceTolerance" type="number" min="0" max="120" step="1" value="${settings.latenessToleranceMinutes}"></label><label>Attendance score period · days<input id="attendancePeriod" type="number" min="30" max="45" step="1" value="${settings.scorePeriodDays}"></label></div><div class="actions"><button type="button" class="primary" data-action="saveAttendanceSettings">Save attendance rules</button></div><p class="note">Clock entries count as attendance evidence even if they are awaiting BambooHR approval. Approved leave is excluded from absence classification and the score denominator.</p>`)+
+        stats([['Expected shifts',f(summary.expected),'Accepted shifts in selected period'],['Clocked in',f(summary.clockedIn),'Includes late arrivals'],['Attendance',summary.attendancePercent===null?'—':f(summary.attendancePercent,2)+'%','Clocked in ÷ expected'],['Late / absent',f(summary.late)+' / '+f(summary.absent),'Exceptions in selected period'],['Approved leave',f(summary.approvedLeave),'Excluded from attendance rate']])+
+        panel(`Attendance · ${esc(data?.periodStart||selectedDate||'')} to ${esc(data?.periodEnd||selectedDate||'')}`,`<div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Location</th><th>Role</th><th>Shift start</th><th>Clock-in</th><th>Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody>${shiftRows}</tbody></table></div>`)+
+        panel(`Attendance scores · selected period`,scores.length?`<div class="tablewrap"><table><thead><tr><th>Employee</th><th>Location</th><th>Role</th><th>Attended / scheduled</th><th>Calculated</th><th>Effective</th><th>Actions</th></tr></thead><tbody>${scoreRows}</tbody></table></div>`:(allScores.length?'<p>No active employees match these filters.</p>':'<p>No active employees are available.</p>'))+
+        '<dialog id="attendanceOverrideDialog" class="wide-dialog"></dialog><dialog id="attendanceReconciliationDialog" class="wide-dialog"></dialog>'
+}
+function openAttendanceReconciliationDialog(button){
+    let direction=button.dataset.direction,copy=direction==='app_to_bamboohr'?'Replace the BambooHR shift with the accepted app shift.':'Update the accepted app schedule to match BambooHR.';
+    let dialog=workflowDialog('attendanceReconciliationDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE SHIFT RECONCILIATION</div><h2>${esc(button.dataset.name)} · ${esc(button.dataset.date)}</h2></div><button type="button" data-dialog-close="attendanceReconciliationDialog" aria-label="Close">✕</button></div><p>${copy}</p>${direction==='app_to_bamboohr'?'<p class="note">BambooHR replacement is a separate add-then-delete operation. If only one step succeeds, the app will report the partial result; refresh before retrying.</p>':''}<label>Reason · required<textarea id="attendanceReconciliationReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" class="primary" data-action="resolveAttendanceDiscrepancy" data-discrepancy-id="${esc(button.dataset.discrepancyId)}" data-direction="${esc(direction)}" data-date="${esc(button.dataset.date)}">Confirm and resolve</button><button type="button" data-dialog-close="attendanceReconciliationDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
+}
+function openAttendanceScoreDialog(button){
+    let item=(attendanceData?.scores||[]).find(score=>String(score.employeeId)===button.dataset.employeeId);
+    if(!item)throw Error('The selected employee attendance score could not be found.');
+    let dialog=workflowDialog('attendanceOverrideDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE OVERRIDE</div><h2>Attendance score · ${esc(item.name)}</h2></div><button type="button" data-dialog-close="attendanceOverrideDialog" aria-label="Close">✕</button></div><p>Calculated score: ${item.computedScore===null?'No data':f(item.computedScore,2)+'%'} · ${item.attended} attended of ${item.scheduled} scheduled shifts.</p><label>Override score · 0–100<input id="attendanceOverrideScore" type="number" min="0" max="100" step="0.01" value="${item.score??''}"></label><label>Reason · required<textarea id="attendanceOverrideReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" data-action="saveAttendanceScoreOverride" data-employee-id="${esc(item.employeeId)}">Save override</button>${item.manualOverride?`<button type="button" class="danger" data-action="removeAttendanceScoreOverride" data-employee-id="${esc(item.employeeId)}">Remove override</button>`:''}<button type="button" data-dialog-close="attendanceOverrideDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
+}
+function openAttendanceShiftDialog(button){
+    let dialog=workflowDialog('attendanceOverrideDialog');
+    let options=[['attended','Attended'],['late','Late'],['absent','Absent'],['sick','Sick'],['vacation','Vacation'],['approved_leave','Approved leave']];
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE CORRECTION</div><h2>Attendance · ${esc(button.dataset.name)}</h2></div><button type="button" data-dialog-close="attendanceOverrideDialog" aria-label="Close">✕</button></div><p>${esc(button.dataset.shiftDate)} · Current status: ${esc(button.dataset.status)}</p><label>Corrected status ${select(options,button.dataset.status,'id="attendanceShiftStatus"')}</label><label>Reason · required<textarea id="attendanceShiftReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" class="primary" data-action="saveAttendanceShiftOverride" data-run-id="${esc(button.dataset.runId)}" data-employee-id="${esc(button.dataset.employeeId)}" data-shift-date="${esc(button.dataset.shiftDate)}">Save correction</button><button type="button" data-dialog-close="attendanceOverrideDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
 }
 function applyMenuSettings(){
     if(!pageAllowed(page))page='controls';
@@ -794,6 +854,23 @@ document.addEventListener('change',e=>{
     if(!model)return;let t=e.target;if(t.dataset.menuSetting){
         let id=t.dataset.menuSetting;if(!['controls','schedules'].includes(id))appSettings().menus[id]=t.checked;render();queueSave()
     }
+    if(t.id==='attendanceLocationFilter'||t.id==='attendanceRoleFilter'){
+        if(t.id==='attendanceLocationFilter')attendanceLocationFilter=t.value;
+        else attendanceRoleFilter=t.value;
+        render();
+        return
+    }
+    if(['attendancePeriodMode','attendanceDateFilter','attendanceStartMonth','attendanceEndMonth'].includes(t.id)){
+        if(t.id==='attendancePeriodMode')attendancePeriodMode=t.value;
+        if(t.id==='attendanceDateFilter')attendanceSelectedDate=t.value;
+        if(t.id==='attendanceStartMonth')attendanceStartMonth=t.value;
+        if(t.id==='attendanceEndMonth')attendanceEndMonth=t.value;
+        loadSelectedAttendance().catch(error=>{
+            attendanceSyncStatus=error.message;
+            if(page==='attendance')render(true)
+        });
+        return
+    }
     if(t.id==='workforceCcSetting'){
         appSettings().workforceCc=t.checked;queueSave()
     }
@@ -913,6 +990,7 @@ function overtimeEstimate(run){
     return rows
 }
 function overtimePanel(run){
+    if(!membershipFeatureEnabled('overtimeForecasting'))return panel('Overtime planning','<p>Overtime forecasting is included with Gold and above.</p>');
     let rows=overtimeEstimate(run),known=rows.filter(r=>r.hours!==null),total=known.reduce((n,r)=>n+r.hours,0),days=Array.from({
         length:7
     }
@@ -920,10 +998,12 @@ function overtimePanel(run){
     return panel('Overtime planning · daily and shift estimates',`<p>${warehouseRole(run.role)?'Warehouse demand uses saved daily volume ÷ volume per FTE per paid shift, distributed by shift shares.':'Minimum daily headcount is distributed across shifts using whole-person rounding.'} Scheduled demand and make-up staff both count toward capacity.</p><div class="actions">${badge(known.length?f(total,2)+' suggested staff-hours':'No overtime suggested',known.length&&total>0?'warn':'')}${badge('Volume unit: '+(run.overtime?.unit||'units'))}</div><div class="tablewrap"><table><thead><tr><th>Date / day</th><th>Basis / input status</th>${(run.shiftStarts||STARTS).map(s=>'<th>'+timeLabel(s)+'<small>Scheduled / required · OT hours</small></th>').join('')}<th>Daily OT hours</th></tr></thead><tbody>${days.map(rs=>`<tr><td>${rs[0].date}<small>${rs[0].day}</small></td><td>${esc(rs[0].status)}<small>${warehouseRole(run.role)?'Daily volume: '+(run.overtime?.volumes?.[DAYS.indexOf(rs[0].day)]??'Not entered')+' · capacity/FTE: '+(run.overtime?.capacity??'Not set'):'Min daily HC: '+(run.overtime?.minimum??'Not set')}</small></td>${rs.map(r=>`<td class="${r.hours>0?'gap':''}">${r.staff} / ${r.required===null?'—':f(r.required,2)}<small>${r.hours===null?'No suggestion':f(r.hours,2)+'h suggested'}</small></td>`).join('')}<td>${rs.some(r=>r.hours!==null)?f(rs.reduce((n,r)=>n+(r.hours||0),0),2)+'h':'—'}</td></tr>`).join('')}</tbody></table></div><p class="note">Additional staff-hours = max(required FTE − scheduled staff, 0) × paid hours per shift; totals sum shift deficits, without offsetting surplus staff on another shift. Figures are rounded up to 0.01 hour per shift. These are coverage estimates, not employee overtime assignments or approvals. Existing schedule and rest constraints are unchanged. Missing configuration or volume suppresses suggestions; a closed day with volume requires calendar review. Saved estimates use the configuration captured when generated.</p>`)
 }
 function overtimeSettingsPanel(){
+    if(!membershipFeatureEnabled('overtimeForecasting'))return panel('Overtime forecasting','<p>Overtime forecasting is included with Gold and above.</p>');
     let o=overtimeConfig(),locations=[...new Set(model.pools.filter(p=>warehouseRole(p.role)).map(p=>p.location))];
     return panel('Warehouse FTE volume capacity',`<p>Set the average volume one warehouse FTE handles during one normal paid shift. Leave blank or enter 0 to disable volume-based overtime suggestions for that location. This applies only to the Warehouse role, not warehouse supervisors.</p><label>Volume unit · use the same unit for capacity and daily volumes<input type="text" maxlength="40" value="${esc(o.unit)}" data-ot-unit ${disabled()}></label><div class="tablewrap"><table><thead><tr><th>Location</th><th>Average volume / FTE / paid shift</th><th>Overtime basis</th></tr></thead><tbody>${locations.map(loc=>`<tr><td>${esc(loc)}</td><td><input type="number" min="0" max="1000000000000" step="any" value="${esc(o.capacity[loc]??'')}" data-ot-capacity="${esc(loc)}" ${disabled()} aria-label="Average warehouse volume per FTE for ${esc(loc)}"></td><td>${positiveNumber(o.capacity[loc])?'Volume-based enabled':'Disabled · capacity not set'}</td></tr>`).join('')}</tbody></table></div><p class="note">Unlock in Controls & lock to edit. For other roles, set Min daily HC in Location roles. Capacity settings and weekly volumes are captured with newly generated schedules.</p>`)
 }
 function volumeConfiguration(){
+    if(!membershipFeatureEnabled('overtimeForecasting'))return panel('Overtime forecasting','<p>Daily volume and overtime forecasting are included with Gold and above.</p>');
     let o=overtimeConfig(),pools=model.pools.filter(p=>p.enabled&&warehouseRole(p.role)&&(filterLoc==='All'||p.location===filterLoc)),valid=/^\d{4}-\d{2}-\d{2}$/.test(model.controls.week)&&!Number.isNaN(Date.parse(model.controls.week))&&new Date(model.controls.week+'T00:00:00Z').getUTCDay()===1;
     if(!valid)return panel('Daily warehouse volume · by configured week','<p>Select a valid Monday in Controls & lock to map dated weekly volumes.</p>');
     let rows=[];
@@ -956,6 +1036,7 @@ function overtimeInputTables(){
 }
 function overtimeInputChange(event){
     let e=event.target;
+    if(!membershipFeatureEnabled('overtimeForecasting'))return;
     if(!model||!e.dataset)return;
     let field=e.hasAttribute?.('data-ot-unit')?'unit':e.dataset.otCapacity!==undefined?'capacity':e.dataset.otMinimum!==undefined?'minimum':e.dataset.otVolume!==undefined?'volume':null;
     if(!field)return;
@@ -1285,6 +1366,7 @@ function tradePoolChanged(){
     tradeWeekChanged()
 }
 function openTrades(){
+    if(!membershipFeatureEnabled('shiftTrades'))throw Error('Shift trades are included with Silver and above.');
     if(!model.results.length)throw Error('Generate or upload schedules first.');
     let pairs=[...new Set(model.results.map(r=>key(r.location,r.role)))],selected=model.results.find(r=>r.id===model.selectedRun)||visibleScheduleRuns()[0]||model.results[0];
     $('tradeDialog').innerHTML=`<div class="dialoghead"><div><div class="eyebrow">WEEKLY SCHEDULES</div><h2>Trade shifts</h2></div><button type="button" data-trade-command="close" aria-label="Close trade dialog">✕</button></div><p>Trades stay within one location and role. Shifts swap within each selected day. Work/OFF trades need a balancing day so both employees retain exactly five working days.</p><div class="formgrid"><label>Location × team ${select(pairs.map(k=>[k,k.replace('|',' · ')]),key(selected.location,selected.role),'id="tradePool"')}</label><label id="tradeWeekWrap"></label><label id="tradeFirstWrap"></label><label id="tradeSecondWrap"></label></div><div id="tradeDays"></div><div id="tradeStatus" role="status"></div><p class="note">Known availability, shift permissions, fixed preferences and minimum rest are checked. For uploaded employees without a matching roster profile, only the supplied schedule, five-day balance and configured rest can be checked.</p><button type="button" id="confirmTrade" class="primary" data-trade-command="confirm" hidden>Confirm shift trade</button>`;
@@ -1292,6 +1374,7 @@ function openTrades(){
     $('tradeDialog').showModal()
 }
 async function confirmShiftTrade(){
+    if(!membershipFeatureEnabled('shiftTrades'))throw Error('Shift trades are included with Silver and above.');
     let s=tradeSelection(),p=tradePlan(s.runId,s.firstId,s.secondId,s.days);
     if(p.errors.length){
         updateTradePreview();
@@ -1595,7 +1678,7 @@ document.addEventListener('click',async e=>{
 
 }
 );
-let bambooCredentials=null,credentialSessionOnly=false,localConnectorToken='';
+let localConnectorToken='';
 const dismissedHeaderNotices=new Set();
 function dismissHeaderNotice(id){
     dismissedHeaderNotices.add(id);
@@ -1716,81 +1799,39 @@ async function clearLegacyBambooCredentials(){
     }
 
 }
-async function saveBambooCredentials(value){
-    bambooCredentials=value;
-    if(storageMode==='session'){
-        credentialSessionOnly=!!value;
-        return false
-    }
-    try{
-        await store('put',value,'bambooCredentials');
-        credentialSessionOnly=false;
-        return true
-    }
-    catch{
-        credentialSessionOnly=!!value;
-        return false
-    }
-
-}
 function openUserProfile(){
-    let name=model.user?.firstName||'';
-    $('profileDialog').innerHTML=`<div id="profileForm"><div class="eyebrow">${esc(businessConfig.businessName)}</div><h2>${name?'Your profile & BambooHR connection':'Welcome to Scheduling Command Centre'}</h2><p>The operational BambooHR API key is configured on the Flask server. Test a new key in Business Settings; keys are not saved to browser storage.</p><label>First name · required<input id="profileFirstName" type="text" maxlength="80" required autocomplete="given-name" value="${esc(name)}"></label><input id="profileApiKey" type="hidden"><input id="profileApiPassword" type="hidden"><section class="connectionpanel"><h3>BambooHR time-off connection</h3><p>${publishConfigured?'Server API key is configured.':'BAMBOOHR_API_KEY is not configured in the app server .env file.'}</p><p class="note">Time-offs are fetched automatically when schedules are generated or refreshed. If BambooHR is unavailable, scheduling continues and the schedule must be reviewed.</p><button type="button" data-bamboo-action="checkTimeOff">Test time-off connection</button></section><p id="profileStatus" role="status"></p><button class="primary" type="button" id="profileSave">Save & continue</button></div>`;
-    $('profileSave').onclick=async ()=>{
+    let name=model.user?.firstName||'',email=model.user?.email||'';
+    $('profileDialog').innerHTML=`<div class="dialoghead"><div><div class="eyebrow">${esc(businessConfig.businessName)}</div><h2>Your profile</h2></div><button type="button" data-dialog-close="profileDialog" aria-label="Close profile">✕</button></div><form id="profileForm"><label>Name<input id="profileName" type="text" maxlength="120" required autocomplete="name" value="${esc(name)}"></label><label>Email<input id="profileEmail" type="email" maxlength="254" required autocomplete="email" value="${esc(email)}"></label><label id="profilePasswordLabel" hidden>Current password (required to change email)<input id="profileCurrentPassword" type="password" autocomplete="current-password"></label><p id="profileStatus" role="status"></p><div class="actions"><button class="primary" type="submit">Save profile</button><button type="button" data-dialog-close="profileDialog">Cancel</button></div></form>`;
+    const emailInput=$('profileEmail'),passwordLabel=$('profilePasswordLabel'),passwordInput=$('profileCurrentPassword');
+    emailInput.addEventListener('input',()=>{
+        let changed=emailInput.value.trim().toLowerCase()!==email.toLowerCase();
+        passwordLabel.hidden=!changed;
+        passwordInput.required=changed
+    });
+    $('profileForm').addEventListener('submit',async event=>{
+        event.preventDefault();
         if(busy)return;
-        let name=$('profileFirstName').value.trim();
-        if(!name){
-            $('profileStatus').textContent='First name is required.';
-            return
-        }
-        let key=$('profileApiKey').value.trim(),password=$('profileApiPassword').value;
-        if(password&&!key&&!bambooCredentials){
-            $('profileStatus').textContent='Enter an API key, or leave both credential fields blank.';
-            return
-        }
-        if(key.includes(':')||/[\r\n]/.test(key)){
-            $('profileStatus').textContent='The API key contains unsupported characters.';
-            return
-        }
         busy=true;
         try{
-            if(key||password)await saveBambooCredentials({
-                apiKey:key||bambooCredentials.apiKey,apiPassword:password||'x'
-            }
-            );
-            model.user={
-                firstName:name
-            }
-            ;
-            await saveState();
+            let response=await fetch('/api/business/profile',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({name:$('profileName').value,email:emailInput.value,currentPassword:passwordInput.value})
+            }),result=await response.json();
+            if(!response.ok)throw Error(result.error||'Profile update failed.');
+            model.user={firstName:result.name,email:result.email};
             $('profileDialog').close();
             $('profileDialog').innerHTML='';
             render();
-            message('Welcome, '+name+'.')
-        }
-        finally{
-            busy=false
-        }
-
-    }
-    ;
-    $('profileForm').onkeydown=e=>{
-        if(e.key==='Enter'&&e.target.tagName==='INPUT'){
-            e.preventDefault();
-            $('profileSave').onclick()
-        }
-
-    }
-    ;
-    $('profileDialog').oncancel=e=>{
-        if(!model.user?.firstName)e.preventDefault()
-    }
-    ;
+            message('Profile updated.')
+        }catch(error){$('profileStatus').textContent=error.message}
+        finally{busy=false}
+    });
     $('profileDialog').showModal()
 }
 function profileHeader(){
     let b=$('profileButton');
-    if(b)b.textContent=model.user?.firstName?'Hi, '+model.user.firstName+' · Profile':'Your profile'
+    if(b)b.textContent=model.user?.firstName?model.user.firstName+' · Profile':'Your profile'
 }
 function timeOffTable(query=''){
     let state=model.bambooTimeOff,entries=state?.entries||[],q=normalizedEmployeeName(query),shown=entries.filter(t=>normalizedEmployeeName(t.name+' '+t.employeeId).includes(q));
@@ -1832,20 +1873,7 @@ document.addEventListener('click',async e=>{
     let dismiss=e.target.closest('[data-dismiss-header]')?.dataset.dismissHeader;if(dismiss){
         dismissHeaderNotice(dismiss);return
     }
-    let cmd=e.target.closest('[data-bamboo-action]')?.dataset.bambooAction;    if(cmd==='checkTimeOff'&&!busy){
-        busy=true;
-        try{
-            let {start,end}=schedulingTimeOffPeriod(),check=await prepareSchedulingTimeOff(start,end);
-            $('profileStatus').textContent=check.status==='success'?'Connection successful. '+check.entries.length+' approved time-off records received.':timeOffSummary()
-        }
-        catch(err){
-            $('profileStatus').textContent=err.message
-        }
-        finally{
-            busy=false
-        }
-        return
-    }
+    let cmd=e.target.closest('[data-bamboo-action]')?.dataset.bambooAction;
     if(cmd==='downloadConnector'&&!busy){
         try{
             await downloadConnectorKit();$('profileStatus').textContent='Connector kit downloaded. Extract all files and run the launcher to open the app locally.'
@@ -1855,12 +1883,7 @@ document.addEventListener('click',async e=>{
         }
         return
     }
-    if(cmd==='testConnection'&&!busy){
-        await testBambooConnection();return
-    }
-    if(cmd==='closeTimeOffs')$('timeOffDialog').close();if(cmd==='remove'&&!busy){
-        let removed=await saveBambooCredentials(null);$('profileApiKey').value='';$('profileApiPassword').value='';$('profileStatus').textContent=removed?'API credentials removed from this browser.':'Credentials cleared for this session. Browser storage is unavailable, so any previously saved browser record could not be removed.';e.target.hidden=true
-    }
+    if(cmd==='closeTimeOffs')$('timeOffDialog').close();
 
 }
 );
@@ -1904,38 +1927,6 @@ function bambooTransport(){
     }
     :{
         mode:'direct',url:'https://cbljm.bamboohr.com/api/v1/time_off/whos_out'
-    }
-
-}
-async function testBambooConnection(){
-    let key=$('profileApiKey').value.trim(),password=$('profileApiPassword').value,saved=bambooCredentials;
-    if(!key&&!saved?.apiKey){
-        $('profileStatus').textContent='Enter an API key before testing the BambooHR connection.';
-        return
-    }
-    if(key.includes(':')||/[\r\n]/.test(key)){
-        $('profileStatus').textContent='The API key contains unsupported characters.';
-        return
-    }
-    busy=true;
-    try{
-        bambooCredentials={
-            apiKey:key||saved.apiKey,apiPassword:password||(key?'x':saved.apiPassword)
-        }
-        ;
-        let start=model.controls.week;
-        if(!validTimeOffDate(start)){
-            $('profileStatus').textContent='Select a valid week commencing date in Controls first.';
-            return
-        }
-        let weeks=scheduleWeeks(model);
-        $('profileStatus').textContent='Testing BambooHR access…';
-        let check=await prepareTimeOff(start,addDays(start,weeks*7-1));
-        $('profileStatus').textContent=check.status==='success'?'Connection successful. '+check.entries.length+' employee time-off records received. Save & continue to keep your profile settings.':check.error
-    }
-    finally{
-        bambooCredentials=saved;
-        busy=false
     }
 
 }
@@ -2139,8 +2130,8 @@ document.addEventListener('click',async e=>{
 }
 );
 let storageMode='unknown',storageReason='';
-let model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null;
-let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[];
+let model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
+let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0;
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }
@@ -2148,6 +2139,9 @@ const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,
     maximumFractionDigits:d
 }
 ),sum=a=>a.reduce((s,x)=>s+x,0),percent=v=>v===null?'':Math.round(v*1000000)/10000;
+function membershipFeatureEnabled(feature){
+    return tenantMembership?.features?.[feature]===true
+}
 function message(text,error=false){
     dismissedHeaderNotices.delete('notice');
     if($('noticeWrap'))$('noticeWrap').hidden=!text;
@@ -2161,7 +2155,7 @@ async function directoryRequest(path,options={}){
             'Content-Type':'application/json',...(options.headers||{})
         }
     }),body=await response.json().catch(()=>({}));
-    if(!response.ok)throw Error(body.error||'Directory request failed with HTTP '+response.status+'.');
+    if(!response.ok)throw Error(body.error||'Request to '+path+' failed with HTTP '+response.status+'.');
     return body
 }
 function blankRosterProfile(employee,index){
@@ -2217,6 +2211,94 @@ async function loadDirectoryData(){
     catch(error){
         directoryError=error.message
     }
+}
+function applyAttendanceScores(data){
+    if(!Array.isArray(data?.scores))return false;
+    let scores=new Map(data.scores.map(item=>[String(item.employeeId),item.score===null?null:Number(item.score)])),changed=false;
+    for(let employee of model.roster){
+        let id=String(employee.id);
+        if(!scores.has(id))continue;
+        let score=scores.get(id);
+        if(employee.attendance!==score){
+            employee.attendance=score;
+            changed=true
+        }
+    }
+    return changed
+}
+function attendancePeriodRange(){
+    if(attendancePeriodMode==='day'){
+        let selectedDate=attendanceSelectedDate||attendanceData?.currentDate||attendanceData?.date;
+        if(!selectedDate)throw Error('Choose an attendance date.');
+        return {start:selectedDate,end:selectedDate}
+    }
+    if(!/^\d{4}-\d{2}$/.test(attendanceStartMonth)||!/^\d{4}-\d{2}$/.test(attendanceEndMonth))throw Error('Choose both a start and end month.');
+    if(attendanceStartMonth>attendanceEndMonth)throw Error('The start month must not be after the end month.');
+    let [startYear,startMonth]=attendanceStartMonth.split('-').map(Number),[endYear,endMonth]=attendanceEndMonth.split('-').map(Number);
+    if(startMonth<1||startMonth>12||endMonth<1||endMonth>12)throw Error('Choose valid calendar months.');
+    let start=`${attendanceStartMonth}-01`,end=new Date(Date.UTC(endYear,endMonth,0)).toISOString().slice(0,10),currentDate=attendanceData?.currentDate;
+    if(currentDate&&end>currentDate)end=currentDate;
+    if(currentDate&&start>currentDate)throw Error('The selected period cannot start in the future.');
+    if(startYear===endYear&&startMonth===endMonth&&end<start)throw Error('The selected month has no attendance dates yet.');
+    return {start,end}
+}
+async function loadSelectedAttendance(){
+    let range=attendancePeriodRange();
+    attendanceSyncStatus='Loading attendance…';
+    render();
+    await loadAttendanceData(range.start,range.end);
+    attendanceSyncStatus='';
+    if(page==='attendance')render(true)
+}
+async function loadAttendanceData(startDate,endDate){
+    let sequence=++attendanceLoadSequence,path=startDate&&endDate?'/attendance?start='+encodeURIComponent(startDate)+'&end='+encodeURIComponent(endDate):'/attendance';
+    let result=await directoryRequest(path);
+    if(sequence!==attendanceLoadSequence)return;
+    attendanceData=result;
+    attendanceSelectedDate=result.date||result.currentDate;
+    if(!attendanceStartMonth)attendanceStartMonth=result.currentDate.slice(0,7);
+    if(!attendanceEndMonth)attendanceEndMonth=result.currentDate.slice(0,7);
+    let changed=!startDate&&!endDate&&applyAttendanceScores(result);
+    if(changed)await saveState()
+}
+async function syncAttendance(silent=true,selectedPeriod=null){
+    if(!tenantAuthCsrfToken||document.hidden)return false;
+    attendanceLastAttempt=Date.now();
+    attendanceSyncStatus='Syncing BambooHR attendance…';
+    let succeeded=false;
+    try{
+        let synced=await directoryRequest('/attendance/sync',{
+            method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(selectedPeriod||{})
+        });
+        if(selectedPeriod){
+            attendanceData=synced;
+            attendanceSelectedDate=synced.currentDate
+        }
+        else{
+            if(applyAttendanceScores(synced))await saveState();
+            let range=attendancePeriodRange();
+            await loadAttendanceData(range.start,range.end)
+        }
+        attendanceSyncStatus='';
+        succeeded=true;
+        if(!silent)message('Attendance refreshed at '+new Date(synced.reportedAt).toLocaleTimeString()+'.');
+    }
+    catch(error){
+        attendanceSyncStatus=error.message;
+        if(!silent)message('Attendance sync failed: '+error.message,true)
+    }
+    if(page==='attendance')render(true)
+    return succeeded
+}
+function startAttendancePolling(){
+    if(attendanceSyncTimer)clearInterval(attendanceSyncTimer);
+    attendanceSyncTimer=setInterval(()=>{
+        if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
+    },60*1000);
+    document.addEventListener('visibilitychange',()=>{
+        if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
+    });
+    syncAttendance(true)
 }
 async function loadBambooPublishStatus(){
     try{
@@ -2386,7 +2468,7 @@ function poolState(p){
 }
 function pools(){
     return heading('CONFIGURATION / LOCATION ROLES','Choose the pools to schedule.','Add or remove possible start times per location and role. New starts begin with 0% share; allocate their share here and set employee permissions in Roster settings.')+`<div class="toolbar"><label>Filter location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="poolLocation"')}</label><span>${model.locked?'Locked · unlock in Controls to edit':'Shift shares per pool must total 100%'}</span></div>`+panel('Location × role configuration',`<div class="tablewrap"><table><thead><tr><th>Enabled</th><th>Location</th><th>Role</th><th>HC</th><th>Possible starts · share %</th><th>Min daily HC<br>Other roles</th><th>Status</th></tr></thead><tbody>${model.pools.map((p,i)=>{
-        if(filterLoc!=='All'&&p.location!==filterLoc)return '';let st=poolState(p);return `<tr data-pool-row="${i}"><td><input type="checkbox" data-pool="${i}" data-field="enabled" ${p.enabled?'checked':''} ${disabled()} aria-label="Enable ${esc(p.id)}"></td><td>${esc(p.location)}</td><td>${esc(p.role)}</td><td>${st.count}</td><td><div class="shift-options">${poolStarts(p).map((s,j)=>`<span class="shift-option"><label>${timeLabel(s)}<input type="number" min="0" max="100" step="any" value="${percent(p.shares[j])}" data-pool="${i}" data-share="${j}" ${disabled()} aria-label="${timeLabel(s)} share for ${esc(p.id)}"></label><button type="button" class="shift-remove" data-action="removeShiftStart" data-pool-index="${i}" data-shift-start="${s}" ${disabled()} aria-label="Remove ${timeLabel(s)} from ${esc(p.id)}" title="Remove ${timeLabel(s)}">×</button></span>`).join('')}<label>Add start<input type="time" step="900" data-new-shift-start="${i}" ${disabled()} aria-label="New shift start for ${esc(p.id)}"></label><button type="button" data-action="addShiftStart" data-pool-index="${i}" ${disabled()}>Add</button></div></td><td>${warehouseRole(p.role)?'<span class="note">Volume-based</span>':`<input type="number" min="0" max="1000000000000" step="1" value="${esc(overtimeConfig().minimum[p.id]??'')}" data-ot-minimum="${esc(p.id)}" ${disabled()} aria-label="Minimum daily headcount for ${esc(p.id)}">`}</td><td title="${esc(st.issues.join('; '))}">${badge(st.count===0?'No roster':st.ready?'Ready':'Incomplete',st.ready?'good':'warn')}</td></tr>`
+        if(filterLoc!=='All'&&p.location!==filterLoc)return '';let st=poolState(p);return `<tr data-pool-row="${i}"><td><input type="checkbox" data-pool="${i}" data-field="enabled" ${p.enabled?'checked':''} ${disabled()} aria-label="Enable ${esc(p.id)}"></td><td>${esc(p.location)}</td><td>${esc(p.role)}</td><td>${st.count}</td><td><div class="shift-options">${poolStarts(p).map((s,j)=>`<span class="shift-option"><label>${timeLabel(s)}<input type="number" min="0" max="100" step="any" value="${percent(p.shares[j])}" data-pool="${i}" data-share="${j}" ${disabled()} aria-label="${timeLabel(s)} share for ${esc(p.id)}"></label><button type="button" class="shift-remove" data-action="removeShiftStart" data-pool-index="${i}" data-shift-start="${s}" ${disabled()} aria-label="Remove ${timeLabel(s)} from ${esc(p.id)}" title="Remove ${timeLabel(s)}">×</button></span>`).join('')}<label>Add start<input type="time" step="900" data-new-shift-start="${i}" ${disabled()} aria-label="New shift start for ${esc(p.id)}"></label><button type="button" data-action="addShiftStart" data-pool-index="${i}" ${disabled()}>Add</button></div></td><td>${!membershipFeatureEnabled('overtimeForecasting')?'<span class="note">Gold+</span>':warehouseRole(p.role)?'<span class="note">Volume-based</span>':`<input type="number" min="0" max="1000000000000" step="1" value="${esc(overtimeConfig().minimum[p.id]??'')}" data-ot-minimum="${esc(p.id)}" ${disabled()} aria-label="Minimum daily headcount for ${esc(p.id)}">`}</td><td title="${esc(st.issues.join('; '))}">${badge(st.count===0?'No roster':st.ready?'Ready':'Incomplete',st.ready?'good':'warn')}</td></tr>`
     }
     ).join('')}</tbody></table></div>`,'New starts default to 0% share and unavailable for every employee. Removing a start redistributes a valid share allocation across remaining starts. Each pool must keep at least one start, and any employee preference for that time must be changed before removing it.')+volumeConfiguration()+errorsPanel()
 }
@@ -2455,7 +2537,7 @@ function employeesPage(){
             let roster=employee.roster,ready=employeeProfileReady(roster),assigned=scheduleLocations.find(location=>location.id===employee.scheduleLocationId);
             let sourceBadge=employee.source==='manual'?badge('Manual','warn'):employee.source==='bamboohr'?badge('BambooHR','good'):badge('Not registered','warn');
             let bambooStatus=employee.source==='bamboohr'&&employee.bamboohrActive===false?'<small>BambooHR inactive · app scheduling disabled</small>':'';
-            return `<tr><td><input type="checkbox" data-employee-select="${esc(employee.id)}" aria-label="Select ${esc(employee.name)}" ${selectedEmployeeIds.has(employee.id)?'checked':''} ${model.locked||employee.unregistered?'disabled':''}></td><td>${badge(employee.active?'Active':'Inactive',employee.active?'good':'warn')}${bambooStatus}</td><td>${sourceBadge}</td><td>${esc(employee.id)}</td><td>${esc(employee.bamboohrId||'Missing')}</td><td>${esc(employee.name)}</td><td>${esc(employee.location||employee.bamboohrLocation||'Unmapped')}</td><td>${select(employeeRoleOptions(employee),employee.role,`data-employee-role="${esc(employee.id)}" data-current-role="${esc(employee.role)}" ${model.locked||employee.unregistered?'disabled':''}`)}</td><td>${esc(assigned?.name||'Not assigned')}</td><td>${ready?badge('Ready','good'):badge(employee.unregistered?'Directory setup required':'Needs setup','warn')}</td><td><div class="actions">${!employee.unregistered?`<button type="button" data-action="editEmployee" data-employee-id="${esc(employee.id)}">Edit</button><button type="button" data-action="editEmployeeProfile" data-employee-id="${esc(employee.id)}">${ready?'Roster settings':'Complete profile'}</button><button type="button" data-action="toggleEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>${employee.active?'Make inactive':'Make active'}</button>${employee.source==='manual'?`<button type="button" class="danger" data-action="deleteEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>Delete</button>`:''}`:'Not in directory'}</div></td></tr>`
+            return `<tr><td><input type="checkbox" data-employee-select="${esc(employee.id)}" aria-label="Select ${esc(employee.name)}" ${selectedEmployeeIds.has(employee.id)?'checked':''} ${model.locked||employee.unregistered?'disabled':''}></td><td>${badge(employee.active?'Active':'Inactive',employee.active?'good':'warn')}${bambooStatus}</td><td>${sourceBadge}</td><td>${esc(employee.id)}</td><td>${esc(employee.bamboohrId||'Missing')}</td><td>${esc(employee.name)}</td><td>${esc(employee.location||employee.bamboohrLocation||'Unmapped')}</td><td>${select(employeeRoleOptions(employee),employee.role,`data-employee-role="${esc(employee.id)}" data-current-role="${esc(employee.role)}" ${model.locked||employee.unregistered?'disabled':''}`)}</td><td>${esc(assigned?.name||'Not assigned')}</td><td>${ready?badge('Ready','good'):badge(employee.unregistered?'Directory setup required':'Needs setup','warn')}</td><td><div class="actions employee-actions">${!employee.unregistered?`<button type="button" data-action="editEmployee" data-employee-id="${esc(employee.id)}">Edit</button><button type="button" data-action="editEmployeeProfile" data-employee-id="${esc(employee.id)}">${ready?'Roster settings':'Complete profile'}</button><button type="button" data-action="toggleEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>${employee.active?'Make inactive':'Make active'}</button>${employee.source==='manual'?`<button type="button" class="danger" data-action="deleteEmployee" data-employee-id="${esc(employee.id)}" ${model.locked?'disabled':''}>Delete</button>`:''}`:'Not in directory'}</div></td></tr>`
         }).join('')}</tbody></table></div>`,'Profile settings are edited in Roster settings. New or imported employees should remain inactive until their roster profile is complete.')
 }
 function updateEmployeeSelectionUI(){
@@ -2796,12 +2878,12 @@ function metaPage(){
 function scheduleViewWithoutAcceptedHistory(){
     let all=model.results,visible=visibleScheduleRuns(),selected=visible.find(r=>r.id===model.selectedRun)||visible[0];
     if(selected)model.selectedRun=selected.id;
-    return heading('OUTPUT / WEEKLY SCHEDULE','Every week, saved by pool.','Review demand coverage, supplemental shifts and employee target shortfalls. Schedule times use the elapsed span configured for that run. Every generation uses fresh randomness. Refresh & shuffle all processes every saved schedule, including earlier revisions and pools outside the current horizon, using each schedule’s saved constraints.')+`<div class="toolbar"><button type="button" class="primary" data-action="generate" ${model.locked?'':'disabled'}>${all.length?'Generate / update selected horizon':'Generate schedules'}</button><button type="button" data-action="refresh" ${model.locked&&all.length?'':'disabled'}>↻ Refresh & shuffle all</button>${model.previousScheduleSet?'<button type="button" data-action="undoShuffle">Undo last shuffle</button>':''}<button type="button" data-action="timeOffs">View time-offs</button><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button><button type="button" data-action="trade" ${all.length?'':'disabled'}>Trade shifts</button><button type="button" data-action="scheduleUpload">Upload schedules · XLSX</button><button type="button" data-action="scheduleTemplate">Download schedule template</button><button type="button" data-action="downloadVisible" ${visible.length?'':'disabled'}>Download filtered schedules · XLSX</button><button type="button" data-action="download" ${all.length?'':'disabled'}>Download all schedules · XLSX</button><button type="button" data-action="email" ${all.length?'':'disabled'}>Email schedules</button><button type="button" data-action="csv" ${all.length?'':'disabled'}>Combined CSV</button></div>`+scheduleFilters()+(!all.length?panel('No saved schedules',model.locked?'<p>Generate schedules from the locked configuration.</p>':'<p>Complete the settings and lock them in Controls before generating the first schedule.</p>'):`<div class="toolbar"><label>Saved week & pool ${select(visible.map(r=>[r.id,r.start+' to '+r.end+' · '+r.location+' · '+r.role+' · rev '+r.revision]),selected?.id,'id="runSelect"')}</label></div>`+(selected?runView(selected):panel('No matching schedules','<p>Change the filters to view saved schedules.</p>'))+panel('Saved schedule register',`<div class="tablewrap"><table><thead><tr><th>Week period</th><th>Location / role</th><th>Revision</th><th>Demand filled</th><th>Make-up</th><th>Unfilled demand</th><th>Employee shortfall</th></tr></thead><tbody>${visible.map(r=>`<tr><td><button type="button" data-run="${esc(r.id)}">${r.start} → ${r.end}</button></td><td>${esc(r.location)}<small>${esc(r.role)}</small></td><td>${r.revision}</td><td>${r.primary}</td><td>${r.makeup}</td><td>${r.uncovered.length}</td><td>${sum(r.shortages.map(x=>x.missing))}</td></tr>`).join('')}</tbody></table></div>`))
+    return heading('OUTPUT / WEEKLY SCHEDULE','Every week, saved by pool.','Review demand coverage, supplemental shifts and employee target shortfalls. Schedule times use the elapsed span configured for that run. Every generation uses fresh randomness. Refresh & shuffle all processes every saved schedule, including earlier revisions and pools outside the current horizon, using each schedule’s saved constraints.')+`<div class="toolbar"><button type="button" class="primary" data-action="generate" ${model.locked?'':'disabled'}>${all.length?'Generate / update selected horizon':'Generate schedules'}</button><button type="button" data-action="refresh" ${model.locked&&all.length?'':'disabled'}>↻ Refresh & shuffle all</button>${model.previousScheduleSet?'<button type="button" data-action="undoShuffle">Undo last shuffle</button>':''}<button type="button" data-action="timeOffs">View time-offs</button><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button>${membershipFeatureEnabled('shiftTrades')?`<button type="button" data-action="trade" ${all.length?'':'disabled'}>Trade shifts</button>`:''}<button type="button" data-action="scheduleUpload">Upload schedules · XLSX</button><button type="button" data-action="scheduleTemplate">Download schedule template</button><button type="button" data-action="downloadVisible" ${visible.length?'':'disabled'}>Download filtered schedules · XLSX</button><button type="button" data-action="download" ${all.length?'':'disabled'}>Download all schedules · XLSX</button><button type="button" data-action="email" ${all.length?'':'disabled'}>Email schedules</button><button type="button" data-action="csv" ${all.length?'':'disabled'}>Combined CSV</button></div>`+scheduleFilters()+(!all.length?panel('No saved schedules',model.locked?'<p>Generate schedules from the locked configuration.</p>':'<p>Complete the settings and lock them in Controls before generating the first schedule.</p>'):`<div class="toolbar"><label>Saved week & pool ${select(visible.map(r=>[r.id,r.start+' to '+r.end+' · '+r.location+' · '+r.role+' · rev '+r.revision]),selected?.id,'id="runSelect"')}</label></div>`+(selected?runView(selected):panel('No matching schedules','<p>Change the filters to view saved schedules.</p>'))+panel('Saved schedule register',`<div class="tablewrap"><table><thead><tr><th>Week period</th><th>Location / role</th><th>Revision</th><th>Demand filled</th><th>Make-up</th><th>Unfilled demand</th><th>Employee shortfall</th></tr></thead><tbody>${visible.map(r=>`<tr><td><button type="button" data-run="${esc(r.id)}">${r.start} → ${r.end}</button></td><td>${esc(r.location)}<small>${esc(r.role)}</small></td><td>${r.revision}</td><td>${r.primary}</td><td>${r.makeup}</td><td>${r.uncovered.length}</td><td>${sum(r.shortages.map(x=>x.missing))}</td></tr>`).join('')}</tbody></table></div>`))
 }
 function runView(r){
     if(!r)return '';
     let c=r.controls;
-    return (r.importWarnings?.length?panel('Uploaded schedule · missing profile information','<ul>'+r.importWarnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>'):'')+overtimePanel(r)+stats([['Week period',r.start,'Through '+r.end],['Primary shifts filled',r.primary,f(sum(r.requirements.flat()))+' demand slots'],['Make-up shifts',r.makeup,'Shown with a + marker'],['Review items',r.uncovered.length+r.shortages.length,'Unfilled demand slots + employees below target']])+panel(esc(r.location+' · '+r.role),`<div class="actions">${badge('Revision '+r.revision)} ${r.timeOffCheck?badge(r.timeOffCheck.status==='success'?(r.timeOffCheck.source==='workbook'?'Workbook time-offs applied':'BambooHR time-offs checked'):r.timeOffCheck.status==='error'?'Time-offs not checked · API error':'Time-offs not configured',r.timeOffCheck.status==='error'?'warn':''):''} ${r.controls.shuffle?badge('Shuffled · seed '+r.controls.seed):''} ${badge(r.uncovered.length||r.shortages.length?'Review required':'Targets met',r.uncovered.length||r.shortages.length?'warn':'good')}<span class="note">${r.imported?'Uploaded schedule · '+esc(r.sourceName):r.revision!==model.revision?'Earlier configuration revision · included in shuffle all':'Current configuration revision'}</span></div><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((d,i)=>`<th>${d}<small>${addDays(r.start,i)}</small></th>`).join('')}<th>Shifts / hours</th><th>Missing</th></tr></thead><tbody>${r.employees.map(e=>`<tr><td class="sticky">${esc(e.name)}<small>${esc(e.id)}</small></td>${e.slots.map((s,d)=>`<td class="${s===null?(e.timeOff?.[d]?'leave':'off'):e.types[d]==='Make-up'?'added':'duty'}">${s===null?(e.timeOff?.[d]?'time-off':'OFF'):esc(shiftLabel(s,c.span))+(e.types[d]==='Make-up'?'<b class="plus"> +</b>':'')}</td>`).join('')}<td>${e.slots.filter(x=>x!==null).length} / ${f(e.slots.filter(x=>x!==null).length*c.hours,1)}h</td><td>${Math.max(0,c.shifts-e.slots.filter(x=>x!==null).length)}</td></tr>`).join('')}</tbody></table></div>`,'+ = supplemental make-up shift; these do not erase unfilled primary demand. time-off marks approved BambooHR absence (or uploaded time-off); OFF means no assignment. Overnight shifts that overlap the next day’s time-off are also excluded.')+(r.tradeHistory?.length?panel('Confirmed shift trades','<ul>'+r.tradeHistory.map(t=>'<li>'+esc(t.firstName)+' ↔ '+esc(t.secondName)+' · '+esc(t.days.map(d=>DAYS[d]).join(', '))+' · '+esc(t.at)+'</li>').join('')+'</ul>'):'')+panel('Demand coverage · assigned / required',`<div class="tablewrap"><table><thead><tr><th>Day</th>${STARTS.map(s=>'<th>'+timeLabel(s)+'</th>').join('')}<th>Make-up total</th></tr></thead><tbody>${r.requirements.map((rq,d)=>`<tr><td>${DAYS[d]}</td>${rq.map((need,j)=>{
+    return (r.importWarnings?.length?panel('Uploaded schedule · missing profile information','<ul>'+r.importWarnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>'):'')+overtimePanel(r)+stats([['Week period',r.start,'Through '+r.end],['Primary shifts filled',r.primary,f(sum(r.requirements.flat()))+' demand slots'],['Make-up shifts',r.makeup,'Shown with a + marker'],['Review items',r.uncovered.length+r.shortages.length,'Unfilled demand slots + employees below target']])+panel(esc(r.location+' · '+r.role),`<div class="actions">${badge('Revision '+r.revision)} ${r.timeOffCheck?badge(r.timeOffCheck.status==='success'?(r.timeOffCheck.source==='workbook'?'Workbook time-offs applied':'BambooHR time-offs checked'):r.timeOffCheck.status==='error'?'Time-offs not checked · API error':'Time-offs not configured',r.timeOffCheck.status==='error'?'warn':''):''} ${r.controls.shuffle?badge('Shuffled · seed '+r.controls.seed):''} ${badge(r.uncovered.length||r.shortages.length?'Review required':'Targets met',r.uncovered.length||r.shortages.length?'warn':'good')}<span class="note">${r.imported?'Uploaded schedule · '+esc(r.sourceName):r.revision!==model.revision?'Earlier configuration revision · included in shuffle all':'Current configuration revision'}</span></div><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((d,i)=>`<th>${d}<small>${addDays(r.start,i)}</small></th>`).join('')}<th>Shifts / hours</th><th>Missing</th></tr></thead><tbody>${r.employees.map(e=>`<tr><td class="sticky">${esc(e.name)}<small>${esc(e.id)}</small></td>${e.slots.map((s,d)=>`<td class="${s===null?(e.timeOff?.[d]?'leave':'off'):e.types[d]==='Make-up'?'added':'duty'}">${s===null?(e.timeOff?.[d]?'time-off':'OFF'):esc(shiftLabel(s,c.span))+(e.types[d]==='Make-up'?'<b class="plus"> +</b>':'')}</td>`).join('')}<td>${e.slots.filter(x=>x!==null).length} / ${f(e.slots.filter(x=>x!==null).length*c.hours,1)}h</td><td>${Math.max(0,c.shifts-e.slots.filter(x=>x!==null).length)}</td></tr>`).join('')}</tbody></table></div>`,'+ = supplemental make-up shift; these do not erase unfilled primary demand. time-off marks approved BambooHR absence (or uploaded time-off); OFF means no assignment. Overnight shifts that overlap the next day’s time-off are also excluded.')+(membershipFeatureEnabled('shiftTrades')&&r.tradeHistory?.length?panel('Confirmed shift trades','<ul>'+r.tradeHistory.map(t=>'<li>'+esc(t.firstName)+' ↔ '+esc(t.secondName)+' · '+esc(t.days.map(d=>DAYS[d]).join(', '))+' · '+esc(t.at)+'</li>').join('')+'</ul>'):'')+panel('Demand coverage · assigned / required',`<div class="tablewrap"><table><thead><tr><th>Day</th>${STARTS.map(s=>'<th>'+timeLabel(s)+'</th>').join('')}<th>Make-up total</th></tr></thead><tbody>${r.requirements.map((rq,d)=>`<tr><td>${DAYS[d]}</td>${rq.map((need,j)=>{
         let got=r.employees.filter(e=>e.slots[d]===STARTS[j]&&e.types[d]==='Demand').length;return `<td class="${got<need?'gap':''}">${got} / ${need}</td>`
     }
     ).join('')}<td>${r.employees.filter(e=>e.types[d]==='Make-up').length}</td></tr>`).join('')}</tbody></table></div>`)+(r.shortages.length?panel('Employee target shortfalls','<ul>'+r.shortages.map(e=>'<li>'+esc(e.name)+' · '+e.missing+' missing shifts</li>').join('')+'</ul>'):'')
@@ -2827,6 +2909,7 @@ async function loadAcceptedSchedules(){
     }
 }
 function acceptedHistoryPanel(){
+    if(!membershipFeatureEnabled('scheduleHistory'))return panel('Previously accepted shifts','<p>Schedule history is included with Silver and above. Accepted schedules remain available for BambooHR publishing.</p>');
     if(acceptedScheduleError)return panel('Previously accepted shifts',`<p class="badtext">${esc(acceptedScheduleError)}</p>`);
     if(!acceptedSchedules.length)return panel('Previously accepted shifts','<p>No schedules have been accepted yet. Accept a generated or uploaded schedule to save it to the app database.</p>');
     return panel('Previously accepted shifts',acceptedSchedules.map(record=>{
@@ -2874,7 +2957,7 @@ function bambooPublishPage(){
     }).join('');
     let selectionCount=publishSelection.length;
     return heading('OUTPUT / BAMBOOHR','Publish accepted shifts only.','Select shifts from previously accepted schedules, preview the exact BambooHR schedule payloads, then confirm before posting. The API key remains on the Flask server.')+
-        panel('BambooHR connection',(publishError?`<p class="badtext">${esc(publishError)}</p>`:publishConfigured?'<p>Server credential is configured. No credential is sent to the browser.</p>':'<p class="badtext">BAMBOOHR_API_KEY is not configured in the app server environment. Configure it before publishing.</p>')+'<button type="button" data-action="refreshBambooStatus">Refresh server status</button>')+
+        panel('BambooHR connection',(publishError?`<p class="badtext">${esc(publishError)}</p>`:publishConfigured?'<p>Server credential is configured. No credential is sent to the browser.</p>':'<p class="badtext">The BambooHR API key is not configured for this business. Add it in Settings before publishing.</p>')+'<button type="button" data-action="refreshBambooStatus">Refresh server status</button>')+
         (acceptedScheduleError?panel('Accepted schedules unavailable',`<p class="badtext">${esc(acceptedScheduleError)}</p>`):'')+
         (acceptedSchedules.length?panel('Select accepted shifts',records+`<div class="actions"><span>${selectionCount} shifts selected (maximum 500 per publish)</span><button type="button" data-action="previewPublish" class="primary" ${selectionCount?'':'disabled'}>Preview BambooHR changes</button><button type="button" data-action="clearPublishSelection" ${selectionCount?'':'disabled'}>Clear selection</button></div><p class="note">Shift start and end times use the accepted schedule's saved duration and Jamaica timezone. Employee BambooHR IDs and schedule mappings are validated by the server before preview.</p>`):panel('Select accepted shifts','<p>No accepted schedules are available. Accept a generated or uploaded schedule first.'))
         +(publishPreview?panel('Preview · no changes posted',`<div class="tablewrap"><table><thead><tr><th>Schedule</th><th>UTC start</th><th>UTC end</th><th>Employees</th><th>BambooHR IDs</th></tr></thead><tbody>${publishPreview.map(item=>`<tr><td>${esc(item.scheduleName)}</td><td>${esc(item.start)}</td><td>${esc(item.end)}</td><td>${esc(item.employeeNames.join(', '))}</td><td>${esc(item.employeeIds.join(', '))}</td></tr>`).join('')}</tbody></table></div><div class="actions"><button type="button" class="primary" data-action="openPublishConfirm" ${publishConfigured?'':'disabled'}>Continue to publish confirmation</button></div>`):'')+
@@ -2893,7 +2976,7 @@ function runView(r){
     return (r.importWarnings?.length?panel('Uploaded schedule · missing profile information','<ul>'+r.importWarnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>'):'')+overtimePanel(r)+stats([['Week period',r.start,'Through '+r.end],['Primary shifts filled',r.primary,f(sum(r.requirements.flat()))+' demand slots'],['Make-up shifts',r.makeup,'Shown with a + marker'],['Review items',r.uncovered.length+r.shortages.length,'Unfilled demand slots + employees below target']])+panel(esc(r.location+' · '+r.role),`<div class="actions">${badge('Revision '+r.revision)} ${r.imported?badge('Uploaded schedule'):badge('Generated schedule')} ${record?badge('Accepted','good'):badge('Not accepted','warn')}<button type="button" class="primary" data-action="acceptSchedule" data-run-id="${esc(r.id)}">${record?'Update accepted copy':'Accept this schedule'}</button><span class="note">${r.imported?'Uploaded · '+esc(r.sourceName):r.revision!==model.revision?'Earlier configuration revision':'Current configuration revision'}</span></div><div class="tablewrap schedule"><table><thead><tr><th>Employee / ID</th>${DAYS.map((day,index)=>`<th>${day}<small>${addDays(r.start,index)}</small></th>`).join('')}<th>Shifts / hours</th><th>Missing</th></tr></thead><tbody>${r.employees.map(employee=>`<tr><td class="sticky">${esc(employee.name)}<small>${esc(employee.id)}</small></td>${employee.slots.map((_,day)=>dayCell(employee,day)).join('')}<td>${employee.slots.filter(start=>start!==null).length} / ${f(employee.slots.filter(start=>start!==null).length*c.hours,1)}h</td><td>${Math.max(0,c.shifts-employee.slots.filter(start=>start!==null).length)}</td></tr>`).join('')}</tbody></table></div>`,'Click a shift cell to select OFF or a start configured for this pool. Shift end times follow the run’s elapsed shift span. A shift that is not enabled for that employee is unavailable in the selector.')+panel('Demand coverage · assigned / required',`<div class="tablewrap"><table><thead><tr><th>Day</th>${starts.map(start=>'<th>'+timeLabel(start)+'</th>').join('')}<th>Make-up total</th></tr></thead><tbody>${r.requirements.map((requirement,day)=>`<tr><td>${DAYS[day]}</td>${requirement.map((need,index)=>{
         let start=starts[index],assigned=r.employees.filter(employee=>employee.slots[day]===start&&employee.types[day]==='Demand').length;
         return `<td class="${assigned<need?'gap':''}">${assigned} / ${need}</td>`
-    }).join('')}<td>${r.employees.filter(employee=>employee.types[day]==='Make-up').length}</td></tr>`).join('')}</tbody></table></div>`)+(r.shortages.length?panel('Employee target shortfalls','<ul>'+r.shortages.map(employee=>'<li>'+esc(employee.name)+' · '+employee.missing+' missing shifts</li>').join('')+'</ul>'):'')+(r.tradeHistory?.length?panel('Confirmed shift trades','<ul>'+r.tradeHistory.map(trade=>'<li>'+esc(trade.firstName)+' ↔ '+esc(trade.secondName)+' · '+esc(trade.days.map(day=>DAYS[day]).join(', '))+' · '+esc(trade.at)+'</li>').join('')+'</ul>'):'')
+    }).join('')}<td>${r.employees.filter(employee=>employee.types[day]==='Make-up').length}</td></tr>`).join('')}</tbody></table></div>`)+(r.shortages.length?panel('Employee target shortfalls','<ul>'+r.shortages.map(employee=>'<li>'+esc(employee.name)+' · '+employee.missing+' missing shifts</li>').join('')+'</ul>'):'')+(membershipFeatureEnabled('shiftTrades')&&r.tradeHistory?.length?panel('Confirmed shift trades','<ul>'+r.tradeHistory.map(trade=>'<li>'+esc(trade.firstName)+' ↔ '+esc(trade.secondName)+' · '+esc(trade.days.map(day=>DAYS[day]).join(', '))+' · '+esc(trade.at)+'</li>').join('')+'</ul>'):'')
 }
 function schedules(){
     return scheduleViewWithoutAcceptedHistory()+acceptedHistoryPanel()
@@ -2914,7 +2997,7 @@ function render(preserveScroll=false){
     $('lockState').className=model.locked?'lock locked':'lock';
     storageStatus();
     $('content').innerHTML=({
-        home,pools,roster,employees:employeesPage,scheduleLocations:scheduleLocationsPage,controls,meta:metaPage,schedules,publish:bambooPublishPage,source:sourcePage,settings:settingsPage,links:workforceLinksPage
+        home,pools,roster,employees:employeesPage,scheduleLocations:scheduleLocationsPage,attendance:attendancePage,controls,meta:metaPage,schedules,publish:bambooPublishPage,source:sourcePage,settings:settingsPage,links:workforceLinksPage
     }
     [page])();
     document.querySelectorAll('#content [data-action="timeOffWorkbook"]').forEach(button=>{
@@ -3223,6 +3306,20 @@ async function action(a,element=null){
         return
     }
     try{
+        if(a==='tenantLogout'){
+            let stateResponse=await fetch('/api/tenant-auth/state');
+            let state=await stateResponse.json();
+            if(!stateResponse.ok||!state.csrfToken)throw Error(state.error||'Unable to validate the sign-out session.');
+            let logoutResponse=await fetch('/api/tenant-auth/logout',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrfToken},
+                body:'{}'
+            });
+            let logoutResult=await logoutResponse.json();
+            if(!logoutResponse.ok)throw Error(logoutResult.error||'Sign out failed.');
+            window.location.assign('/');
+            return
+        }
         if(a==='pickBusinessLogo'){
             $('businessLogoFile')?.click();
             return
@@ -3256,7 +3353,7 @@ async function action(a,element=null){
             if(!apiKey?.trim())throw Error('Enter an API key to test.');
             bambooPromotionToken='';
             $('promoteBambooKey').hidden=true;
-            $('businessKeyStatus').textContent='Testing a read-only BambooHR time-off request…';
+            $('businessKeyStatus').textContent='Testing read-only BambooHR time-off and time-tracking requests…';
             try{
                 let result=await directoryRequest('/bamboohr/validate-key',{method:'POST',body:JSON.stringify({tenantId,apiKey})});
                 bambooPromotionToken=result.promotionToken;
@@ -3281,7 +3378,7 @@ async function action(a,element=null){
             $('businessKeyStatus').textContent='The tested key is now the app’s operational BambooHR API key for '+result.tenantId+'.';
             if($('bambooTestApiKey'))$('bambooTestApiKey').value='';
             render(true);
-            message('Tested BambooHR API key promoted and saved to the server .env file.');
+            message('Tested BambooHR API key saved (encrypted) for this business.');
             return
         }
         if(a==='reloadDirectory'){
@@ -3290,11 +3387,144 @@ async function action(a,element=null){
             render(true);
             return
         }
+        if(a==='syncAttendance'){
+            await syncAttendance(false,attendancePeriodRange());
+            return
+        }
+        if(a==='saveAttendanceSource'){
+            let source=$('attendanceShiftSource')?.value,attendanceRange=attendancePeriodRange();
+            if(source==='bamboohr'&&!window.confirm('Switch attendance to BambooHR scheduled shifts? The app will read and compare BambooHR shifts for the selected period. BambooHR clock events will continue to verify attendance.'))return;
+            let result=await directoryRequest('/attendance/source',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({
+                    source,confirmed:source==='bamboohr',
+                    start:attendanceRange.start,end:attendanceRange.end
+                })
+            });
+            let refreshed=await syncAttendance(true,attendanceRange);
+            render(true);
+            if(!refreshed){
+                message('Attendance shift source saved, but the selected period could not be refreshed: '+attendanceSyncStatus,true);
+                return
+            }
+            message('Attendance shift source saved: '+(result.selected==='app'?'accepted app shifts.':'BambooHR shifts.'));
+            return
+        }
+        if(a==='reviewAttendanceDiscrepancy'){
+            openAttendanceReconciliationDialog(element);
+            return
+        }
+        if(a==='resolveAttendanceDiscrepancy'){
+            let reason=$('attendanceReconciliationReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the shift reconciliation.');
+            let attendanceRange=attendancePeriodRange(),result;
+            try{
+                result=await directoryRequest('/attendance/reconciliation/resolve',{
+                    method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                    body:JSON.stringify({
+                        confirmed:true,discrepancyId:element.dataset.discrepancyId,
+                        direction:element.dataset.direction,date:element.dataset.date,reason
+                    })
+                })
+            }
+            catch(error){
+                $('attendanceReconciliationDialog')?.close();
+                try{
+                    await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+                    let refreshed=await syncAttendance(true,attendanceRange);
+                    render(true);
+                    message(
+                        refreshed
+                            ?error.message
+                            :error.message+' Attendance refresh failed: '+attendanceSyncStatus,
+                        true
+                    )
+                }
+                catch(refreshError){
+                    message(error.message+' Refresh also failed: '+refreshError.message,true)
+                }
+                return
+            }
+            $('attendanceReconciliationDialog')?.close();
+            let refreshed=await syncAttendance(true,attendanceRange);
+            render(true);
+            message(
+                !refreshed
+                    ?'Reconciliation '+result.outcome+' and audited, but attendance refresh failed: '+attendanceSyncStatus
+                    :result.outcome==='succeeded'
+                        ?'Shift discrepancy resolved and audited.'
+                        :'Reconciliation '+result.outcome+'. Review the updated discrepancies.',
+                !refreshed
+            );
+            return
+        }
+        if(a==='saveAttendanceSettings'){
+            let settings={
+                latenessToleranceMinutes:Number($('attendanceTolerance')?.value),
+                scorePeriodDays:Number($('attendancePeriod')?.value)
+            };
+            if(!Number.isInteger(settings.latenessToleranceMinutes)||settings.latenessToleranceMinutes<0||settings.latenessToleranceMinutes>120||!Number.isInteger(settings.scorePeriodDays)||settings.scorePeriodDays<30||settings.scorePeriodDays>45)throw Error('Set lateness tolerance from 0 to 120 minutes and the attendance period from 30 to 45 days.');
+            let result=await directoryRequest('/attendance/settings',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(settings)
+            });
+            if(attendanceData)attendanceData.settings=result.settings;
+            await syncAttendance(true);
+            render(true);
+            message('Attendance rules saved.');
+            return
+        }
+        if(a==='editAttendanceScore'){
+            openAttendanceScoreDialog(element);
+            return
+        }
+        if(a==='saveAttendanceScoreOverride'||a==='removeAttendanceScoreOverride'){
+            let employeeId=element.dataset.employeeId,reason=$('attendanceOverrideReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the attendance score override.');
+            let options={
+                method:a==='saveAttendanceScoreOverride'?'POST':'DELETE',
+                headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({reason})
+            };
+            if(a==='saveAttendanceScoreOverride'){
+                let score=$('attendanceOverrideScore')?.value;
+                if(score===''||score===undefined||!Number.isFinite(Number(score))||Number(score)<0||Number(score)>100)throw Error('Enter an attendance score from 0 to 100.');
+                options.body=JSON.stringify({score:Number(score),reason})
+            }
+            await directoryRequest('/attendance/scores/'+encodeURIComponent(employeeId)+'/override',options);
+            let attendanceRange=attendancePeriodRange();
+            await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+            $('attendanceOverrideDialog')?.close();
+            render(true);
+            await saveState();
+            message(a==='saveAttendanceScoreOverride'?'Attendance score override saved and audited.':'Attendance score override removed and audited.');
+            return
+        }
+        if(a==='editAttendanceShift'){
+            openAttendanceShiftDialog(element);
+            return
+        }
+        if(a==='saveAttendanceShiftOverride'){
+            let reason=$('attendanceShiftReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the attendance correction.');
+            await directoryRequest('/attendance/shifts/override',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({
+                    runId:element.dataset.runId,employeeId:element.dataset.employeeId,
+                    date:element.dataset.shiftDate,status:$('attendanceShiftStatus')?.value,reason
+                })
+            });
+            let attendanceRange=attendancePeriodRange();
+            await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+            $('attendanceOverrideDialog')?.close();
+            render(true);
+            message('Attendance correction saved and audited.');
+            return
+        }
         if(a==='refreshBambooStatus'){
             await loadBambooPublishStatus();
             render(true);
             if(publishError)throw Error(publishError);
-            message(publishConfigured?'BambooHR server credential is configured.':'BAMBOOHR_API_KEY is not configured on the server.',!publishConfigured);
+            message(publishConfigured?'BambooHR credential is configured.':'The BambooHR API key is not configured. Add it in Settings.',!publishConfigured);
             return
         }
         if(a==='syncBambooEmployees'){
@@ -4349,8 +4579,19 @@ async function init(){
         await loadAcceptedSchedules();
         await loadDirectoryData();
         await loadBambooPublishStatus();
+        let authResponse=await fetch('/api/tenant-auth/state'),authState=await authResponse.json();
+        if(!authResponse.ok||!authState.authenticated)throw Error(authState.error||'Your administrator session has expired.');
+        tenantAuthCsrfToken=authState.csrfToken;
+        tenantMembership=authState.membership;
+        model.user={firstName:authState.displayName||'',email:authState.email||''};
+        try{
+            await loadAttendanceData()
+        }
+        catch(error){
+            attendanceSyncStatus=error.message
+        }
         render();
-        openUserProfile()
+        startAttendancePolling();
     }
     catch(err){
         $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'

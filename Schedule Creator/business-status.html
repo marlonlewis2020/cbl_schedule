@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Business status | CBL Schedule</title>
+  <style>
+    :root { color-scheme: light; font-family: Segoe UI, Arial, sans-serif; color: #183044; background: #f3f6f8; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 32px 16px; box-sizing: border-box; }
+    main { width: min(100%, 640px); background: white; border-radius: 12px; padding: 32px; box-shadow: 0 8px 32px #1830441a; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    h2 { margin: 28px 0 8px; font-size: 1.15rem; }
+    p { line-height: 1.5; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; }
+    input, select { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    button, a.button { display: inline-block; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+    button.secondary { background: #5b6b78; }
+    button.danger { background: #a12121; margin: 0; padding: 6px 12px; }
+    [hidden] { display: none !important; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; background: #e3eef4; }
+    .badge.pending { background: #fff1c7; }
+    .badge.active { background: #d9f2d0; }
+    .badge.suspended { background: #f8d7d7; }
+    .badge.paused, .badge.cancelled { background: #f8d7d7; }
+    .note { margin-top: 14px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
+    .error { color: #a12121; }
+    .success { color: #236d2b; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e3eaef; overflow-wrap: anywhere; }
+    details.admins { margin: 12px 0 20px; border: 1px solid #d3dee5; border-radius: 8px; padding: 12px; }
+    details.admins summary { cursor: pointer; font-weight: 700; }
+    .admin-details { flex: 1; }
+    .admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .admin-actions button, .admin-edit button { margin: 0; padding: 6px 10px; }
+    .admin-edit { width: 100%; padding: 12px; background: #f3f6f8; border-radius: 6px; }
+    .temporary-password { margin: 12px 0; padding: 12px; background: #e6f4e7; border-radius: 6px; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="businessName">Your business</h1>
+    <p>Status: <span id="status" class="badge">…</span></p>
+    <p id="statusText"></p>
+    <p id="statusNote" class="note" hidden></p>
+    <a id="openApp" class="button" href="/" hidden>Open the scheduler</a>
+
+    <section id="membershipSection">
+      <h2>Membership</h2>
+      <p>Plan: <strong id="membershipTier">…</strong></p>
+      <p>Membership status: <span id="membershipStatus" class="badge">…</span></p>
+      <p id="membershipText" class="note"></p>
+      <div id="membershipControls" hidden>
+        <label for="membershipTierChoice">Change membership tier</label>
+        <select id="membershipTierChoice">
+          <option value="bronze">Bronze</option>
+          <option value="silver">Silver</option>
+          <option value="gold">Gold</option>
+          <option value="platinum">Platinum</option>
+        </select>
+        <button id="changeTier" type="button">Change tier</button>
+        <button id="pauseMembership" class="secondary" type="button" hidden>Pause membership</button>
+        <button id="resumeMembership" type="button" hidden>Resume membership</button>
+        <button id="cancelMembership" class="danger" type="button" hidden>Cancel membership</button>
+      </div>
+    </section>
+
+    <section id="adminSection" hidden>
+      <h2>Administrators</h2>
+      <p>Every administrator must set up an authenticator app the first time they sign in.</p>
+      <details class="admins" id="adminDetails">
+        <summary id="adminSummary">View administrators</summary>
+        <ul id="adminList"></ul>
+      </details>
+      <p id="temporaryPassword" class="temporary-password" hidden></p>
+      <form id="adminForm" hidden>
+        <label for="adminName">Name</label>
+        <input id="adminName" maxlength="120" required>
+        <label for="adminEmail">Email</label>
+        <input id="adminEmail" type="email" maxlength="254" required>
+        <label for="adminPassword">Initial password (14+ characters, share it privately)</label>
+        <input id="adminPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+        <button type="submit">Add administrator</button>
+      </form>
+    </section>
+
+    <button id="signOut" class="secondary" type="button">Sign out</button>
+    <p id="message" class="error" role="alert" aria-live="polite"></p>
+  </main>
+  <script>
+    const $ = selector => document.querySelector(selector);
+    const message = $("#message");
+    let csrfToken = "";
+    let isPrimary = false;
+    const descriptions = {
+      pending: "Your registration is waiting for approval. Scheduling is unavailable until the platform owner approves your business. You can sign in to check back at any time.",
+      active: "Your business is active.",
+      suspended: "Your business is suspended. Scheduling is unavailable. Contact the platform owner to restore access."
+    };
+    const membershipDescriptions = {
+      active: "Membership changes apply immediately. This app does not currently collect membership payments. Lower tiers keep existing records but may block new additions when usage exceeds a plan limit.",
+      paused: "Membership is paused. Scheduler access is disabled, but your business data is retained. The main administrator can resume the membership at any time. No billing changes are processed by this app.",
+      cancelled: "Membership is cancelled and scheduler access is disabled. Your business data is retained, not deleted. Contact the platform owner if you need access restored. No billing changes are processed by this app."
+    };
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The request failed.");
+      return result;
+    }
+
+    function renderAdmins(admins) {
+      const list = $("#adminList");
+      list.replaceChildren();
+      $("#adminSummary").textContent = `View administrators (${admins.length})`;
+      for (const admin of admins) {
+        const row = document.createElement("li");
+        const details = document.createElement("span");
+        details.className = "admin-details";
+        details.textContent = `${admin.name} · ${admin.email}${admin.isPrimary ? " · main administrator" : ""}`;
+        if (isPrimary) {
+          const mfaStatus = admin.mfaEnabled
+            ? "authenticator set up"
+            : admin.mfaEnrollmentPending
+              ? "authenticator setup pending"
+              : "authenticator not set up";
+          details.textContent += ` · joined ${admin.joinedAt} · ${mfaStatus}`;
+        }
+        row.append(details);
+        if (isPrimary && !admin.isPrimary) {
+          const actions = document.createElement("span");
+          actions.className = "admin-actions";
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "secondary";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", () => {
+            const existingForm = row.querySelector(".admin-edit");
+            if (existingForm) {
+              existingForm.remove();
+              return;
+            }
+            const form = document.createElement("form");
+            form.className = "admin-edit";
+            const nameLabel = document.createElement("label");
+            nameLabel.textContent = "Name";
+            const nameInput = document.createElement("input");
+            nameInput.required = true;
+            nameInput.maxLength = 120;
+            nameInput.value = admin.name;
+            nameLabel.append(nameInput);
+            const emailLabel = document.createElement("label");
+            emailLabel.textContent = "Email";
+            const emailInput = document.createElement("input");
+            emailInput.type = "email";
+            emailInput.required = true;
+            emailInput.maxLength = 254;
+            emailInput.value = admin.email;
+            emailLabel.append(emailInput);
+            const save = document.createElement("button");
+            save.type = "submit";
+            save.textContent = "Save details";
+            form.append(nameLabel, emailLabel, save);
+            form.addEventListener("submit", async event => {
+              event.preventDefault();
+              try {
+                await request(`/api/business/admins/${encodeURIComponent(admin.id)}`, {
+                  method: "PUT",
+                  body: JSON.stringify({ name: nameInput.value, email: emailInput.value })
+                });
+                await load();
+              } catch (error) { message.textContent = error.message; }
+            });
+            row.append(form);
+          });
+          actions.append(edit);
+
+          const resetPassword = document.createElement("button");
+          resetPassword.type = "button";
+          resetPassword.className = "secondary";
+          resetPassword.textContent = "Reset password";
+          resetPassword.addEventListener("click", async () => {
+            if (!window.confirm(`Reset the password for ${admin.name}? A new password will be shown here once.`)) return;
+            try {
+              const result = await request(`/api/business/admins/${encodeURIComponent(admin.id)}/reset-password`, { method: "POST", body: "{}" });
+              $("#temporaryPassword").hidden = false;
+              $("#temporaryPassword").textContent = `New password for ${admin.name}: ${result.temporaryPassword}. Copy it now and share it privately; it cannot be viewed again.`;
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          actions.append(resetPassword);
+
+          const resetMfa = document.createElement("button");
+          resetMfa.type = "button";
+          resetMfa.className = "secondary";
+          resetMfa.textContent = "Reset MFA";
+          resetMfa.disabled = admin.mfaEnabled !== true && admin.mfaEnrollmentPending !== true;
+          resetMfa.addEventListener("click", async () => {
+            if (!window.confirm(`Reset the authenticator for ${admin.name}? They will enroll again at their next sign-in.`)) return;
+            try {
+              await request(`/api/business/admins/${encodeURIComponent(admin.id)}/reset-mfa`, { method: "POST", body: "{}" });
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          actions.append(resetMfa);
+
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "danger";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", async () => {
+            message.textContent = "";
+            try {
+              await request(`/api/business/admins/${encodeURIComponent(admin.id)}`, { method: "DELETE" });
+              await load();
+            } catch (error) { message.textContent = error.message; }
+          });
+          actions.append(remove);
+          row.append(actions);
+        }
+        list.append(row);
+      }
+    }
+
+    async function load() {
+      const status = await (await fetch("/api/business/status")).json();
+      if (status.error) { window.location.assign("/"); return; }
+      csrfToken = status.csrfToken;
+      isPrimary = status.isPrimaryAdmin;
+      $("#businessName").textContent = status.businessName;
+      $("#status").textContent = status.status;
+      $("#status").className = `badge ${status.status}`;
+      $("#statusText").textContent = descriptions[status.status] || "";
+      $("#statusNote").hidden = !status.note;
+      $("#statusNote").textContent = status.note ? `Note from the platform owner: ${status.note}` : "";
+      const membership = status.membership;
+      $("#membershipTier").textContent = membership.tierName;
+      $("#membershipStatus").textContent = membership.status;
+      $("#membershipStatus").className = `badge ${membership.status}`;
+      $("#membershipText").textContent = membershipDescriptions[membership.status] || "";
+      $("#membershipTierChoice").value = membership.tier;
+      const canManageMembership = isPrimary && status.status === "active" && membership.status !== "cancelled";
+      $("#membershipControls").hidden = !canManageMembership;
+      $("#changeTier").hidden = !canManageMembership;
+      $("#pauseMembership").hidden = !canManageMembership || membership.status !== "active";
+      $("#resumeMembership").hidden = !canManageMembership || membership.status !== "paused";
+      $("#cancelMembership").hidden = !canManageMembership;
+      $("#membershipTierChoice").disabled = !canManageMembership;
+      $("#openApp").hidden = status.status !== "active" || membership.status !== "active";
+      $("#adminSection").hidden = false;
+      $("#adminForm").hidden = !isPrimary;
+      const adminResult = await (await fetch("/api/business/admins")).json();
+      renderAdmins(adminResult.admins);
+    }
+
+    async function changeMembership(action, tier) {
+      const messages = {
+        change_tier: `Change the membership tier to ${tier}? The change takes effect immediately. Existing data remains, but new additions can be blocked if usage is above the selected plan limits. This app does not currently process membership payments.`,
+        pause: "Pause membership now? Scheduler access will stop immediately. Your data will be retained, and the main administrator can resume later. This app does not process billing.",
+        resume: "Resume membership and restore scheduler access now?",
+        cancel: "Cancel membership now? Scheduler access will stop immediately. Your business data will be retained, not deleted. Cancellation cannot be undone here; contact the platform owner to restore access. This app does not process billing."
+      };
+      if (!window.confirm(messages[action])) return;
+      message.textContent = "";
+      try {
+        await request("/api/business/membership", {
+          method: "POST",
+          body: JSON.stringify({ action, tier, confirmed: true })
+        });
+        await load();
+        message.className = "success";
+        message.textContent = {
+          change_tier: "Membership tier updated.",
+          pause: "Membership paused.",
+          resume: "Membership resumed.",
+          cancel: "Membership cancelled."
+        }[action];
+      } catch (error) {
+        message.className = "error";
+        message.textContent = error.message;
+      }
+    }
+
+    $("#changeTier").addEventListener("click", () => changeMembership("change_tier", $("#membershipTierChoice").value));
+    $("#pauseMembership").addEventListener("click", () => changeMembership("pause"));
+    $("#resumeMembership").addEventListener("click", () => changeMembership("resume"));
+    $("#cancelMembership").addEventListener("click", () => changeMembership("cancel"));
+
+    $("#adminForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      try {
+        await request("/api/business/admins", {
+          method: "POST",
+          body: JSON.stringify({
+            name: $("#adminName").value,
+            email: $("#adminEmail").value,
+            password: $("#adminPassword").value
+          })
+        });
+            event.target.reset();
+            await load();
+          } catch (error) { message.textContent = error.message; }
+    });
+
+    $("#signOut").addEventListener("click", async () => {
+      try {
+        await request("/api/tenant-auth/logout", { method: "POST", body: "{}" });
+        window.location.assign("/");
+      } catch (error) { message.textContent = error.message; }
+    });
+
+    load().catch(() => { message.textContent = "The status could not be loaded. Reload the page."; });
+  </script>
+</body>
+</html>
