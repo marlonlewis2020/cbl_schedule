@@ -3793,5 +3793,17 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         self.assertEqual(new_login.status_code, 200)
 
 
+class UserManualTests(unittest.TestCase):
+    def test_manual_files_are_current(self):
+        import build_user_manual
+
+        self.assertTrue(build_user_manual.DOCX_PATH.exists(), "Run python build_user_manual.py")
+        self.assertEqual(
+            build_user_manual.HTML_PATH.read_text(encoding="utf-8"),
+            build_user_manual.build_html(),
+            "docs/User-Manual.html is stale; update user_manual_content.py and run python build_user_manual.py",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

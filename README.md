@@ -259,6 +259,20 @@ remain Gold/Platinum. Tenant registration and membership management,
 manager/employee access, the employee portal, shift trades, payment, and
 Copilot automation remain separate implementation phases.
 
+## User manual
+
+The user manual is in `Schedule Creator\docs\User-Manual.html` and
+`Schedule Creator\docs\User-Manual.docx`. **Update it with every change that
+affects what users see or do.** Edit `Schedule Creator\user_manual_content.py`
+(the relevant section plus a new `REVISIONS` entry), then regenerate both files:
+
+```powershell
+python -m pip install -r requirements-docs.txt
+python build_user_manual.py
+```
+
+`UserManualTests` fails when the committed HTML does not match the content file.
+
 ## Data and tests
 
 In local development, accepted schedules, employee records, schedule locations,
