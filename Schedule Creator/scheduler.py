@@ -742,6 +742,21 @@ def initialize_database() -> None:
                 actor_email TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS attendance_reconciliation_audit_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                discrepancy_id TEXT NOT NULL,
+                direction TEXT NOT NULL CHECK (direction IN ('app_to_bamboohr', 'bamboohr_to_app')),
+                shift_date TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                before_json TEXT NOT NULL,
+                after_json TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'partial', 'failed')),
+                actor_id TEXT,
+                actor_email TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS attendance_score_overrides (
                 tenant_id TEXT NOT NULL,
                 employee_id TEXT NOT NULL,
@@ -1050,6 +1065,7 @@ def initialize_database() -> None:
             "attendance_time_entries",
             "attendance_shift_records",
             "attendance_shift_audit_events",
+            "attendance_reconciliation_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
         ):
@@ -1216,6 +1232,7 @@ def initialize_database() -> None:
                 "attendance_time_entries",
                 "attendance_shift_records",
                 "attendance_shift_audit_events",
+                "attendance_reconciliation_audit_events",
                 "attendance_score_overrides",
                 "attendance_score_audit_events",
             ):
@@ -1507,6 +1524,9 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
         attendance_time_entries = source_rows("attendance_time_entries")
         attendance_shift_records = source_rows("attendance_shift_records")
         attendance_shift_audit_events = source_rows("attendance_shift_audit_events")
+        attendance_reconciliation_audit_events = source_rows(
+            "attendance_reconciliation_audit_events"
+        )
         attendance_score_overrides = source_rows("attendance_score_overrides")
         attendance_score_audit_events = source_rows("attendance_score_audit_events")
 
@@ -1555,6 +1575,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             "attendance_time_entries",
             "attendance_shift_records",
             "attendance_shift_audit_events",
+            "attendance_reconciliation_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
         ):
@@ -1721,6 +1742,27 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                         row["actor_email"], row["created_at"],
                     )
                     for row in attendance_shift_audit_events
+                ],
+            )
+        if attendance_reconciliation_audit_events:
+            connection.executemany(
+                """
+                INSERT INTO attendance_reconciliation_audit_events
+                    (id, tenant_id, discrepancy_id, direction, shift_date,
+                     employee_id, reason, before_json, after_json, outcome,
+                     actor_id, actor_email, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                [
+                    (
+                        row["id"], DEFAULT_TENANT_ID, row["discrepancy_id"],
+                        row["direction"], row["shift_date"], row["employee_id"],
+                        row["reason"], row["before_json"], row["after_json"],
+                        row["outcome"], row.get("actor_id"), row.get("actor_email"),
+                        source_value(row, "created_at", datetime.now().isoformat()),
+                    )
+                    for row in attendance_reconciliation_audit_events
                 ],
             )
         if attendance_score_overrides:
@@ -3234,6 +3276,7 @@ def hub_delete_business(tenant_id: str):
             "attendance_time_entries",
             "attendance_shift_records",
             "attendance_shift_audit_events",
+            "attendance_reconciliation_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
         ):
@@ -5529,8 +5572,8 @@ DEFAULT_ATTENDANCE_SETTINGS = {
     "scorePeriodDays": 30,
 }
 ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE = (
-    "BambooHR shift reconciliation is unavailable because the existing-shift read "
-    "contract is unverified and the configured scheduling POST only adds shifts."
+    "BambooHR shift reconciliation is unavailable because the configured API key "
+    "or the mapped BambooHR schedules could not be verified."
 )
 
 
@@ -5938,8 +5981,7 @@ def attendance_payload(
         "settings": settings,
         "shiftSource": {
             "selected": attendance_shift_source(connection),
-            "bamboohrAvailable": False,
-            "bamboohrUnavailableReason": ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
+            "bamboohrAvailable": None,
             "unresolvedDiscrepancies": None,
         },
     }
@@ -5956,8 +5998,658 @@ def attendance_shift_source(connection: DatabaseConnection) -> str:
     if not row:
         return "app"
     if row[0] != "app":
+        if row[0] == "bamboohr":
+            return row[0]
         raise RuntimeError("Stored attendance shift source is invalid.")
     return row[0]
+
+
+def parse_bamboohr_scheduled_shifts(
+    payload: object,
+    employees_by_bamboo_id: dict[str, dict[str, object]],
+    locations_by_schedule_id: dict[str, dict[str, str]],
+) -> list[dict[str, object]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise AttendanceIntegrationError("BambooHR returned an invalid scheduled-shifts response.")
+    parsed = []
+    for item in payload["data"]:
+        if not isinstance(item, dict):
+            raise AttendanceIntegrationError("BambooHR returned an invalid scheduled shift.")
+        status = item.get("status")
+        if status not in {"planned", "published"} or item.get("deletedAt"):
+            continue
+        try:
+            shift_id = bamboo_identifier(item.get("id"), "scheduled shift ID")
+            schedule_id = bamboo_identifier(item.get("scheduleId"), "schedule ID")
+            start_text, end_text = item.get("start"), item.get("end")
+            timezone_name = item.get("timezone")
+            employee_values = item.get("employeeIds")
+            if (
+                not isinstance(start_text, str)
+                or not isinstance(end_text, str)
+                or not isinstance(timezone_name, str)
+                or not isinstance(employee_values, list)
+                or not employee_values
+            ):
+                raise ValueError
+            start = datetime.fromisoformat(start_text.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(end_text.replace("Z", "+00:00"))
+            ZoneInfo(timezone_name)
+            employee_ids = [
+                bamboo_identifier(value, "scheduled employee ID")
+                for value in employee_values
+            ]
+            if start.tzinfo is None or end.tzinfo is None or end <= start:
+                raise ValueError
+            location = locations_by_schedule_id.get(schedule_id)
+            if not location:
+                raise AttendanceIntegrationError(
+                    "BambooHR returned a shift for an unmapped schedule location."
+                )
+        except AttendanceIntegrationError:
+            raise
+        except (TypeError, ValueError, ZoneInfoNotFoundError) as error:
+            raise AttendanceIntegrationError(
+                "BambooHR returned a scheduled shift with invalid dates, time zone, or employee IDs."
+            ) from error
+        mapped_employees = [
+            employees_by_bamboo_id[employee_id]
+            for employee_id in employee_ids
+            if employee_id in employees_by_bamboo_id
+        ]
+        parsed.append(
+            {
+                "id": shift_id,
+                "scheduleId": schedule_id,
+                "status": status,
+                "color": item.get("color") if isinstance(item.get("color"), str) else "00FFAA",
+                "start": start.astimezone(timezone.utc).isoformat(),
+                "end": end.astimezone(timezone.utc).isoformat(),
+                "timezone": timezone_name,
+                "employeeIds": employee_ids,
+                "employees": mapped_employees,
+                "location": location["location"],
+                "scheduleName": location["name"],
+            }
+        )
+    return parsed
+
+
+def fetch_bamboohr_scheduled_shifts(
+    connection: DatabaseConnection, period_start: date, period_end: date
+) -> list[dict[str, object]]:
+    api_key = bamboohr_api_key()
+    if not api_key:
+        raise AttendanceIntegrationError("The BambooHR API key is not configured for this business.")
+    employee_rows = connection.execute(
+        """
+        SELECT employee_id, bamboohr_id, name, location, role
+        FROM employees
+        WHERE tenant_id = ? AND bamboohr_id IS NOT NULL AND bamboohr_id != ''
+        """,
+        (active_tenant_id(),),
+    ).fetchall()
+    employees_by_bamboo_id = {
+        str(row[1]): {
+            "employeeId": str(row[0]),
+            "bamboohrId": str(row[1]),
+            "name": str(row[2]),
+            "location": str(row[3]),
+            "role": str(row[4]),
+        }
+        for row in employee_rows
+        if re.fullmatch(r"[0-9]+", str(row[1])) is not None
+    }
+    if not employees_by_bamboo_id:
+        return []
+    location_rows = connection.execute(
+        """
+        SELECT bamboo_schedule_id, name, location
+        FROM schedule_locations WHERE tenant_id = ?
+        """,
+        (active_tenant_id(),),
+    ).fetchall()
+    locations_by_schedule_id = {
+        str(row[0]): {"name": str(row[1]), "location": str(row[2])}
+        for row in location_rows
+    }
+    local_start = datetime.combine(period_start, time.min, tzinfo=ATTENDANCE_TIMEZONE)
+    local_end = datetime.combine(period_end, time(23, 59, 59), tzinfo=ATTENDANCE_TIMEZONE)
+    start_text = local_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    end_text = local_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
+    all_shifts = []
+    bamboo_ids = sorted(employees_by_bamboo_id)
+    for offset in range(0, len(bamboo_ids), 50):
+        employee_batch = bamboo_ids[offset:offset + 50]
+        page = 1
+        expected_total = None
+        while expected_total is None or (page - 1) * 1000 < expected_total:
+            params = urlencode(
+                {
+                    "start": start_text,
+                    "end": end_text,
+                    "employeeIds": ",".join(employee_batch),
+                    "statuses": "planned,published",
+                    "page": page,
+                    "pageSize": 1000,
+                }
+            ).replace("%2C", ",")
+            outbound = Request(
+                f"{bamboohr_endpoint('scheduling/shifts')}?{params}",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Basic {authorization}",
+                },
+                method="GET",
+            )
+            try:
+                with urlopen(outbound, timeout=30) as response:
+                    raw_data = response.read(10_000_001)
+                if len(raw_data) > 10_000_000:
+                    raise AttendanceIntegrationError(
+                        "BambooHR scheduled-shifts response exceeds the allowed size."
+                    )
+                response_payload = json.loads(raw_data)
+            except HTTPError as error:
+                raise AttendanceIntegrationError(
+                    f"BambooHR scheduled-shifts request failed with HTTP {error.code}."
+                ) from error
+            except (URLError, TimeoutError, OSError) as error:
+                raise AttendanceIntegrationError(
+                    "The app server could not reach BambooHR for scheduled shifts."
+                ) from error
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise AttendanceIntegrationError(
+                    "BambooHR returned invalid scheduled-shifts data."
+                ) from error
+            meta = response_payload.get("meta") if isinstance(response_payload, dict) else None
+            if not isinstance(meta, dict):
+                raise AttendanceIntegrationError(
+                    "BambooHR scheduled-shifts response omitted pagination metadata."
+                )
+            total_items = meta.get("totalItems")
+            returned_page = meta.get("page")
+            page_size = meta.get("pageSize")
+            if (
+                isinstance(total_items, bool)
+                or not isinstance(total_items, int)
+                or total_items < 0
+                or returned_page != page
+                or isinstance(page_size, bool)
+                or not isinstance(page_size, int)
+                or page_size < 1
+            ):
+                raise AttendanceIntegrationError(
+                    "BambooHR returned invalid scheduled-shifts pagination metadata."
+                )
+            expected_total = total_items
+            all_shifts.extend(
+                parse_bamboohr_scheduled_shifts(
+                    response_payload,
+                    employees_by_bamboo_id,
+                    locations_by_schedule_id,
+                )
+            )
+            if page * page_size >= expected_total:
+                break
+            if page >= 1000:
+                raise AttendanceIntegrationError(
+                    "BambooHR scheduled-shifts response exceeded the page limit."
+                )
+            page += 1
+    start_utc, end_utc = local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+    return [
+        shift for shift in all_shifts
+        if start_utc <= datetime.fromisoformat(str(shift["start"])) <= end_utc
+    ]
+
+
+def accepted_app_shift_inventory(
+    connection: DatabaseConnection, period_start: date, period_end: date
+) -> list[dict[str, object]]:
+    tenant_id = active_tenant_id()
+    employees = {
+        str(row[0]): {
+            "bamboohrId": str(row[1]) if row[1] is not None else "",
+            "name": str(row[2]),
+            "location": str(row[3]),
+            "role": str(row[4]),
+            "scheduleLocationId": row[5],
+        }
+        for row in connection.execute(
+            """
+            SELECT employee_id, bamboohr_id, name, location, role, schedule_location_id
+            FROM employees WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        )
+    }
+    locations = {
+        str(row[0]): {"bambooScheduleId": str(row[1]), "name": str(row[2]), "location": str(row[3])}
+        for row in connection.execute(
+            """
+            SELECT id, bamboo_schedule_id, name, location
+            FROM schedule_locations WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        )
+    }
+    rows = connection.execute(
+        """
+        SELECT run_id, payload FROM accepted_schedules
+        WHERE tenant_id = ? AND week_start >= ? AND week_start <= ?
+        """,
+        (tenant_id, (period_start - timedelta(days=6)).isoformat(), period_end.isoformat()),
+    ).fetchall()
+    shifts = []
+    for run_id, encoded in rows:
+        try:
+            schedule = json.loads(encoded)
+            week_start = date.fromisoformat(schedule["start"])
+            span = float(schedule.get("controls", {}).get("span", 8))
+            if not 0 < span <= 24 or not isinstance(schedule.get("employees"), list):
+                raise ValueError
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"Accepted schedule {run_id} has invalid reconciliation data.") from error
+        for assigned in schedule["employees"]:
+            if not isinstance(assigned, dict) or not isinstance(assigned.get("slots"), list):
+                raise RuntimeError(f"Accepted schedule {run_id} has invalid employee assignments.")
+            employee_id = str(assigned.get("id", ""))
+            employee = employees.get(employee_id)
+            if not employee:
+                continue
+            bamboohr_id = employee["bamboohrId"] or str(assigned.get("bamboohrId") or "")
+            location_id = assigned.get("scheduleLocationId") or employee["scheduleLocationId"]
+            location = locations.get(str(location_id)) if location_id else None
+            if not bamboohr_id or not location:
+                continue
+            for day_index, slot in enumerate(assigned["slots"][:7]):
+                if slot is None:
+                    continue
+                shift_date = week_start + timedelta(days=day_index)
+                if not period_start <= shift_date <= period_end:
+                    continue
+                start = schedule_shift_datetime(shift_date, slot)
+                end = start + timedelta(hours=span)
+                shifts.append(
+                    {
+                        "runId": str(run_id),
+                        "employeeId": employee_id,
+                        "bamboohrId": bamboohr_id,
+                        "name": str(assigned.get("name") or employee["name"]),
+                        "location": str(assigned.get("location") or location["location"]),
+                        "role": str(assigned.get("role") or employee["role"]),
+                        "scheduleId": location["bambooScheduleId"],
+                        "date": shift_date.isoformat(),
+                        "day": day_index,
+                        "startHour": float(slot),
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                    }
+                )
+    return shifts
+
+
+def attendance_shift_discrepancies(
+    connection: DatabaseConnection,
+    period_start: date,
+    period_end: date,
+    bamboo_shifts: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    app_shifts = accepted_app_shift_inventory(connection, period_start, period_end)
+    app_by_employee_day: dict[tuple[str, str], list[dict[str, object]]] = {}
+    bamboo_by_employee_day: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for shift in app_shifts:
+        app_by_employee_day.setdefault((str(shift["employeeId"]), str(shift["date"])), []).append(shift)
+    for shift in bamboo_shifts:
+        local_start = datetime.fromisoformat(str(shift["start"])).astimezone(ATTENDANCE_TIMEZONE)
+        shift_date = local_start.date().isoformat()
+        if not period_start <= local_start.date() <= period_end:
+            continue
+        for employee in shift["employees"]:
+            bamboo_by_employee_day.setdefault(
+                (str(employee["employeeId"]), shift_date), []
+            ).append(shift | {"employee": employee})
+
+    def signature(shift: dict[str, object]) -> tuple[str, str, str]:
+        start = datetime.fromisoformat(str(shift["start"])).astimezone(timezone.utc).isoformat()
+        end = datetime.fromisoformat(str(shift["end"])).astimezone(timezone.utc).isoformat()
+        return start, end, str(shift["location"])
+
+    discrepancies = []
+    keys = sorted(set(app_by_employee_day) | set(bamboo_by_employee_day))
+    for employee_id, shift_date in keys:
+        app_items = app_by_employee_day.get((employee_id, shift_date), [])
+        bamboo_items = bamboo_by_employee_day.get((employee_id, shift_date), [])
+        app_signatures = sorted(signature(shift) for shift in app_items)
+        bamboo_signatures = sorted(signature(shift) for shift in bamboo_items)
+        if app_signatures == bamboo_signatures:
+            continue
+        employee = (
+            bamboo_items[0].get("employee")
+            if bamboo_items
+            else {
+                "name": app_items[0]["name"],
+                "location": app_items[0]["location"],
+                "role": app_items[0]["role"],
+            }
+        )
+        fingerprint = json.dumps(
+            {
+                "tenant": active_tenant_id(),
+                "employee": employee_id,
+                "date": shift_date,
+                "app": app_signatures,
+                "bamboohr": bamboo_signatures,
+            },
+            sort_keys=True,
+        )
+        can_apply_app = (
+            len(app_items) <= 1
+            and len(bamboo_items) <= 1
+            and all(len(item["employeeIds"]) == 1 for item in bamboo_items)
+        )
+        can_apply_bamboo = len(app_items) <= 1 and len(bamboo_items) <= 1
+        discrepancies.append(
+            {
+                "id": hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24],
+                "employeeId": employee_id,
+                "name": str(employee["name"]),
+                "date": shift_date,
+                "location": str(employee.get("location", "")),
+                "role": str(employee.get("role", "")),
+                "appShifts": [
+                    {
+                        "runId": shift["runId"],
+                        "bamboohrId": shift["bamboohrId"],
+                        "start": shift["start"],
+                        "end": shift["end"],
+                        "location": shift["location"],
+                        "role": shift["role"],
+                        "day": shift["day"],
+                        "startHour": shift["startHour"],
+                    }
+                    for shift in app_items
+                ],
+                "bamboohrShifts": [
+                    {
+                        "id": shift["id"],
+                        "scheduleId": shift["scheduleId"],
+                        "start": shift["start"],
+                        "end": shift["end"],
+                        "timezone": shift["timezone"],
+                        "status": shift["status"],
+                        "location": shift["location"],
+                        "employeeCount": len(shift["employeeIds"]),
+                    }
+                    for shift in bamboo_items
+                ],
+                "canApplyApp": can_apply_app,
+                "canApplyBambooHR": can_apply_bamboo,
+            }
+        )
+    return discrepancies
+
+
+def bamboo_shift_request(
+    api_key: str, method: str, path: str, payload: dict[str, object] | None = None
+) -> dict[str, object]:
+    url = bamboohr_endpoint(path)
+    outbound = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Basic "
+            + base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii"),
+            **({"Content-Type": "application/json"} if payload is not None else {}),
+        },
+        method=method,
+    )
+    try:
+        with urlopen(outbound, timeout=30) as response:
+            response.read(2048)
+            return {"success": 200 <= response.status < 300, "status": response.status}
+    except HTTPError as error:
+        error.read(2048)
+        return {"success": False, "status": error.code}
+    except (URLError, TimeoutError, OSError):
+        return {"success": False, "status": None, "outcome": "unknown"}
+
+
+def bamboo_payload_for_app_shift(
+    connection: DatabaseConnection, app_shift: dict[str, object]
+) -> dict[str, object]:
+    row = connection.execute(
+        """
+        SELECT payload FROM accepted_schedules
+        WHERE tenant_id = ? AND run_id = ?
+        """,
+        (active_tenant_id(), app_shift["runId"]),
+    ).fetchone()
+    if not row:
+        raise ValueError("The accepted app shift no longer exists.")
+    schedule = json.loads(row[0])
+    payloads = bamboo_payloads(
+        connection,
+        [
+            {
+                "runId": app_shift["runId"],
+                "day": app_shift["day"],
+                "start": app_shift["startHour"],
+                "schedule": schedule,
+            }
+        ],
+    )
+    bamboo_id = str(app_shift["bamboohrId"])
+    matching = [
+        item for item in payloads
+        if bamboo_id in {str(value) for value in item["employeeIds"]}
+    ]
+    if len(matching) != 1:
+        raise ValueError("The app shift could not be mapped to one BambooHR shift payload.")
+    shift_payload = matching[0]
+    return {
+        key: shift_payload[key]
+        for key in ("scheduleId", "status", "color", "timezone", "start", "end")
+    } | {
+        "employeeIds": [
+            value for value in shift_payload["employeeIds"] if str(value) == bamboo_id
+        ]
+    }
+
+
+def write_reconciliation_audit(
+    connection: DatabaseConnection,
+    *,
+    discrepancy: dict[str, object],
+    direction: str,
+    reason: str,
+    before: object,
+    after: object,
+    outcome: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO attendance_reconciliation_audit_events
+            (id, tenant_id, discrepancy_id, direction, shift_date, employee_id,
+             reason, before_json, after_json, outcome, actor_id, actor_email)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            secrets.token_urlsafe(18),
+            active_tenant_id(),
+            discrepancy["id"],
+            direction,
+            discrepancy["date"],
+            discrepancy["employeeId"],
+            reason,
+            json.dumps(before, ensure_ascii=False, sort_keys=True),
+            json.dumps(after, ensure_ascii=False, sort_keys=True),
+            outcome,
+            session.get("tenant_admin_id"),
+            session.get("tenant_admin_email"),
+        ),
+    )
+
+
+def apply_bamboo_shift_to_app(
+    connection: DatabaseConnection,
+    discrepancy: dict[str, object],
+    bamboo_shift: dict[str, object] | None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    app_shifts = discrepancy["appShifts"]
+    if len(app_shifts) > 1:
+        raise ValueError("This employee has multiple app shifts on the same day; resolve them manually.")
+    app_shift = app_shifts[0] if app_shifts else None
+    employee_id = str(discrepancy["employeeId"])
+    shift_date = date.fromisoformat(str(discrepancy["date"]))
+    bamboo_start = bamboo_end = None
+    bamboo_schedule = None
+    if bamboo_shift:
+        bamboo_start = datetime.fromisoformat(str(bamboo_shift["start"])).astimezone(
+            ATTENDANCE_TIMEZONE
+        )
+        bamboo_end = datetime.fromisoformat(str(bamboo_shift["end"])).astimezone(
+            ATTENDANCE_TIMEZONE
+        )
+        if bamboo_start.date() != shift_date:
+            raise ValueError("The BambooHR shift no longer matches the discrepancy date.")
+        bamboo_schedule = connection.execute(
+            """
+            SELECT id, location, role_group
+            FROM schedule_locations
+            WHERE tenant_id = ? AND bamboo_schedule_id = ?
+            """,
+            (active_tenant_id(), bamboo_shift["scheduleId"]),
+        ).fetchone()
+        if not bamboo_schedule:
+            raise ValueError("The BambooHR schedule location is no longer mapped.")
+    if app_shift:
+        row = connection.execute(
+            """
+            SELECT payload FROM accepted_schedules
+            WHERE tenant_id = ? AND run_id = ?
+            """,
+            (active_tenant_id(), app_shift["runId"]),
+        ).fetchone()
+        if not row:
+            raise ValueError("The accepted app shift no longer exists.")
+        schedule = json.loads(row[0])
+    else:
+        week_start = (shift_date - timedelta(days=shift_date.weekday())).isoformat()
+        candidates = connection.execute(
+            """
+            SELECT run_id, payload FROM accepted_schedules
+            WHERE tenant_id = ? AND week_start = ?
+            """,
+            (active_tenant_id(), week_start),
+        ).fetchall()
+        schedule = None
+        run_id = None
+        for candidate_run_id, encoded in candidates:
+            candidate = json.loads(encoded)
+            if (
+                bamboo_schedule
+                and candidate.get("location") == bamboo_schedule[1]
+                and candidate.get("role") == discrepancy["role"]
+            ):
+                schedule = candidate
+                run_id = candidate_run_id
+                break
+        if schedule is None:
+            raise ValueError(
+                "No accepted schedule exists for this BambooHR shift's week, location, and role."
+            )
+        app_shift = {"runId": run_id, "day": shift_date.weekday()}
+    before_schedule = json.loads(json.dumps(schedule))
+    day_index = shift_date.weekday()
+    assignments = schedule.get("employees")
+    if not isinstance(assignments, list):
+        raise ValueError("The accepted schedule has invalid employee assignments.")
+    assigned = next(
+        (
+            item for item in assignments
+            if isinstance(item, dict) and str(item.get("id", "")) == employee_id
+        ),
+        None,
+    )
+    employee_row = connection.execute(
+        """
+        SELECT bamboohr_id, name, location, role, schedule_location_id
+        FROM employees WHERE tenant_id = ? AND employee_id = ?
+        """,
+        (active_tenant_id(), employee_id),
+    ).fetchone()
+    if not employee_row:
+        raise ValueError("The employee mapping no longer exists.")
+    if bamboo_shift:
+        if (
+            bamboo_schedule[0] != employee_row[4]
+            or bamboo_schedule[1] != employee_row[2]
+            or not role_matches_schedule_group(str(employee_row[3]), str(bamboo_schedule[2]))
+        ):
+            raise ValueError(
+                "The BambooHR shift's location or role conflicts with the employee's app mapping."
+            )
+        duration = (bamboo_end - bamboo_start).total_seconds() / 3600
+        span = float(schedule.get("controls", {}).get("span", 8))
+        if not math.isclose(duration, span, abs_tol=1 / 60):
+            raise ValueError(
+                "The BambooHR shift duration differs from the accepted schedule's shared shift duration."
+            )
+    if assigned is None:
+        if not bamboo_shift:
+            raise ValueError("The app shift assignment could not be found.")
+        slots = [None] * 7
+        assigned = {
+            "id": employee_id,
+            "name": str(employee_row[1]),
+            "bamboohrId": str(employee_row[0] or ""),
+            "location": str(employee_row[2]),
+            "role": str(employee_row[3]),
+            "slots": slots,
+        }
+        assignments.append(assigned)
+    slots = assigned.get("slots")
+    if not isinstance(slots, list) or len(slots) < 7:
+        raise ValueError("The accepted app shift has invalid day assignments.")
+    while len(slots) < 7:
+        slots.append(None)
+    if bamboo_shift:
+        slots[day_index] = bamboo_start.hour + bamboo_start.minute / 60
+    else:
+        slots[day_index] = None
+    encoded = json.dumps(schedule, ensure_ascii=False, separators=(",", ":"))
+    updated = connection.execute(
+        """
+        UPDATE accepted_schedules
+        SET week_start = ?, location = ?, role = ?, payload = ?
+        WHERE tenant_id = ? AND run_id = ?
+        """,
+        (
+            schedule["start"], schedule["location"], schedule["role"], encoded,
+            active_tenant_id(), app_shift["runId"],
+        ),
+    )
+    if updated.rowcount != 1:
+        raise ValueError("The accepted schedule changed before the reconciliation could be saved.")
+    before = {
+        "runId": app_shift["runId"],
+        "employeeId": employee_id,
+        "date": shift_date.isoformat(),
+        "acceptedSchedule": before_schedule,
+    }
+    after = {
+        "runId": app_shift["runId"],
+        "employeeId": employee_id,
+        "date": shift_date.isoformat(),
+        "startHour": slots[day_index],
+        "bambooShiftId": bamboo_shift["id"] if bamboo_shift else None,
+        "acceptedSchedule": schedule,
+    }
+    return before, after
 
 
 def sync_attendance_data(
@@ -5968,6 +6660,7 @@ def sync_attendance_data(
     now: datetime | None = None,
     period_start: date | None = None,
     period_end: date | None = None,
+    bamboo_shifts: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     now = now or datetime.now(ATTENDANCE_TIMEZONE)
     today = now.date()
@@ -6048,17 +6741,65 @@ def sync_attendance_data(
     }
     active_keys: set[tuple[str, str, str]] = set()
     changed = 0
-    scheduled = connection.execute(
-        """
-        SELECT run_id, payload FROM accepted_schedules
-        WHERE tenant_id = ? AND week_start >= ? AND week_start <= ?
-        """,
-        (
-            tenant_id,
-            (api_start - timedelta(days=6)).isoformat(),
-            history_end.isoformat(),
-        ),
-    ).fetchall()
+    if attendance_shift_source(connection) == "bamboohr":
+        if bamboo_shifts is None:
+            raise RuntimeError("BambooHR shifts must be fetched before attendance can be synced.")
+        scheduled = []
+        for bamboo_shift in bamboo_shifts:
+            shift_start = datetime.fromisoformat(str(bamboo_shift["start"])).astimezone(
+                ATTENDANCE_TIMEZONE
+            )
+            shift_end = datetime.fromisoformat(str(bamboo_shift["end"])).astimezone(
+                ATTENDANCE_TIMEZONE
+            )
+            if not history_start <= shift_start.date() <= history_end:
+                continue
+            shift_week_start = shift_start.date() - timedelta(days=shift_start.weekday())
+            day_index = shift_start.weekday()
+            duration = (shift_end - shift_start).total_seconds() / 3600
+            if not 0 < duration <= 24:
+                raise AttendanceIntegrationError(
+                    "BambooHR returned a shift with an unsupported duration."
+                )
+            shift_hour = shift_start.hour + shift_start.minute / 60
+            scheduled_employees = []
+            for employee in bamboo_shift["employees"]:
+                slots = [None] * 7
+                slots[day_index] = shift_hour
+                scheduled_employees.append(
+                    {
+                        "id": employee["employeeId"],
+                        "name": employee["name"],
+                        "bamboohrId": employee["bamboohrId"],
+                        "location": employee["location"],
+                        "role": employee["role"],
+                        "slots": slots,
+                    }
+                )
+            if not scheduled_employees:
+                continue
+            schedule = {
+                "id": f"bamboohr:{bamboo_shift['id']}",
+                "start": shift_week_start.isoformat(),
+                "end": (shift_week_start + timedelta(days=6)).isoformat(),
+                "location": bamboo_shift["location"],
+                "role": scheduled_employees[0]["role"],
+                "controls": {"span": duration, "hours": duration},
+                "employees": scheduled_employees,
+            }
+            scheduled.append((schedule["id"], json.dumps(schedule)))
+    else:
+        scheduled = connection.execute(
+            """
+            SELECT run_id, payload FROM accepted_schedules
+            WHERE tenant_id = ? AND week_start >= ? AND week_start <= ?
+            """,
+            (
+                tenant_id,
+                (api_start - timedelta(days=6)).isoformat(),
+                history_end.isoformat(),
+            ),
+        ).fetchall()
     for run_id, encoded in scheduled:
         try:
             schedule = json.loads(encoded)
@@ -6359,14 +7100,30 @@ def get_attendance():
     if period_end and period_end > today:
         return jsonify(error="Attendance cannot be viewed for a future date."), 400
     with closing(database_connect()) as connection:
-        return jsonify(
-            attendance_payload(
-                connection,
-                selected_date=selected_date,
-                period_start=period_start,
-                period_end=period_end,
-            )
+        result = attendance_payload(
+            connection,
+            selected_date=selected_date,
+            period_start=period_start,
+            period_end=period_end,
         )
+        if attendance_shift_source(connection) == "bamboohr":
+            report_start = period_start or selected_date or date.fromisoformat(result["periodStart"])
+            report_end = period_end or selected_date or date.fromisoformat(result["periodEnd"])
+            try:
+                bamboo_shifts = fetch_bamboohr_scheduled_shifts(
+                    connection, report_start, report_end
+                )
+                discrepancies = attendance_shift_discrepancies(
+                    connection, report_start, report_end, bamboo_shifts
+                )
+            except AttendanceIntegrationError as error:
+                return jsonify(error=str(error)), 502
+            result["shiftSource"] = {
+                "selected": "bamboohr",
+                "bamboohrAvailable": True,
+                "unresolvedDiscrepancies": discrepancies,
+            }
+        return jsonify(result)
 
 
 @app.put("/api/attendance/settings")
@@ -6421,27 +7178,55 @@ def update_attendance_shift_source():
     source = payload.get("source") if isinstance(payload, dict) else None
     if not isinstance(source, str) or source not in {"app", "bamboohr"}:
         return jsonify(error="Choose either app or BambooHR shifts as the attendance source."), 400
+    if source == "bamboohr" and (not isinstance(payload, dict) or payload.get("confirmed") is not True):
+        return jsonify(error="Explicit confirmation is required before switching to BambooHR shifts."), 400
+    today = datetime.now(ATTENDANCE_TIMEZONE).date()
     if source == "bamboohr":
-        return jsonify(
-            error=ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
-            selected="app",
-            bamboohrAvailable=False,
-        ), 503
+        start_text, end_text = payload.get("start"), payload.get("end")
+        try:
+            if not isinstance(start_text, str) or not isinstance(end_text, str):
+                raise ValueError
+            period_start = date.fromisoformat(start_text)
+            period_end = date.fromisoformat(end_text)
+            if (
+                period_start.isoformat() != start_text
+                or period_end.isoformat() != end_text
+                or period_end < period_start
+                or period_end > today
+                or (period_end - period_start).days > 363
+            ):
+                raise ValueError
+        except ValueError:
+            return jsonify(
+                error="Provide a valid attendance period of up to 365 inclusive days before switching sources."
+            ), 400
+        with closing(database_connect()) as connection:
+            try:
+                bamboo_shifts = fetch_bamboohr_scheduled_shifts(
+                    connection, period_start, period_end
+                )
+                discrepancies = attendance_shift_discrepancies(
+                    connection, period_start, period_end, bamboo_shifts
+                )
+            except AttendanceIntegrationError as error:
+                return jsonify(error=str(error), selected=attendance_shift_source(connection)), 502
     with closing(database_connect()) as connection, connection:
         connection.execute(
             """
             INSERT INTO application_settings (setting_key, setting_value, tenant_id)
-            VALUES ('attendance_shift_source', 'app', ?)
+            VALUES ('attendance_shift_source', ?, ?)
             ON CONFLICT (tenant_id, setting_key)
             DO UPDATE SET setting_value = excluded.setting_value
             """,
-            (active_tenant_id(),),
+            (source, active_tenant_id()),
         )
-    return jsonify(
-        selected="app",
-        bamboohrAvailable=False,
-        bamboohrUnavailableReason=ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
-    )
+    if source == "bamboohr":
+        return jsonify(
+            selected=source,
+            bamboohrAvailable=True,
+            unresolvedDiscrepancies=discrepancies,
+        )
+    return jsonify(selected=source, bamboohrAvailable=None, unresolvedDiscrepancies=None)
 
 
 @app.post("/api/attendance/sync")
@@ -6453,6 +7238,7 @@ def sync_attendance():
         return jsonify(error="Attendance sync options must be an object."), 400
     with closing(database_connect()) as connection:
         settings = attendance_settings(connection)
+        source = attendance_shift_source(connection)
     now = datetime.now(ATTENDANCE_TIMEZONE)
     today = now.date()
     start_text = payload.get("start") if payload else None
@@ -6498,6 +7284,15 @@ def sync_attendance():
         )
         clock_entries = parse_bamboohr_clock_entries(clock_data)
         approved_time_off = parse_bamboohr_time_off(time_off_data)
+        bamboo_shifts = None
+        if source == "bamboohr":
+            with closing(database_connect()) as connection:
+                bamboo_shifts = fetch_bamboohr_scheduled_shifts(
+                    connection, history_start, history_end
+                )
+                discrepancies = attendance_shift_discrepancies(
+                    connection, history_start, history_end, bamboo_shifts
+                )
     except AttendanceIntegrationError as error:
         return jsonify(error=str(error)), 502
 
@@ -6509,8 +7304,191 @@ def sync_attendance():
             now=now,
             period_start=history_start,
             period_end=history_end,
+            bamboo_shifts=bamboo_shifts,
         )
+    if source == "bamboohr":
+        result["shiftSource"] = {
+            "selected": source,
+            "bamboohrAvailable": True,
+            "unresolvedDiscrepancies": discrepancies,
+        }
     return jsonify(result)
+
+
+@app.post("/api/attendance/reconciliation/resolve")
+def resolve_attendance_shift_discrepancy():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+        return jsonify(error="Explicit confirmation is required before resolving a shift discrepancy."), 400
+    discrepancy_id = payload.get("discrepancyId")
+    direction = payload.get("direction")
+    reason = payload.get("reason")
+    shift_date_text = payload.get("date")
+    if (
+        not isinstance(discrepancy_id, str)
+        or not re.fullmatch(r"[a-f0-9]{24}", discrepancy_id)
+        or not isinstance(direction, str)
+        or direction not in {"app_to_bamboohr", "bamboohr_to_app"}
+        or not isinstance(reason, str)
+        or not 1 <= len(reason.strip()) <= 500
+        or not isinstance(shift_date_text, str)
+    ):
+        return jsonify(error="Choose a valid discrepancy, direction, date, and reason."), 400
+    try:
+        shift_date = date.fromisoformat(shift_date_text)
+    except ValueError:
+        return jsonify(error="Provide a valid discrepancy date."), 400
+    if shift_date.isoformat() != shift_date_text or shift_date > datetime.now(ATTENDANCE_TIMEZONE).date():
+        return jsonify(error="Provide a valid, non-future discrepancy date."), 400
+
+    with closing(database_connect()) as connection:
+        if attendance_shift_source(connection) != "bamboohr":
+            return jsonify(error="Select BambooHR shifts before resolving a discrepancy."), 409
+        try:
+            bamboo_shifts = fetch_bamboohr_scheduled_shifts(
+                connection, shift_date, shift_date
+            )
+            discrepancies = attendance_shift_discrepancies(
+                connection, shift_date, shift_date, bamboo_shifts
+            )
+        except AttendanceIntegrationError as error:
+            return jsonify(error=str(error)), 502
+        discrepancy = next(
+            (item for item in discrepancies if item["id"] == discrepancy_id),
+            None,
+        )
+        if not discrepancy:
+            return jsonify(error="This discrepancy has changed. Refresh attendance and review it again."), 409
+        can_resolve = (
+            discrepancy["canApplyApp"]
+            if direction == "app_to_bamboohr"
+            else discrepancy["canApplyBambooHR"]
+        )
+        if not can_resolve:
+            return jsonify(
+                error="This discrepancy contains multiple shifts or employees and cannot be safely resolved as one action."
+            ), 409
+        bamboo_by_id = {str(item["id"]): item for item in bamboo_shifts}
+        current_bamboo = [
+            bamboo_by_id[str(item["id"])]
+            for item in discrepancy["bamboohrShifts"]
+            if str(item["id"]) in bamboo_by_id
+        ]
+        if len(current_bamboo) != len(discrepancy["bamboohrShifts"]):
+            return jsonify(error="A BambooHR shift changed while this discrepancy was being prepared."), 409
+
+    if direction == "bamboohr_to_app":
+        if len(current_bamboo) > 1:
+            return jsonify(error="This employee has multiple BambooHR shifts on the same day; resolve them manually."), 409
+        try:
+            with closing(database_connect()) as connection, connection:
+                before, after = apply_bamboo_shift_to_app(
+                    connection,
+                    discrepancy,
+                    current_bamboo[0] if current_bamboo else None,
+                )
+                write_reconciliation_audit(
+                    connection,
+                    discrepancy=discrepancy,
+                    direction=direction,
+                    reason=reason.strip(),
+                    before=before,
+                    after=after,
+                    outcome="succeeded",
+                )
+        except ValueError as error:
+            return jsonify(error=str(error)), 409
+        return jsonify(success=True, outcome="succeeded", updated=after)
+
+    api_key = bamboohr_api_key()
+    if not api_key:
+        return jsonify(error="The BambooHR API key is not configured for this business."), 503
+    if current_bamboo and len(current_bamboo[0]["employeeIds"]) != 1:
+        return jsonify(
+            error="This BambooHR shift is shared by multiple employees; replacing it individually could alter their schedules."
+        ), 409
+    operations = []
+    try:
+        with closing(database_connect()) as connection:
+            app_shifts = discrepancy["appShifts"]
+            replacement = (
+                bamboo_payload_for_app_shift(connection, app_shifts[0])
+                if app_shifts
+                else None
+            )
+    except (ValueError, KeyError, TypeError) as error:
+        return jsonify(error=str(error)), 409
+
+    if replacement:
+        operations.append(
+            {
+                "operation": "add",
+                **bamboo_shift_request(
+                    api_key, "POST", "scheduling/shifts", replacement
+                ),
+            }
+        )
+    if not replacement or (operations and operations[0]["success"]):
+        if current_bamboo:
+            shift_id = quote(str(current_bamboo[0]["id"]), safe="")
+            delete_path = (
+                f"scheduling/shifts/{shift_id}?"
+                + urlencode({"recurrenceEditOption": "instance"})
+            )
+            operations.append(
+                {
+                    "operation": "delete",
+                    **bamboo_shift_request(api_key, "DELETE", delete_path),
+                }
+            )
+    succeeded = bool(operations) and all(item["success"] for item in operations)
+    outcome = (
+        "succeeded"
+        if succeeded
+        else "partial"
+        if any(item["success"] for item in operations)
+        else "failed"
+    )
+    with closing(database_connect()) as connection, connection:
+        write_reconciliation_audit(
+            connection,
+            discrepancy=discrepancy,
+            direction=direction,
+            reason=reason.strip(),
+            before={
+                "appShifts": discrepancy["appShifts"],
+                "bamboohrShifts": discrepancy["bamboohrShifts"],
+            },
+            after={"requestedAppShift": replacement, "operations": operations},
+            outcome=outcome,
+        )
+    status_code = 200 if succeeded else 502
+    operation_summary = "; ".join(
+        f"{item['operation']}: "
+        + (
+            str(item["status"])
+            if item.get("status") is not None
+            else "outcome unknown"
+        )
+        for item in operations
+    )
+    return jsonify(
+        success=succeeded,
+        outcome=outcome,
+        operations=operations,
+        **(
+            {}
+            if succeeded
+            else {
+                "error": (
+                    f"BambooHR reconciliation {outcome} ({operation_summary}). "
+                    "Refresh and review the current shifts before retrying."
+                )
+            }
+        ),
+    ), status_code
 
 
 @app.post("/api/attendance/scores/<path:employee_id>/override")

@@ -89,6 +89,22 @@ CREATE TABLE IF NOT EXISTS tenant_audit_events (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS attendance_reconciliation_audit_events (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
+    discrepancy_id TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('app_to_bamboohr', 'bamboohr_to_app')),
+    shift_date TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'partial', 'failed')),
+    actor_id TEXT,
+    actor_email TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Identity (looked up before a tenant is known, so no row-level security) ----
 
 CREATE TABLE IF NOT EXISTS tenants (
@@ -198,6 +214,13 @@ ALTER TABLE tenant_audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_audit_events FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON tenant_audit_events;
 CREATE POLICY tenant_isolation ON tenant_audit_events
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE attendance_reconciliation_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_reconciliation_audit_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_reconciliation_audit_events;
+CREATE POLICY tenant_isolation ON attendance_reconciliation_audit_events
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 

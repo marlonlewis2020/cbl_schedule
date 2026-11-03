@@ -169,13 +169,22 @@ when the warning appears.
 Publishing accepted shifts sends changes to BambooHR. Review the selected
 shifts and payload preview, and explicitly confirm before posting.
 
-Attendance uses accepted shifts in this app as its shift source. BambooHR
-scheduled shifts cannot yet be selected: the existing integration's scheduling
-POST adds shifts, and the BambooHR API operation for reading existing shifts
-has not been verified. The Attendance page reports that comparison and
-discrepancy resolution are unavailable rather than showing an empty
-discrepancy list. The server rejects attempts to select BambooHR as the source,
-so reconciliation cannot create duplicate shifts or imply an update succeeded.
+Attendance defaults to accepted shifts in this app, but an administrator can
+select BambooHR scheduled shifts as the attendance shift source. BambooHR clock
+events remain the source of attendance evidence in either mode. When BambooHR
+is selected, the Attendance page reads its shifts, compares employee/date/time
+and mapped location with accepted app shifts, and lists unresolved
+discrepancies.
+
+Admins can explicitly confirm a reasoned resolution in either direction.
+Applying an app shift to BambooHR adds the replacement first and then deletes
+the prior single-employee shift; BambooHR does not make these two operations
+transactional, so a partial result is reported and audited. Applying BambooHR
+to the app updates the accepted schedule and audits full before/after schedule
+payloads. Stale discrepancies are rechecked before a write, and shared
+BambooHR shifts or unsupported app mappings/durations are blocked from unsafe
+individual resolution. These API operations were validated with mocked
+responses; no production schedule writes were made during implementation.
 
 ## Scheduling workflow
 

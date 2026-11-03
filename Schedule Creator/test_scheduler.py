@@ -8,6 +8,7 @@ import base64
 from contextlib import closing
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import MagicMock, patch
 
 import scheduler
@@ -2579,22 +2580,18 @@ class AttendanceAutomationTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as connection:
             return connection.execute(sql, parameters).fetchall()
 
-    def test_attendance_source_keeps_bamboohr_disabled_until_reconciliation_is_supported(self):
+    def test_attendance_source_requires_confirmation_and_live_read(self):
         response = self.client.get("/api/attendance")
         self.assertEqual(response.status_code, 200)
-        source = response.get_json()["shiftSource"]
-        self.assertEqual(source["selected"], "app")
-        self.assertFalse(source["bamboohrAvailable"])
-        self.assertIsNone(source["unresolvedDiscrepancies"])
-        self.assertIn("only adds shifts", source["bamboohrUnavailableReason"])
-
-        rejected = self.client.put(
+        self.assertEqual(response.get_json()["shiftSource"]["selected"], "app")
+        today = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date()
+        start = end = (today - scheduler.timedelta(days=1)).isoformat()
+        unconfirmed = self.client.put(
             "/api/attendance/source",
             headers={"X-CSRF-Token": "test-csrf-token"},
-            json={"source": "bamboohr"},
+            json={"source": "bamboohr", "start": start, "end": end},
         )
-        self.assertEqual(rejected.status_code, 503)
-        self.assertEqual(rejected.get_json()["selected"], "app")
+        self.assertEqual(unconfirmed.status_code, 400)
         self.assertEqual(
             self.query(
                 "SELECT setting_value FROM application_settings "
@@ -2604,19 +2601,27 @@ class AttendanceAutomationTests(unittest.TestCase):
             [],
         )
 
-        saved = self.client.put(
-            "/api/attendance/source",
-            headers={"X-CSRF-Token": "test-csrf-token"},
-            json={"source": "app"},
-        )
+        with patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[]) as fetch:
+            saved = self.client.put(
+                "/api/attendance/source",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "source": "bamboohr",
+                    "confirmed": True,
+                    "start": start,
+                    "end": end,
+                },
+            )
         self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.get_json()["selected"], "bamboohr")
+        self.assertEqual(saved.get_json()["unresolvedDiscrepancies"], [])
+        fetch.assert_called_once()
         self.assertEqual(
             self.query(
                 "SELECT setting_value FROM application_settings "
                 "WHERE tenant_id = ? AND setting_key = 'attendance_shift_source'",
                 (scheduler.DEFAULT_TENANT_ID,),
-            ),
-            [("app",)],
+            ), [("bamboohr",)],
         )
         invalid = self.client.put(
             "/api/attendance/source",
@@ -2624,6 +2629,460 @@ class AttendanceAutomationTests(unittest.TestCase):
             json={"source": "other"},
         )
         self.assertEqual(invalid.status_code, 400)
+        saved = self.client.put(
+            "/api/attendance/source",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"source": "app"},
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.get_json()["selected"], "app")
+
+    def seed_reconciliation_schedule(self):
+        shift_date = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date() - scheduler.timedelta(days=2)
+        week_start = shift_date - scheduler.timedelta(days=shift_date.weekday())
+        day_index = shift_date.weekday()
+        schedule_location_id = "reconciliation-location"
+        schedule = {
+            "id": "reconciliation-run",
+            "start": week_start.isoformat(),
+            "end": (week_start + scheduler.timedelta(days=6)).isoformat(),
+            "location": "Kingston",
+            "role": "Cashier",
+            "controls": {"span": 8, "hours": 8},
+            "employees": [
+                {
+                    "id": "attendance-111",
+                    "name": "Reconciliation employee",
+                    "bamboohrId": "111",
+                    "location": "Kingston",
+                    "role": "Cashier",
+                    "scheduleLocationId": schedule_location_id,
+                    "slots": [
+                        6 if index == day_index else None for index in range(7)
+                    ],
+                }
+            ],
+        }
+        local_start = scheduler.datetime.combine(
+            shift_date, scheduler.time(7), tzinfo=scheduler.ATTENDANCE_TIMEZONE
+        )
+        bamboo_shift = {
+            "id": "bamboo-shift-111",
+            "scheduleId": "bamboo-schedule-111",
+            "status": "published",
+            "start": local_start.astimezone(scheduler.timezone.utc).isoformat(),
+            "end": (local_start + scheduler.timedelta(hours=8)).astimezone(
+                scheduler.timezone.utc
+            ).isoformat(),
+            "timezone": "America/Jamaica",
+            "employeeIds": ["111"],
+            "employees": [
+                {
+                    "employeeId": "attendance-111",
+                    "bamboohrId": "111",
+                    "name": "Reconciliation employee",
+                    "location": "Kingston",
+                    "role": "Cashier",
+                }
+            ],
+            "location": "Kingston",
+            "scheduleName": "Kingston Cashiers",
+        }
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_locations
+                    (id, tenant_id, name, bamboo_schedule_id, location, role_group)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule_location_id,
+                    scheduler.DEFAULT_TENANT_ID,
+                    "Kingston Cashiers",
+                    "bamboo-schedule-111",
+                    "Kingston",
+                    "Cashier",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO employees
+                    (employee_id, tenant_id, bamboohr_id, name, location, role,
+                     active, schedule_location_id)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    "attendance-111",
+                    scheduler.DEFAULT_TENANT_ID,
+                    "111",
+                    "Reconciliation employee",
+                    "Kingston",
+                    "Cashier",
+                    schedule_location_id,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO accepted_schedules
+                    (run_id, tenant_id, week_start, location, role, payload)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule["id"],
+                    scheduler.DEFAULT_TENANT_ID,
+                    schedule["start"],
+                    schedule["location"],
+                    schedule["role"],
+                    json.dumps(schedule),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+                VALUES ('attendance_shift_source', 'bamboohr', ?)
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+            connection.execute(
+                """
+                INSERT INTO employees
+                    (employee_id, tenant_id, bamboohr_id, name, location, role,
+                     active, source_type, bamboohr_active)
+                VALUES (?, ?, ?, ?, ?, ?, 0, 'manual', 0)
+                """,
+                (
+                    "manual-placeholder",
+                    scheduler.DEFAULT_TENANT_ID,
+                    "MANUAL-test-only-id",
+                    "Manual Placeholder",
+                    "Kingston",
+                    "Cashier",
+                ),
+            )
+        return shift_date, schedule, bamboo_shift
+
+    @staticmethod
+    def mocked_bamboo_response(status):
+        class FakeResponse:
+            def __init__(self, response_status):
+                self.status = response_status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return b""
+
+        return FakeResponse(status)
+
+    def test_bamboohr_shift_read_parses_and_paginates_contract(self):
+        shift_date, _, bamboo_shift = self.seed_reconciliation_schedule()
+
+        class JsonResponse:
+            status = 200
+
+            def __init__(self, value):
+                self.value = json.dumps(value).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return self.value
+
+        item = {
+            "id": bamboo_shift["id"],
+            "scheduleId": bamboo_shift["scheduleId"],
+            "status": bamboo_shift["status"],
+            "color": "2e7918",
+            "start": bamboo_shift["start"].replace("+00:00", "Z"),
+            "end": bamboo_shift["end"].replace("+00:00", "Z"),
+            "timezone": bamboo_shift["timezone"],
+            "employeeIds": [111],
+            "deletedAt": None,
+        }
+        page_one = {
+            "data": [item],
+            "meta": {"totalItems": 1001, "page": 1, "pageSize": 1000},
+        }
+        page_two = {
+            "data": [],
+            "meta": {"totalItems": 1001, "page": 2, "pageSize": 1000},
+        }
+        calls_by_batch = {}
+
+        def response_for(request, **_):
+            query = parse_qs(urlsplit(request.full_url).query)
+            employee_batch = query["employeeIds"][0]
+            page_number = int(query["page"][0])
+            calls_by_batch.setdefault(employee_batch, []).append(page_number)
+            if "111" not in employee_batch.split(","):
+                return JsonResponse(
+                    {
+                        "data": [],
+                        "meta": {"totalItems": 0, "page": page_number, "pageSize": 1000},
+                    }
+                )
+            return JsonResponse(page_one if page_number == 1 else page_two)
+
+        with patch.object(
+            scheduler, "bamboohr_api_key", return_value="test-only-key"
+        ), patch("scheduler.urlopen", side_effect=response_for) as open_url:
+            with closing(scheduler.database_connect()) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id, tenant_id, bamboohr_id, name, location, role, active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        "attendance-112",
+                        scheduler.DEFAULT_TENANT_ID,
+                        "112",
+                        "Second Bamboo employee",
+                        "Kingston",
+                        "Cashier",
+                    ),
+                )
+                shifts = scheduler.fetch_bamboohr_scheduled_shifts(
+                    connection, shift_date, shift_date
+                )
+        target_batch = next(
+            batch for batch in calls_by_batch if "111" in batch.split(",")
+        )
+        self.assertEqual(calls_by_batch[target_batch], [1, 2])
+        first_query = next(
+            parse_qs(urlsplit(call.args[0].full_url).query)
+            for call in open_url.call_args_list
+            if "111" in parse_qs(urlsplit(call.args[0].full_url).query)["employeeIds"][0].split(",")
+        )
+        self.assertEqual(first_query["statuses"], ["planned,published"])
+        self.assertEqual(first_query["page"], ["1"])
+        queried_employee_ids = first_query["employeeIds"][0].split(",")
+        self.assertIn("111", queried_employee_ids)
+        self.assertIn("112", queried_employee_ids)
+        self.assertTrue(all(employee_id.isdigit() for employee_id in queried_employee_ids))
+        first_url = next(
+            call.args[0].full_url
+            for call in open_url.call_args_list
+            if "111" in parse_qs(urlsplit(call.args[0].full_url).query)["employeeIds"][0].split(",")
+        )
+        self.assertRegex(first_url, r"employeeIds=[0-9,]+")
+        self.assertIn("statuses=planned,published", first_url)
+        self.assertNotIn("%2C", first_url)
+        start_datetime = scheduler.datetime.combine(
+            shift_date, scheduler.time.min, tzinfo=scheduler.ATTENDANCE_TIMEZONE
+        ).astimezone(scheduler.timezone.utc)
+        end_datetime = scheduler.datetime.combine(
+            shift_date, scheduler.time(23, 59, 59), tzinfo=scheduler.ATTENDANCE_TIMEZONE
+        ).astimezone(scheduler.timezone.utc)
+        self.assertEqual(
+            first_query["start"],
+            [start_datetime.isoformat().replace("+00:00", "Z")],
+        )
+        self.assertEqual(
+            first_query["end"],
+            [end_datetime.isoformat().replace("+00:00", "Z")],
+        )
+        self.assertNotIn(".", first_query["end"][0])
+        self.assertEqual(shifts[0]["id"], "bamboo-shift-111")
+        self.assertEqual(shifts[0]["employees"][0]["employeeId"], "attendance-111")
+
+    def discrepancy_id(self, shift_date, bamboo_shift):
+        with closing(scheduler.database_connect()) as connection:
+            discrepancies = scheduler.attendance_shift_discrepancies(
+                connection, shift_date, shift_date, [bamboo_shift]
+            )
+        self.assertEqual(len(discrepancies), 1)
+        return discrepancies[0]["id"]
+
+    def test_reconciliation_adds_then_deletes_and_audits(self):
+        shift_date, _, bamboo_shift = self.seed_reconciliation_schedule()
+        discrepancy_id = self.discrepancy_id(shift_date, bamboo_shift)
+        with patch.object(
+            scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[bamboo_shift]
+        ), patch.object(
+            scheduler, "bamboohr_api_key", return_value="test-only-key"
+        ), patch(
+            "scheduler.urlopen",
+            side_effect=[
+                self.mocked_bamboo_response(201),
+                self.mocked_bamboo_response(204),
+            ],
+        ) as open_url:
+            response = self.client.post(
+                "/api/attendance/reconciliation/resolve",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "confirmed": True,
+                    "discrepancyId": discrepancy_id,
+                    "direction": "app_to_bamboohr",
+                    "date": shift_date.isoformat(),
+                    "reason": "Align BambooHR to the accepted schedule",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["success"])
+        self.assertEqual(
+            [call.args[0].method for call in open_url.call_args_list], ["POST", "DELETE"]
+        )
+        self.assertIn(
+            "recurrenceEditOption=instance",
+            open_url.call_args_list[1].args[0].full_url,
+        )
+        audit = self.query(
+            "SELECT direction, reason, before_json, after_json, outcome "
+            "FROM attendance_reconciliation_audit_events"
+        )
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0][0], "app_to_bamboohr")
+        self.assertEqual(audit[0][1], "Align BambooHR to the accepted schedule")
+        self.assertEqual(audit[0][4], "succeeded")
+
+    def test_reconciliation_rejects_unconfirmed_stale_and_shared_shifts(self):
+        shift_date, _, bamboo_shift = self.seed_reconciliation_schedule()
+        discrepancy_id = self.discrepancy_id(shift_date, bamboo_shift)
+        endpoint = "/api/attendance/reconciliation/resolve"
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        request_payload = {
+            "confirmed": True,
+            "discrepancyId": discrepancy_id,
+            "direction": "app_to_bamboohr",
+            "date": shift_date.isoformat(),
+            "reason": "Test safety checks",
+        }
+        shared = bamboo_shift | {"employeeIds": ["111", "222"]}
+        with patch.object(
+            scheduler,
+            "fetch_bamboohr_scheduled_shifts",
+            side_effect=[[bamboo_shift], [shared]],
+        ), patch("scheduler.urlopen") as open_url:
+            unconfirmed = self.client.post(
+                endpoint, headers=headers, json=request_payload | {"confirmed": False}
+            )
+            stale = self.client.post(
+                endpoint,
+                headers=headers,
+                json=request_payload | {"discrepancyId": "f" * 24},
+            )
+            unsafe = self.client.post(
+                endpoint,
+                headers=headers,
+                json=request_payload,
+            )
+        self.assertEqual(unconfirmed.status_code, 400)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(unsafe.status_code, 409)
+        open_url.assert_not_called()
+
+    def test_reconciliation_reports_partial_bamboohr_replacement(self):
+        shift_date, _, bamboo_shift = self.seed_reconciliation_schedule()
+        discrepancy_id = self.discrepancy_id(shift_date, bamboo_shift)
+        with patch.object(
+            scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[bamboo_shift]
+        ), patch.object(
+            scheduler, "bamboohr_api_key", return_value="test-only-key"
+        ), patch(
+            "scheduler.urlopen",
+            side_effect=[
+                self.mocked_bamboo_response(201),
+                self.mocked_bamboo_response(409),
+            ],
+        ):
+            response = self.client.post(
+                "/api/attendance/reconciliation/resolve",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "confirmed": True,
+                    "discrepancyId": discrepancy_id,
+                    "direction": "app_to_bamboohr",
+                    "date": shift_date.isoformat(),
+                    "reason": "Test partial outcome",
+                },
+            )
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["outcome"], "partial")
+        self.assertIn("delete: 409", response.get_json()["error"])
+        self.assertEqual(
+            self.query(
+                "SELECT outcome FROM attendance_reconciliation_audit_events"
+            ),
+            [("partial",)],
+        )
+
+    def test_reconciliation_does_not_delete_when_add_fails(self):
+        shift_date, _, bamboo_shift = self.seed_reconciliation_schedule()
+        discrepancy_id = self.discrepancy_id(shift_date, bamboo_shift)
+        with patch.object(
+            scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[bamboo_shift]
+        ), patch.object(
+            scheduler, "bamboohr_api_key", return_value="test-only-key"
+        ), patch(
+            "scheduler.urlopen",
+            return_value=self.mocked_bamboo_response(409),
+        ) as open_url:
+            response = self.client.post(
+                "/api/attendance/reconciliation/resolve",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "confirmed": True,
+                    "discrepancyId": discrepancy_id,
+                    "direction": "app_to_bamboohr",
+                    "date": shift_date.isoformat(),
+                    "reason": "Preserve the current shift after add rejection",
+                },
+            )
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["outcome"], "failed")
+        self.assertEqual(open_url.call_count, 1)
+        self.assertEqual(open_url.call_args.args[0].method, "POST")
+        self.assertEqual(
+            self.query(
+                "SELECT outcome FROM attendance_reconciliation_audit_events"
+            ),
+            [("failed",)],
+        )
+
+    def test_bamboohr_to_app_records_full_schedule_history(self):
+        shift_date, original_schedule, bamboo_shift = self.seed_reconciliation_schedule()
+        discrepancy_id = self.discrepancy_id(shift_date, bamboo_shift)
+        with patch.object(
+            scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[bamboo_shift]
+        ):
+            response = self.client.post(
+                "/api/attendance/reconciliation/resolve",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "confirmed": True,
+                    "discrepancyId": discrepancy_id,
+                    "direction": "bamboohr_to_app",
+                    "date": shift_date.isoformat(),
+                    "reason": "Use confirmed BambooHR timing",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["success"])
+        audit = self.query(
+            "SELECT before_json, after_json, outcome "
+            "FROM attendance_reconciliation_audit_events"
+        )[0]
+        before, after = json.loads(audit[0]), json.loads(audit[1])
+        self.assertEqual(before["acceptedSchedule"], original_schedule)
+        updated_schedule = json.loads(
+            self.query(
+                "SELECT payload FROM accepted_schedules WHERE run_id = ?",
+                ("reconciliation-run",),
+            )[0][0]
+        )
+        self.assertEqual(updated_schedule["employees"][0]["slots"][shift_date.weekday()], 7)
+        self.assertEqual(after["acceptedSchedule"], updated_schedule)
+        self.assertEqual(audit[2], "succeeded")
 
     def seed_attendance_schedule(self):
         employees = (

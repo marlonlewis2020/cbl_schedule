@@ -219,26 +219,29 @@ remain for production use:
   records were written during live validation. Before completion, backed up all
   15 change-request rows and 20 dependencies, then marked this request `done`.
 
-## Attendance shift-source selection and reconciliation (`attendance-shift-source-reconciliation`) — blocked
+## Attendance shift-source selection and reconciliation (`attendance-shift-source-reconciliation`) — complete
 
-- [x] Persist the selected attendance shift source per tenant; the app's
-  accepted schedules remain the active source.
-- [x] Add an Attendance-page source control that keeps BambooHR shifts
-  unavailable until the integration contract is verified. The API rejects
-  BambooHR source selection with an explicit unavailable response.
-- [x] Show that discrepancy status is unknown, not zero, while BambooHR
-  schedules cannot be read.
-- [x] Attendance automation regression tests: 8 passed; `git diff --check`
-  passed. The Python suite exercised the source API gate and app-source save.
-- [ ] Read BambooHR scheduled shifts and compare employee, date, start/end time,
-  and location. Blocked: a read-only `GET /api/v1/scheduling/shifts` probe
-  returned HTTP 422 (“Invalid data provided”); no usable read contract is
-  established.
-- [ ] Resolve confirmed discrepancies in either direction with confirmation
-  and audit history. Blocked: the user confirmed the existing scheduling POST
-  only adds shifts; no safe update/delete operation has been verified.
-- No production schedule writes were made. Keep this request blocked until
-  BambooHR documents or confirms the read and update/delete operations.
+- [x] Persist the selected attendance shift source per tenant. Attendance
+  continues to use BambooHR clock events regardless of whether accepted app
+  shifts or BambooHR shifts are selected for the schedule source.
+- [x] Read paginated BambooHR scheduled shifts using the parameterized
+  `start`, `end`, `employeeIds`, `statuses`, `page`, and `pageSize` contract
+  supplied and confirmed by the user. Compare employee, date, start/end, and
+  mapped location, and show unresolved discrepancies whenever BambooHR is
+  selected.
+- [x] Require CSRF protection, explicit confirmation, and a reason for either
+  resolution direction. Re-read shifts and reject stale discrepancies before
+  writing; prevent individual replacement of shared BambooHR shifts and reject
+  unsupported app-schedule mappings/durations.
+- [x] For app-to-BambooHR reconciliation, add the accepted shift and then
+  delete the prior single-employee BambooHR shift using the confirmed
+  `recurrenceEditOption=instance` contract. Report and audit partial outcomes;
+  the two remote operations are not transactional.
+- [x] For BambooHR-to-app reconciliation, update the accepted schedule and
+  retain full before/after payloads in the tenant-scoped audit history.
+- [x] Focused attendance tests cover source confirmation, read parsing and
+  pagination, both resolution directions, and mocked partial BambooHR writes.
+  No production schedule writes were made during implementation.
 
 ## Test evidence and handoff
 

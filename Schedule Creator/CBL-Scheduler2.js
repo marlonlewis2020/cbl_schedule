@@ -674,7 +674,7 @@ function settingsPage(){
     return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
 }
 function attendancePage(){
-    let data=attendanceData,settings=data?.settings||{latenessToleranceMinutes:15,scorePeriodDays:30},selectedDate=data?.date||attendanceSelectedDate,currentDate=data?.currentDate||selectedDate,sourceInfo=data?.shiftSource||{selected:'app',bamboohrUnavailableReason:'BambooHR schedule reads and replacement behavior have not been verified.',unresolvedDiscrepancies:null};
+    let data=attendanceData,settings=data?.settings||{latenessToleranceMinutes:15,scorePeriodDays:30},selectedDate=data?.date||attendanceSelectedDate,currentDate=data?.currentDate||selectedDate,sourceInfo=data?.shiftSource||{selected:'app',unresolvedDiscrepancies:null};
     let allShifts=data?.shifts||[],allScores=(data?.scores||[]).filter(item=>item.active);
     let locations=[...new Set([...allShifts,...allScores].map(item=>item.location).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
     let roles=[...new Set([...allShifts,...allScores].map(item=>item.role).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
@@ -696,15 +696,29 @@ function attendancePage(){
     if(summary.expected)summary.attendancePercent=summary.clockedIn*100/summary.expected;
     let shiftRows=shifts.length?shifts.map(item=>`<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${esc(new Date(item.shiftStart).toLocaleTimeString())}</td><td>${item.clockIn?esc(new Date(item.clockIn).toLocaleTimeString()):'—'}</td><td>${badge(item.status,item.status==='absent'?'bad':item.status==='late'?'warn':item.status==='attended'?'good':'')}</td><td>${esc(item.reason||'')}</td><td><button type="button" data-action="editAttendanceShift" data-run-id="${esc(item.runId)}" data-employee-id="${esc(item.employeeId)}" data-shift-date="${esc(item.date)}" data-status="${esc(item.status)}" data-name="${esc(item.name)}">Correct</button></td></tr>`).join(''):(allShifts.length?'<tr><td colspan="9">No shifts match these filters.</td></tr>':'<tr><td colspan="9">No attendance records are available for this period.</td></tr>');
     let scoreRows=scores.map(item=>`<tr><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${item.attended} / ${item.scheduled}</td><td>${item.computedScore===null?'No data':f(item.computedScore,2)+'%'}</td><td>${item.manualOverride?badge('Manual override','warn'):badge(item.score===null?'No data':f(item.score,2)+'%')}</td><td><button type="button" data-action="editAttendanceScore" data-employee-id="${esc(item.employeeId)}" data-score="${item.score??''}" data-name="${esc(item.name)}" data-manual="${item.manualOverride?'true':'false'}">Set override</button></td></tr>`).join('');
+    let discrepancies=(sourceInfo.unresolvedDiscrepancies||[]).filter(matchesFilter);
+    let discrepancyRows=discrepancies.map(item=>{
+        let formatShift=shift=>esc(new Date(shift.start).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}))+'–'+esc(new Date(shift.end).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}))+' · '+esc(shift.location);
+        let appShifts=item.appShifts.map(formatShift).join('<br>')||'No accepted app shift';
+        let bambooShifts=item.bamboohrShifts.map(formatShift).join('<br>')||'No BambooHR shift';
+        return `<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.location)} · ${esc(item.role)}</small></td><td>${appShifts}</td><td>${bambooShifts}</td><td><div class="actions">${item.canApplyApp?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="app_to_bamboohr" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use app shift</button>`:'<span class="note">App→BambooHR unavailable</span>'}${item.canApplyBambooHR?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="bamboohr_to_app" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use BambooHR shift</button>`:'<span class="note">BambooHR→app unavailable</span>'}</div></td></tr>`
+    }).join('');
+    let sourceControl=panel('Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" ${sourceInfo.selected==='bamboohr'?'selected':''}>BambooHR shifts</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}. BambooHR clock events remain the source of attendance evidence.</p>`)+(sourceInfo.selected==='bamboohr'?panel('Unresolved BambooHR shift discrepancies',sourceInfo.bamboohrAvailable===true?(discrepancies.length?`<p>${discrepancies.length} unresolved difference${discrepancies.length===1?'':'s'} match the current filters. Differences are rechecked before each resolution.</p><div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Accepted app shift</th><th>BambooHR shift</th><th>Resolution</th></tr></thead><tbody>${discrepancyRows}</tbody></table></div>`:'<p>No unresolved shift discrepancies match the current filters.</p>'):'<p class="badtext">BambooHR shifts could not be checked. Refresh the attendance page before relying on this comparison.</p>'):'');
     return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+
         panel('BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
-        panel('Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" disabled>BambooHR shifts (unavailable)</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}.</p><p class="badtext">${esc(sourceInfo.bamboohrUnavailableReason||'BambooHR shift comparison is unavailable.')}</p><p class="note">Discrepancies have not been checked. The configured BambooHR scheduling POST only adds shifts, and the existing-shift read API is not verified. BambooHR source selection and reconciliation remain disabled to prevent duplicate or unintended schedule changes. BambooHR clock events continue to be used for attendance.</p>`)+
+        sourceControl+
         panel('Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
         panel('Attendance rules',`<div class="formgrid"><label>Lateness tolerance · minutes<input id="attendanceTolerance" type="number" min="0" max="120" step="1" value="${settings.latenessToleranceMinutes}"></label><label>Attendance score period · days<input id="attendancePeriod" type="number" min="30" max="45" step="1" value="${settings.scorePeriodDays}"></label></div><div class="actions"><button type="button" class="primary" data-action="saveAttendanceSettings">Save attendance rules</button></div><p class="note">Clock entries count as attendance evidence even if they are awaiting BambooHR approval. Approved leave is excluded from absence classification and the score denominator.</p>`)+
         stats([['Expected shifts',f(summary.expected),'Accepted shifts in selected period'],['Clocked in',f(summary.clockedIn),'Includes late arrivals'],['Attendance',summary.attendancePercent===null?'—':f(summary.attendancePercent,2)+'%','Clocked in ÷ expected'],['Late / absent',f(summary.late)+' / '+f(summary.absent),'Exceptions in selected period'],['Approved leave',f(summary.approvedLeave),'Excluded from attendance rate']])+
         panel(`Attendance · ${esc(data?.periodStart||selectedDate||'')} to ${esc(data?.periodEnd||selectedDate||'')}`,`<div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Location</th><th>Role</th><th>Shift start</th><th>Clock-in</th><th>Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody>${shiftRows}</tbody></table></div>`)+
         panel(`Attendance scores · selected period`,scores.length?`<div class="tablewrap"><table><thead><tr><th>Employee</th><th>Location</th><th>Role</th><th>Attended / scheduled</th><th>Calculated</th><th>Effective</th><th>Actions</th></tr></thead><tbody>${scoreRows}</tbody></table></div>`:(allScores.length?'<p>No active employees match these filters.</p>':'<p>No active employees are available.</p>'))+
-        '<dialog id="attendanceOverrideDialog" class="wide-dialog"></dialog>'
+        '<dialog id="attendanceOverrideDialog" class="wide-dialog"></dialog><dialog id="attendanceReconciliationDialog" class="wide-dialog"></dialog>'
+}
+function openAttendanceReconciliationDialog(button){
+    let direction=button.dataset.direction,copy=direction==='app_to_bamboohr'?'Replace the BambooHR shift with the accepted app shift.':'Update the accepted app schedule to match BambooHR.';
+    let dialog=workflowDialog('attendanceReconciliationDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE SHIFT RECONCILIATION</div><h2>${esc(button.dataset.name)} · ${esc(button.dataset.date)}</h2></div><button type="button" data-dialog-close="attendanceReconciliationDialog" aria-label="Close">✕</button></div><p>${copy}</p>${direction==='app_to_bamboohr'?'<p class="note">BambooHR replacement is a separate add-then-delete operation. If only one step succeeds, the app will report the partial result; refresh before retrying.</p>':''}<label>Reason · required<textarea id="attendanceReconciliationReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" class="primary" data-action="resolveAttendanceDiscrepancy" data-discrepancy-id="${esc(button.dataset.discrepancyId)}" data-direction="${esc(direction)}" data-date="${esc(button.dataset.date)}">Confirm and resolve</button><button type="button" data-dialog-close="attendanceReconciliationDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
 }
 function openAttendanceScoreDialog(button){
     let item=(attendanceData?.scores||[]).find(score=>String(score.employeeId)===button.dataset.employeeId);
@@ -2248,9 +2262,10 @@ async function loadAttendanceData(startDate,endDate){
     if(changed)await saveState()
 }
 async function syncAttendance(silent=true,selectedPeriod=null){
-    if(!tenantAuthCsrfToken||document.hidden)return;
+    if(!tenantAuthCsrfToken||document.hidden)return false;
     attendanceLastAttempt=Date.now();
     attendanceSyncStatus='Syncing BambooHR attendance…';
+    let succeeded=false;
     try{
         let synced=await directoryRequest('/attendance/sync',{
             method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(selectedPeriod||{})
@@ -2265,6 +2280,7 @@ async function syncAttendance(silent=true,selectedPeriod=null){
             await loadAttendanceData(range.start,range.end)
         }
         attendanceSyncStatus='';
+        succeeded=true;
         if(!silent)message('Attendance refreshed at '+new Date(synced.reportedAt).toLocaleTimeString()+'.');
     }
     catch(error){
@@ -2272,6 +2288,7 @@ async function syncAttendance(silent=true,selectedPeriod=null){
         if(!silent)message('Attendance sync failed: '+error.message,true)
     }
     if(page==='attendance')render(true)
+    return succeeded
 }
 function startAttendancePolling(){
     if(attendanceSyncTimer)clearInterval(attendanceSyncTimer);
@@ -3375,14 +3392,70 @@ async function action(a,element=null){
             return
         }
         if(a==='saveAttendanceSource'){
+            let source=$('attendanceShiftSource')?.value,attendanceRange=attendancePeriodRange();
+            if(source==='bamboohr'&&!window.confirm('Switch attendance to BambooHR scheduled shifts? The app will read and compare BambooHR shifts for the selected period. BambooHR clock events will continue to verify attendance.'))return;
             let result=await directoryRequest('/attendance/source',{
                 method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
-                body:JSON.stringify({source:$('attendanceShiftSource')?.value})
+                body:JSON.stringify({
+                    source,confirmed:source==='bamboohr',
+                    start:attendanceRange.start,end:attendanceRange.end
+                })
             });
-            let attendanceRange=attendancePeriodRange();
-            await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+            let refreshed=await syncAttendance(true,attendanceRange);
             render(true);
+            if(!refreshed){
+                message('Attendance shift source saved, but the selected period could not be refreshed: '+attendanceSyncStatus,true);
+                return
+            }
             message('Attendance shift source saved: '+(result.selected==='app'?'accepted app shifts.':'BambooHR shifts.'));
+            return
+        }
+        if(a==='reviewAttendanceDiscrepancy'){
+            openAttendanceReconciliationDialog(element);
+            return
+        }
+        if(a==='resolveAttendanceDiscrepancy'){
+            let reason=$('attendanceReconciliationReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the shift reconciliation.');
+            let attendanceRange=attendancePeriodRange(),result;
+            try{
+                result=await directoryRequest('/attendance/reconciliation/resolve',{
+                    method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                    body:JSON.stringify({
+                        confirmed:true,discrepancyId:element.dataset.discrepancyId,
+                        direction:element.dataset.direction,date:element.dataset.date,reason
+                    })
+                })
+            }
+            catch(error){
+                $('attendanceReconciliationDialog')?.close();
+                try{
+                    await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+                    let refreshed=await syncAttendance(true,attendanceRange);
+                    render(true);
+                    message(
+                        refreshed
+                            ?error.message
+                            :error.message+' Attendance refresh failed: '+attendanceSyncStatus,
+                        true
+                    )
+                }
+                catch(refreshError){
+                    message(error.message+' Refresh also failed: '+refreshError.message,true)
+                }
+                return
+            }
+            $('attendanceReconciliationDialog')?.close();
+            let refreshed=await syncAttendance(true,attendanceRange);
+            render(true);
+            message(
+                !refreshed
+                    ?'Reconciliation '+result.outcome+' and audited, but attendance refresh failed: '+attendanceSyncStatus
+                    :result.outcome==='succeeded'
+                        ?'Shift discrepancy resolved and audited.'
+                        :'Reconciliation '+result.outcome+'. Review the updated discrepancies.',
+                !refreshed
+            );
             return
         }
         if(a==='saveAttendanceSettings'){
