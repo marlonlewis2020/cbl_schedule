@@ -3,6 +3,7 @@ from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
 import argparse
 import json
+import math
 import os
 import re
 import secrets
@@ -19,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values, load_dotenv, set_key, unset_key
 from flask import (
@@ -162,8 +163,14 @@ DEVELOPER_REQUESTS = (
     (
         "attendance-automation",
         "Real-time attendance tracking and automation",
-        "Priority: Medium. Verify that each tenant's BambooHR API key can read time-tracking clock-in data and that staff clock in through BambooHR. Ingest attendance updates promptly and match clock-ins to accepted shifts by employee ID, with a configurable lateness tolerance, correct overnight-shift day handling, and exclusion of approved time off. Keep auditable attendance events and exception states (for example sick, absent, late, and vacation), including their source and timestamps; do not infer vacation or sick leave solely from a missing clock-in. If no valid clock-in exists four hours after a scheduled shift starts, flag the employee absent unless approved leave covers the shift; allow an authorized manager or admin to correct the status with a required reason and audit trail. Calculate each employee's attendance as attended shifts divided by scheduled shifts over a configurable 30-45-day period (default 30), retain an auditable manual override, show period and counts, and leave the percentage blank when no data exists. Attendance calculation and operational tracking are included in every tier. The existing attendance priority bonus uses the calculated value unchanged.",
+        "Priority: Medium. Verify that each tenant's BambooHR API key can read both time-tracking clock-in data and approved time off. Read recent timesheet entries within BambooHR's 365-day API limit and match clock entries to accepted shifts by employee ID and timestamp, including overnight shifts in the scheduler's Jamaica time zone. Clock starts count as evidence even before BambooHR approval; exclude approved leave and never infer sick leave from a missing punch. Use a configurable lateness tolerance (0–120 minutes, default 15). Mark a shift late after the tolerance when no clock start exists; if no valid clock-in exists four hours after shift start, flag the employee absent. Keep tenant-scoped, idempotent time entries, shift statuses, and audit history. Allow an authorized administrator to correct a shift with a required reason; manager actions become available after manager authentication is implemented. Refresh on app open and every five minutes while the authenticated app tab is visible; no sync runs while it is closed or hidden. Calculate each employee's attendance as attended (including late) shifts divided by scheduled shifts, excluding approved leave, over a configurable 30–45-day period (default 30). Show period and counts, leave the calculated percentage blank when no eligible data exists, and allow a reasoned, audited score override or removal. Attendance calculation and operational tracking are included in every tier. The existing attendance priority bonus consumes the effective calculated or overridden score unchanged.",
         ("business-hub",),
+    ),
+    (
+        "attendance-shift-source-reconciliation",
+        "Attendance shift-source selection and reconciliation",
+        "Add an administrator-controlled Attendance page switch to use accepted app shifts or BambooHR scheduled shifts as the shift source, while always using BambooHR clock events to verify attendance. When BambooHR is selected, notify the administrator of unresolved differences between app and BambooHR shifts. Compare shifts by employee, date, start/end time, and location; let an administrator explicitly choose to update the app shift data from BambooHR or publish the app shift data to BambooHR. Require confirmation and audit every resolution, preserve accepted-schedule history, and never modify clock events. First verify the tenant's BambooHR Scheduling API supports reading and updating shifts and that the configured key has the required permissions; report unsupported operations clearly rather than implying reconciliation succeeded.",
+        ("attendance-automation",),
     ),
     (
         "workforce-dashboards",
@@ -687,6 +694,69 @@ def initialize_database() -> None:
                 response_status INTEGER NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS attendance_time_entries (
+                tenant_id TEXT NOT NULL,
+                entry_id TEXT NOT NULL,
+                bamboohr_id TEXT NOT NULL,
+                entry_date TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                timezone TEXT NOT NULL,
+                approved INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, entry_id)
+            );
+            CREATE TABLE IF NOT EXISTS attendance_shift_records (
+                tenant_id TEXT NOT NULL,
+                schedule_run_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                shift_date TEXT NOT NULL,
+                shift_start REAL NOT NULL,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                employee_name TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT '',
+                clock_in_at TEXT,
+                clock_in_timezone TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, schedule_run_id, employee_id, shift_date)
+            );
+            CREATE TABLE IF NOT EXISTS attendance_shift_audit_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                schedule_run_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                shift_date TEXT NOT NULL,
+                previous_status TEXT,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                actor_id TEXT,
+                actor_email TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS attendance_score_overrides (
+                tenant_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                score REAL NOT NULL CHECK (score >= 0 AND score <= 100),
+                reason TEXT NOT NULL,
+                actor_id TEXT,
+                actor_email TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, employee_id)
+            );
+            CREATE TABLE IF NOT EXISTS attendance_score_audit_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                previous_score REAL,
+                score REAL,
+                reason TEXT NOT NULL,
+                actor_id TEXT,
+                actor_email TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS platform_owners (
                 id TEXT PRIMARY KEY,
                 email TEXT NOT NULL UNIQUE,
@@ -936,6 +1006,21 @@ def initialize_database() -> None:
                     """,
                     (request[1], request[2], request_id),
                 )
+        if connection.execute(
+            "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
+            ("attendance-automation-implementation-v1",),
+        ).rowcount:
+            request = next(
+                row for row in DEVELOPER_REQUESTS if row[0] == "attendance-automation"
+            )
+            connection.execute(
+                """
+                UPDATE developer_change_requests
+                SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE request_id = ? AND status IN ('pending', 'in_progress', 'blocked')
+                """,
+                (request[1], request[2], request[0]),
+            )
         for request_id, _, _, dependencies in DEVELOPER_REQUESTS:
             connection.executemany(
                 """
@@ -951,6 +1036,11 @@ def initialize_database() -> None:
             "employees",
             "application_settings",
             "tenant_audit_events",
+            "attendance_time_entries",
+            "attendance_shift_records",
+            "attendance_shift_audit_events",
+            "attendance_score_overrides",
+            "attendance_score_audit_events",
         ):
             columns = {
                 row[1] for row in connection.execute(f"PRAGMA table_info({table_name})")
@@ -1112,6 +1202,11 @@ def initialize_database() -> None:
                 "employees",
                 "application_settings",
                 "tenant_audit_events",
+                "attendance_time_entries",
+                "attendance_shift_records",
+                "attendance_shift_audit_events",
+                "attendance_score_overrides",
+                "attendance_score_audit_events",
             ):
                 connection.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
                 connection.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
@@ -1125,6 +1220,18 @@ def initialize_database() -> None:
                     WITH CHECK (tenant_id = current_setting('app.tenant_id', true))
                     """
                 )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS attendance_shift_records_period_idx
+            ON attendance_shift_records (tenant_id, shift_date, employee_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS attendance_time_entries_employee_idx
+            ON attendance_time_entries (tenant_id, bamboohr_id, entry_date)
+            """
+        )
         connection.executemany(
             """
             INSERT OR IGNORE INTO application_settings
@@ -1386,6 +1493,11 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
         developer_users = source_rows("developer_users")
         migrations = source_rows("app_migrations")
         audit_events = source_rows("tenant_audit_events")
+        attendance_time_entries = source_rows("attendance_time_entries")
+        attendance_shift_records = source_rows("attendance_shift_records")
+        attendance_shift_audit_events = source_rows("attendance_shift_audit_events")
+        attendance_score_overrides = source_rows("attendance_score_overrides")
+        attendance_score_audit_events = source_rows("attendance_score_audit_events")
 
     def source_value(row: dict, column: str, default):
         value = row.get(column, default)
@@ -1428,6 +1540,16 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
         connection.execute(
             "DELETE FROM tenant_audit_events WHERE tenant_id = ?", (DEFAULT_TENANT_ID,)
         )
+        for table_name in (
+            "attendance_time_entries",
+            "attendance_shift_records",
+            "attendance_shift_audit_events",
+            "attendance_score_overrides",
+            "attendance_score_audit_events",
+        ):
+            connection.execute(
+                f"DELETE FROM {table_name} WHERE tenant_id = ?", (DEFAULT_TENANT_ID,)
+            )
         if locations:
             connection.executemany(
                 """
@@ -1520,6 +1642,112 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                         row["payload"],
                     )
                     for row in accepted
+                ],
+            )
+        if attendance_time_entries:
+            connection.executemany(
+                """
+                INSERT INTO attendance_time_entries
+                    (tenant_id, entry_id, bamboohr_id, entry_date, started_at,
+                     ended_at, timezone, approved)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, entry_id) DO UPDATE SET
+                    bamboohr_id = excluded.bamboohr_id,
+                    entry_date = excluded.entry_date, started_at = excluded.started_at,
+                    ended_at = excluded.ended_at, timezone = excluded.timezone,
+                    approved = excluded.approved
+                """,
+                [
+                    (
+                        DEFAULT_TENANT_ID, row["entry_id"], row["bamboohr_id"],
+                        row["entry_date"], row["started_at"], row["ended_at"],
+                        row["timezone"], row["approved"],
+                    )
+                    for row in attendance_time_entries
+                ],
+            )
+        if attendance_shift_records:
+            connection.executemany(
+                """
+                INSERT INTO attendance_shift_records
+                    (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
+                     status, source, reason, employee_name, location, role, clock_in_at,
+                     clock_in_timezone, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, schedule_run_id, employee_id, shift_date)
+                DO UPDATE SET shift_start = excluded.shift_start, status = excluded.status,
+                    source = excluded.source, reason = excluded.reason,
+                    employee_name = excluded.employee_name, location = excluded.location,
+                    role = excluded.role, clock_in_at = excluded.clock_in_at,
+                    clock_in_timezone = excluded.clock_in_timezone,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        DEFAULT_TENANT_ID, row["schedule_run_id"], row["employee_id"],
+                        row["shift_date"], row["shift_start"], row["status"],
+                        row["source"], row["reason"], row["employee_name"],
+                        row["location"], row["role"], row["clock_in_at"],
+                        row["clock_in_timezone"], row["updated_at"],
+                    )
+                    for row in attendance_shift_records
+                ],
+            )
+        if attendance_shift_audit_events:
+            connection.executemany(
+                """
+                INSERT INTO attendance_shift_audit_events
+                    (id, tenant_id, schedule_run_id, employee_id, shift_date,
+                     previous_status, status, source, reason, actor_id, actor_email, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                [
+                    (
+                        row["id"], DEFAULT_TENANT_ID, row["schedule_run_id"],
+                        row["employee_id"], row["shift_date"], row["previous_status"],
+                        row["status"], row["source"], row["reason"], row["actor_id"],
+                        row["actor_email"], row["created_at"],
+                    )
+                    for row in attendance_shift_audit_events
+                ],
+            )
+        if attendance_score_overrides:
+            connection.executemany(
+                """
+                INSERT INTO attendance_score_overrides
+                    (tenant_id, employee_id, score, reason, actor_id, actor_email, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, employee_id) DO UPDATE SET
+                    score = excluded.score, reason = excluded.reason,
+                    actor_id = excluded.actor_id, actor_email = excluded.actor_email,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        DEFAULT_TENANT_ID, row["employee_id"], row["score"],
+                        row["reason"], row["actor_id"], row["actor_email"],
+                        row["updated_at"],
+                    )
+                    for row in attendance_score_overrides
+                ],
+            )
+        if attendance_score_audit_events:
+            connection.executemany(
+                """
+                INSERT INTO attendance_score_audit_events
+                    (id, tenant_id, employee_id, previous_score, score, reason,
+                     actor_id, actor_email, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                [
+                    (
+                        row["id"], DEFAULT_TENANT_ID, row["employee_id"],
+                        row["previous_score"], row["score"], row["reason"],
+                        row["actor_id"], row["actor_email"], row["created_at"],
+                    )
+                    for row in attendance_score_audit_events
                 ],
             )
         connection.executemany(
@@ -2953,6 +3181,11 @@ def hub_delete_business(tenant_id: str):
             "schedule_locations",
             "application_settings",
             "tenant_audit_events",
+            "attendance_time_entries",
+            "attendance_shift_records",
+            "attendance_shift_audit_events",
+            "attendance_score_overrides",
+            "attendance_score_audit_events",
         ):
             connection.execute(
                 f"DELETE FROM {table_name} WHERE tenant_id = ?", (tenant_id,)
@@ -5156,26 +5389,693 @@ def bamboohr_status():
     return jsonify(configured=bool(bamboohr_api_key()))
 
 
-def check_bamboohr_credentials(subdomain: str, api_key: str) -> tuple[str, int] | None:
-    """Return (message, status) when BambooHR rejects the credentials, else None."""
-    authorization = base64.b64encode(f"{api_key.strip()}:x".encode("utf-8")).decode("ascii")
+ATTENDANCE_TIMEZONE = ZoneInfo("America/Jamaica")
+DEFAULT_ATTENDANCE_SETTINGS = {
+    "latenessToleranceMinutes": 15,
+    "scorePeriodDays": 30,
+}
+
+
+class AttendanceIntegrationError(Exception):
+    pass
+
+
+def attendance_settings(connection: DatabaseConnection) -> dict[str, int]:
+    rows = connection.execute(
+        """
+        SELECT setting_key, setting_value
+        FROM application_settings
+        WHERE tenant_id = ? AND setting_key IN (
+            'attendance_lateness_tolerance_minutes',
+            'attendance_score_period_days'
+        )
+        """,
+        (active_tenant_id(),),
+    ).fetchall()
+    values = {row[0]: row[1] for row in rows}
+    try:
+        tolerance = int(
+            values.get(
+                "attendance_lateness_tolerance_minutes",
+                DEFAULT_ATTENDANCE_SETTINGS["latenessToleranceMinutes"],
+            )
+        )
+        period = int(
+            values.get(
+                "attendance_score_period_days",
+                DEFAULT_ATTENDANCE_SETTINGS["scorePeriodDays"],
+            )
+        )
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Stored attendance settings are invalid.") from error
+    if not 0 <= tolerance <= 120 or not 30 <= period <= 45:
+        raise RuntimeError("Stored attendance settings are outside allowed limits.")
+    return {"latenessToleranceMinutes": tolerance, "scorePeriodDays": period}
+
+
+def bamboohr_json(
+    api_key: str, path: str, params: dict[str, str], label: str
+) -> object:
+    authorization = base64.b64encode(f"{api_key}:x".encode("utf-8")).decode("ascii")
     outbound = Request(
-        f"{bamboohr_endpoint_for_tenant(subdomain, 'time_off/whos_out')}?"
-        f"{urlencode({'start': date.today().isoformat(), 'end': date.today().isoformat()})}",
+        f"{bamboohr_endpoint(path)}?{urlencode(params)}",
         headers={"Accept": "application/json", "Authorization": f"Basic {authorization}"},
         method="GET",
     )
     try:
         with urlopen(outbound, timeout=20) as response:
-            response.read(2048)
+            raw_data = response.read(10_000_001)
+        if len(raw_data) > 10_000_000:
+            raise AttendanceIntegrationError(
+                f"BambooHR {label} response exceeds the allowed size."
+            )
+        data = json.loads(raw_data)
     except HTTPError as error:
-        if error.code == 401:
-            return "BambooHR rejected this API key for the supplied tenant.", 401
         if error.code == 403:
-            return "BambooHR denied this key access to the time-off endpoint.", 403
-        return f"BambooHR key validation failed with HTTP {error.code}.", 502
-    except (URLError, TimeoutError, OSError):
-        return "The app server could not reach BambooHR to validate the key.", 502
+            detail = "the API key lacks permission"
+        elif error.code == 401:
+            detail = "the API key was rejected"
+        else:
+            detail = f"request failed with HTTP {error.code}"
+        raise AttendanceIntegrationError(
+            f"BambooHR {label} {detail}."
+        ) from error
+    except (URLError, TimeoutError, OSError) as error:
+        raise AttendanceIntegrationError(
+            f"The app server could not reach BambooHR for {label}."
+        ) from error
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise AttendanceIntegrationError(
+            f"BambooHR returned invalid {label} data."
+        ) from error
+    if not isinstance(data, list):
+        raise AttendanceIntegrationError(
+            f"BambooHR returned an invalid {label} response."
+        )
+    return data
+
+
+def bamboo_identifier(value: object, label: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise AttendanceIntegrationError(f"BambooHR returned an invalid {label}.")
+    identifier = str(value).strip()
+    if not identifier or len(identifier) > 80:
+        raise AttendanceIntegrationError(f"BambooHR returned an invalid {label}.")
+    return identifier
+
+
+def parse_bamboohr_clock_entries(data: object) -> list[dict[str, object]]:
+    if not isinstance(data, list):
+        raise AttendanceIntegrationError("BambooHR returned an invalid timesheet response.")
+    entries = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise AttendanceIntegrationError(
+                "BambooHR returned an invalid timesheet entry."
+            )
+        if item.get("type") != "clock":
+            continue
+        entry_id = bamboo_identifier(item.get("id"), "timesheet entry ID")
+        bamboohr_id = bamboo_identifier(item.get("employeeId"), "timesheet employee ID")
+        entry_date = item.get("date")
+        start_text = item.get("start")
+        end_text = item.get("end")
+        timezone_name = item.get("timezone")
+        if not isinstance(entry_date, str) or not isinstance(start_text, str):
+            raise AttendanceIntegrationError(
+                "BambooHR returned a clock entry without a date or start time."
+            )
+        try:
+            parsed_date = date.fromisoformat(entry_date)
+            started_at = datetime.fromisoformat(start_text.replace("Z", "+00:00"))
+            ended_at = (
+                datetime.fromisoformat(end_text.replace("Z", "+00:00"))
+                if isinstance(end_text, str) and end_text
+                else None
+            )
+            if (
+                parsed_date.isoformat() != entry_date
+                or started_at.tzinfo is None
+                or (ended_at is not None and ended_at.tzinfo is None)
+                or (ended_at is not None and ended_at < started_at)
+                or not isinstance(timezone_name, str)
+            ):
+                raise ValueError
+            ZoneInfo(timezone_name)
+        except (ValueError, TypeError, ZoneInfoNotFoundError) as error:
+            raise AttendanceIntegrationError(
+                "BambooHR returned a clock entry with an invalid date, time, or time zone."
+            ) from error
+        approved = item.get("approved", False)
+        if not isinstance(approved, bool):
+            raise AttendanceIntegrationError(
+                "BambooHR returned an invalid clock approval flag."
+            )
+        entries.append(
+            {
+                "id": entry_id,
+                "bamboohrId": bamboohr_id,
+                "date": entry_date,
+                "start": started_at.isoformat(),
+                "end": ended_at.isoformat() if ended_at else None,
+                "timezone": timezone_name,
+                "approved": approved,
+            }
+        )
+    return entries
+
+
+def parse_bamboohr_time_off(data: object) -> list[dict[str, str]]:
+    if not isinstance(data, list):
+        raise AttendanceIntegrationError("BambooHR returned an invalid time-off response.")
+    entries = []
+    for item in data:
+        if not isinstance(item, dict) or item.get("type") != "timeOff":
+            continue
+        if item.get("status") and str(item["status"]).casefold() != "approved":
+            continue
+        try:
+            bamboohr_id = bamboo_identifier(item.get("employeeId"), "time-off employee ID")
+            start_text, end_text = item.get("start"), item.get("end")
+            if not isinstance(start_text, str) or not isinstance(end_text, str):
+                raise ValueError
+            start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+            if start.isoformat() != start_text or end.isoformat() != end_text or end < start:
+                raise ValueError
+        except (AttendanceIntegrationError, ValueError, TypeError) as error:
+            raise AttendanceIntegrationError(
+                "BambooHR returned an approved time-off record with invalid employee or date data."
+            ) from error
+        entries.append(
+            {"bamboohrId": bamboohr_id, "start": start_text, "end": end_text}
+        )
+    return entries
+
+
+def schedule_shift_datetime(shift_date: date, start: object) -> datetime:
+    if isinstance(start, bool) or not isinstance(start, (int, float)):
+        raise ValueError("Accepted schedule contains an invalid shift start.")
+    minutes = round(float(start) * 60)
+    if not 0 <= minutes < 24 * 60:
+        raise ValueError("Accepted schedule contains an invalid shift start.")
+    return datetime.combine(
+        shift_date,
+        time(minute=minutes % 60, hour=minutes // 60),
+        tzinfo=ATTENDANCE_TIMEZONE,
+    )
+
+
+def record_attendance_status(
+    connection: DatabaseConnection,
+    *,
+    run_id: str,
+    employee_id: str,
+    shift_date: str,
+    shift_start: float,
+    status: str,
+    source: str,
+    reason: str,
+    employee_name: str,
+    location: str,
+    role: str,
+    clock_in_at: str | None,
+    clock_in_timezone: str,
+    existing: dict[tuple[str, str, str], tuple[str, str, str]],
+    preserve_manual: bool = True,
+    actor_id: str | None = None,
+    actor_email: str | None = None,
+) -> bool:
+    tenant_id = active_tenant_id()
+    key = (run_id, employee_id, shift_date)
+    previous = existing.get(key)
+    if preserve_manual and previous and previous[1] == "manual":
+        status, source, reason = previous
+    prior_status = previous[0] if previous else None
+    prior_source = previous[1] if previous else None
+    connection.execute(
+        """
+        INSERT INTO attendance_shift_records
+            (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
+             status, source, reason, employee_name, location, role, clock_in_at,
+             clock_in_timezone, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (tenant_id, schedule_run_id, employee_id, shift_date)
+        DO UPDATE SET shift_start = excluded.shift_start, status = excluded.status,
+            source = excluded.source, reason = excluded.reason,
+            employee_name = excluded.employee_name, location = excluded.location,
+            role = excluded.role, clock_in_at = excluded.clock_in_at,
+            clock_in_timezone = excluded.clock_in_timezone,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            tenant_id, run_id, employee_id, shift_date, shift_start, status, source,
+            reason, employee_name, location, role, clock_in_at, clock_in_timezone,
+        ),
+    )
+    existing[key] = (status, source, reason)
+    if status in {"scheduled"} or (prior_status == status and prior_source == source):
+        return False
+    connection.execute(
+        """
+        INSERT INTO attendance_shift_audit_events
+            (id, tenant_id, schedule_run_id, employee_id, shift_date,
+             previous_status, status, source, reason, actor_id, actor_email)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            secrets.token_urlsafe(18), tenant_id, run_id, employee_id, shift_date,
+            prior_status, status, source, reason,
+            actor_id, actor_email,
+        ),
+    )
+    return prior_status != status
+
+
+def attendance_payload(
+    connection: DatabaseConnection,
+    now: datetime | None = None,
+    selected_date: date | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> dict[str, object]:
+    now = now or datetime.now(ATTENDANCE_TIMEZONE)
+    today = now.date()
+    report_start = period_start or selected_date or today
+    report_end = period_end or selected_date or today
+    as_of = (
+        now
+        if report_end == today
+        else datetime.combine(report_end, time.max, tzinfo=ATTENDANCE_TIMEZONE)
+    )
+    tenant_id = active_tenant_id()
+    settings = attendance_settings(connection)
+    rows = connection.execute(
+        """
+        SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
+               source, reason, employee_name, location, role, clock_in_at,
+               clock_in_timezone
+        FROM attendance_shift_records
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        ORDER BY shift_date, location, role, shift_start, employee_name
+        """,
+        (tenant_id, report_start.isoformat(), report_end.isoformat()),
+    ).fetchall()
+    current_shifts = []
+    expected = clocked_in = late = absent = approved_leave = 0
+    for row in rows:
+        shift_day = date.fromisoformat(row[2])
+        start = schedule_shift_datetime(shift_day, row[3])
+        if start > as_of:
+            continue
+        item = {
+            "runId": row[0],
+            "employeeId": row[1],
+            "date": row[2],
+            "shiftStart": start.isoformat(),
+            "status": row[4],
+            "source": row[5],
+            "reason": row[6],
+            "name": row[7],
+            "location": row[8],
+            "role": row[9],
+            "clockIn": row[10],
+            "clockInTimezone": row[11],
+        }
+        current_shifts.append(item)
+        if row[4] in {"approved_leave", "sick", "vacation"}:
+            approved_leave += 1
+            continue
+        expected += 1
+        if row[4] in {"attended", "late"}:
+            clocked_in += 1
+        if row[4] == "late":
+            late += 1
+        elif row[4] == "absent":
+            absent += 1
+
+    score_rows = connection.execute(
+        """
+        SELECT employee_id, shift_date, shift_start, status
+        FROM attendance_shift_records
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        """,
+        (tenant_id, report_start.isoformat(), report_end.isoformat()),
+    ).fetchall()
+    totals: dict[str, list[int]] = {}
+    for employee_id, shift_text, shift_start, status in score_rows:
+        shift_day = date.fromisoformat(shift_text)
+        if schedule_shift_datetime(shift_day, shift_start) > as_of:
+            continue
+        if status in {"approved_leave", "sick", "vacation"}:
+            continue
+        counts = totals.setdefault(employee_id, [0, 0])
+        counts[1] += 1
+        if status in {"attended", "late"}:
+            counts[0] += 1
+    overrides = {
+        row[0]: row[1]
+        for row in connection.execute(
+            """
+            SELECT employee_id, score FROM attendance_score_overrides
+            WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        )
+    }
+    employees = connection.execute(
+        """
+        SELECT employee_id, name, location, role, active
+        FROM employees WHERE tenant_id = ?
+        ORDER BY name
+        """,
+        (tenant_id,),
+    ).fetchall()
+    scores = []
+    for employee_id, name, location, role, active in employees:
+        attended_count, scheduled_count = totals.get(employee_id, (0, 0))
+        computed = (
+            round(attended_count * 100 / scheduled_count, 2)
+            if scheduled_count
+            else None
+        )
+        scores.append(
+            {
+                "employeeId": employee_id,
+                "name": name,
+                "location": location,
+                "role": role,
+                "active": bool(active),
+                "attended": attended_count,
+                "scheduled": scheduled_count,
+                "computedScore": computed,
+                "score": overrides.get(employee_id, computed),
+                "manualOverride": employee_id in overrides,
+            }
+        )
+    percentage = round(clocked_in * 100 / expected, 2) if expected else None
+    last_sync = connection.execute(
+        """
+        SELECT setting_value FROM application_settings
+        WHERE tenant_id = ? AND setting_key = 'attendance_last_sync'
+        """,
+        (tenant_id,),
+    ).fetchone()
+    return {
+        "date": report_start.isoformat() if report_start == report_end else None,
+        "periodStart": report_start.isoformat(),
+        "periodEnd": report_end.isoformat(),
+        "currentDate": today.isoformat(),
+        "reportedAt": now.isoformat(),
+        "lastSyncedAt": last_sync[0] if last_sync else None,
+        "summary": {
+            "expected": expected,
+            "clockedIn": clocked_in,
+            "attendancePercent": percentage,
+            "late": late,
+            "absent": absent,
+            "approvedLeave": approved_leave,
+        },
+        "shifts": current_shifts,
+        "scores": scores,
+        "settings": settings,
+    }
+
+
+def sync_attendance_data(
+    connection: DatabaseConnection,
+    clock_entries: list[dict[str, object]],
+    time_off: list[dict[str, str]],
+    *,
+    now: datetime | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> dict[str, object]:
+    now = now or datetime.now(ATTENDANCE_TIMEZONE)
+    today = now.date()
+    tenant_id = active_tenant_id()
+    settings = attendance_settings(connection)
+    history_start = period_start or today - timedelta(days=settings["scorePeriodDays"] - 1)
+    history_end = period_end or today
+    api_start = history_start - timedelta(days=1)
+    employees = {
+        str(row[0]): {
+            "bamboohrId": str(row[1]) if row[1] is not None else "",
+            "name": row[2],
+            "location": row[3],
+            "role": row[4],
+        }
+        for row in connection.execute(
+            """
+            SELECT employee_id, bamboohr_id, name, location, role
+            FROM employees WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        )
+    }
+    bamboo_ids = {
+        record["bamboohrId"] for record in employees.values() if record["bamboohrId"]
+    }
+    clock_entries = [
+        entry for entry in clock_entries if entry["bamboohrId"] in bamboo_ids
+    ]
+    connection.execute(
+        """
+        DELETE FROM attendance_time_entries
+        WHERE tenant_id = ? AND entry_date >= ? AND entry_date <= ?
+        """,
+        (tenant_id, api_start.isoformat(), history_end.isoformat()),
+    )
+    connection.executemany(
+        """
+        INSERT INTO attendance_time_entries
+            (tenant_id, entry_id, bamboohr_id, entry_date, started_at,
+             ended_at, timezone, approved)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, entry_id) DO UPDATE SET
+            bamboohr_id = excluded.bamboohr_id, entry_date = excluded.entry_date,
+            started_at = excluded.started_at, ended_at = excluded.ended_at,
+            timezone = excluded.timezone, approved = excluded.approved
+        """,
+        [
+            (
+                tenant_id, entry["id"], entry["bamboohrId"], entry["date"],
+                entry["start"], entry["end"], entry["timezone"],
+                int(entry["approved"]),
+            )
+            for entry in clock_entries
+        ],
+    )
+    entries_by_bamboo_id: dict[str, list[dict[str, object]]] = {}
+    for entry in clock_entries:
+        entries_by_bamboo_id.setdefault(str(entry["bamboohrId"]), []).append(entry)
+    for entries in entries_by_bamboo_id.values():
+        entries.sort(key=lambda entry: str(entry["start"]))
+    leave_by_employee: dict[str, list[tuple[date, date]]] = {}
+    for leave in time_off:
+        leave_by_employee.setdefault(leave["bamboohrId"], []).append(
+            (date.fromisoformat(leave["start"]), date.fromisoformat(leave["end"]))
+        )
+
+    existing = {
+        (row[0], row[1], row[2]): (row[3], row[4], row[5])
+        for row in connection.execute(
+            """
+            SELECT schedule_run_id, employee_id, shift_date, status, source, reason
+            FROM attendance_shift_records
+            WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+            """,
+            (tenant_id, history_start.isoformat(), history_end.isoformat()),
+        )
+    }
+    active_keys: set[tuple[str, str, str]] = set()
+    changed = 0
+    scheduled = connection.execute(
+        """
+        SELECT run_id, payload FROM accepted_schedules
+        WHERE tenant_id = ? AND week_start >= ? AND week_start <= ?
+        """,
+        (
+            tenant_id,
+            (api_start - timedelta(days=6)).isoformat(),
+            history_end.isoformat(),
+        ),
+    ).fetchall()
+    for run_id, encoded in scheduled:
+        try:
+            schedule = json.loads(encoded)
+            week_start = date.fromisoformat(schedule["start"])
+            if not isinstance(schedule.get("employees"), list):
+                raise ValueError
+            span = float(schedule.get("controls", {}).get("span", 8))
+            if not 0 < span <= 24:
+                raise ValueError
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"Accepted schedule {run_id} has invalid attendance data."
+            ) from error
+        for scheduled_employee in schedule["employees"]:
+            if not isinstance(scheduled_employee, dict):
+                raise RuntimeError(
+                    f"Accepted schedule {run_id} has an invalid employee row."
+                )
+            employee_id = str(scheduled_employee.get("id", ""))
+            employee = employees.get(employee_id)
+            if not employee:
+                continue
+            bamboohr_id = (
+                employee["bamboohrId"]
+                or str(scheduled_employee.get("bamboohrId") or "")
+            )
+            slots = scheduled_employee.get("slots")
+            if not isinstance(slots, list):
+                raise RuntimeError(
+                    f"Accepted schedule {run_id} has invalid shift assignments."
+                )
+            for day_index, shift_start_value in enumerate(slots[:7]):
+                if shift_start_value is None:
+                    continue
+                shift_day = week_start + timedelta(days=day_index)
+                if not history_start <= shift_day <= history_end:
+                    continue
+                shift_start = schedule_shift_datetime(shift_day, shift_start_value)
+                shift_end = shift_start + timedelta(hours=span)
+                matching_entries = []
+                for entry in entries_by_bamboo_id.get(bamboohr_id, []):
+                    entry_start = datetime.fromisoformat(str(entry["start"]))
+                    entry_end = (
+                        datetime.fromisoformat(str(entry["end"]))
+                        if entry["end"]
+                        else None
+                    )
+                    if (
+                        entry_start < shift_end
+                        and (entry_end is None or entry_end > shift_start)
+                    ):
+                        matching_entries.append(entry)
+                on_leave = any(
+                    leave_start <= shift_day <= leave_end
+                    for leave_start, leave_end in leave_by_employee.get(
+                        bamboohr_id, []
+                    )
+                )
+                clock_in = matching_entries[0] if matching_entries else None
+                if on_leave:
+                    status, source, reason = (
+                        "approved_leave",
+                        "bamboohr",
+                        "Approved BambooHR time off.",
+                    )
+                elif clock_in:
+                    clock_time = datetime.fromisoformat(str(clock_in["start"]))
+                    status = (
+                        "late"
+                        if clock_time.astimezone(timezone.utc)
+                        > (shift_start + timedelta(
+                            minutes=settings["latenessToleranceMinutes"]
+                        )).astimezone(timezone.utc)
+                        else "attended"
+                    )
+                    source, reason = "bamboohr", ""
+                elif now >= shift_start + timedelta(hours=4):
+                    status, source, reason = (
+                        "absent",
+                        "attendance_rule",
+                        "No BambooHR clock-in was recorded within four hours of shift start.",
+                    )
+                elif now > shift_start + timedelta(
+                    minutes=settings["latenessToleranceMinutes"]
+                ):
+                    status, source, reason = (
+                        "late",
+                        "attendance_rule",
+                        "No BambooHR clock-in was recorded within the configured lateness tolerance.",
+                    )
+                else:
+                    status, source, reason = "scheduled", "schedule", ""
+                key = (run_id, employee_id, shift_day.isoformat())
+                active_keys.add(key)
+                changed += record_attendance_status(
+                    connection,
+                    run_id=run_id,
+                    employee_id=employee_id,
+                    shift_date=shift_day.isoformat(),
+                    shift_start=float(shift_start_value),
+                    status=status,
+                    source=source,
+                    reason=reason,
+                    employee_name=str(
+                        scheduled_employee.get("name") or employee["name"]
+                    ),
+                    location=str(
+                        scheduled_employee.get("location") or employee["location"]
+                    ),
+                    role=str(scheduled_employee.get("role") or employee["role"]),
+                    clock_in_at=str(clock_in["start"]) if clock_in else None,
+                    clock_in_timezone=str(clock_in["timezone"]) if clock_in else "",
+                    existing=existing,
+                )
+    for key in existing.keys() - active_keys:
+        connection.execute(
+            """
+            DELETE FROM attendance_shift_records
+            WHERE tenant_id = ? AND schedule_run_id = ? AND employee_id = ?
+                AND shift_date = ?
+            """,
+            (tenant_id, *key),
+        )
+    synced_at = now.isoformat()
+    connection.execute(
+        """
+        INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+        VALUES ('attendance_last_sync', ?, ?)
+        ON CONFLICT (tenant_id, setting_key)
+        DO UPDATE SET setting_value = excluded.setting_value
+        """,
+        (synced_at, tenant_id),
+    )
+    payload = attendance_payload(
+        connection, now, period_start=history_start, period_end=history_end
+    )
+    payload["classifiedChanges"] = changed
+    payload["syncedClockEntries"] = len(clock_entries)
+    return payload
+
+
+def check_bamboohr_credentials(subdomain: str, api_key: str) -> tuple[str, int] | None:
+    """Return an error when the key cannot read the app's required BambooHR APIs."""
+    authorization = base64.b64encode(f"{api_key.strip()}:x".encode("utf-8")).decode("ascii")
+    today = date.today().isoformat()
+    endpoints = (
+        ("time_off/whos_out", {"start": today, "end": today}, "time-off"),
+        (
+            "time_tracking/timesheet_entries",
+            {"start": today, "end": today},
+            "time-tracking",
+        ),
+    )
+    for path, params, label in endpoints:
+        outbound = Request(
+            f"{bamboohr_endpoint_for_tenant(subdomain, path)}?{urlencode(params)}",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Basic {authorization}",
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(outbound, timeout=20) as response:
+                response.read(2048)
+        except HTTPError as error:
+            if error.code == 401:
+                return "BambooHR rejected this API key for the supplied tenant.", 401
+            if error.code == 403:
+                return (
+                    f"BambooHR denied this key access to the {label} endpoint.",
+                    403,
+                )
+            return f"BambooHR {label} validation failed with HTTP {error.code}.", 502
+        except (URLError, TimeoutError, OSError):
+            return "The app server could not reach BambooHR to validate the key.", 502
     return None
 
 
@@ -5266,6 +6166,300 @@ def promote_bamboohr_key():
 
     del _validated_bamboo_keys[token]
     return jsonify(promoted=True, tenantId=validation[0])
+
+
+@app.get("/api/attendance")
+def get_attendance():
+    period_start_text = request.args.get("start")
+    period_end_text = request.args.get("end")
+    selected_date_text = request.args.get("date")
+    selected_date = period_start = period_end = None
+    if period_start_text is not None or period_end_text is not None:
+        if not period_start_text or not period_end_text or selected_date_text is not None:
+            return jsonify(error="Provide both attendance period start and end dates."), 400
+        try:
+            period_start = date.fromisoformat(period_start_text)
+            period_end = date.fromisoformat(period_end_text)
+        except ValueError:
+            return jsonify(error="Provide valid attendance period dates in YYYY-MM-DD format."), 400
+        if (
+            period_start.isoformat() != period_start_text
+            or period_end.isoformat() != period_end_text
+            or period_end < period_start
+        ):
+            return jsonify(error="Provide a valid inclusive attendance period."), 400
+    elif selected_date_text:
+        try:
+            selected_date = date.fromisoformat(selected_date_text)
+        except ValueError:
+            return jsonify(error="Provide a valid attendance date in YYYY-MM-DD format."), 400
+        if selected_date.isoformat() != selected_date_text:
+            return jsonify(error="Provide a valid attendance date in YYYY-MM-DD format."), 400
+        period_start = period_end = selected_date
+    today = datetime.now(ATTENDANCE_TIMEZONE).date()
+    if period_end and period_end > today:
+        return jsonify(error="Attendance cannot be viewed for a future date."), 400
+    with closing(database_connect()) as connection:
+        return jsonify(
+            attendance_payload(
+                connection,
+                selected_date=selected_date,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        )
+
+
+@app.put("/api/attendance/settings")
+def update_attendance_settings():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Attendance settings are required."), 400
+    tolerance = payload.get("latenessToleranceMinutes")
+    period = payload.get("scorePeriodDays")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, int)
+        or not 0 <= tolerance <= 120
+        or isinstance(period, bool)
+        or not isinstance(period, int)
+        or not 30 <= period <= 45
+    ):
+        return jsonify(
+            error="Set lateness tolerance from 0 to 120 minutes and the attendance period from 30 to 45 days."
+        ), 400
+    with closing(database_connect()) as connection, connection:
+        connection.executemany(
+            """
+            INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT (tenant_id, setting_key)
+            DO UPDATE SET setting_value = excluded.setting_value
+            """,
+            [
+                (
+                    "attendance_lateness_tolerance_minutes",
+                    str(tolerance),
+                    active_tenant_id(),
+                ),
+                (
+                    "attendance_score_period_days",
+                    str(period),
+                    active_tenant_id(),
+                ),
+            ],
+        )
+    return jsonify(settings={"latenessToleranceMinutes": tolerance, "scorePeriodDays": period})
+
+
+@app.post("/api/attendance/sync")
+def sync_attendance():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if payload is not None and not isinstance(payload, dict):
+        return jsonify(error="Attendance sync options must be an object."), 400
+    with closing(database_connect()) as connection:
+        settings = attendance_settings(connection)
+    now = datetime.now(ATTENDANCE_TIMEZONE)
+    today = now.date()
+    start_text = payload.get("start") if payload else None
+    end_text = payload.get("end") if payload else None
+    if start_text is None and end_text is None:
+        history_end = today
+        history_start = today - timedelta(days=settings["scorePeriodDays"] - 1)
+    else:
+        if not isinstance(start_text, str) or not isinstance(end_text, str):
+            return jsonify(error="Provide both attendance sync period start and end dates."), 400
+        try:
+            history_start = date.fromisoformat(start_text)
+            history_end = date.fromisoformat(end_text)
+        except ValueError:
+            return jsonify(error="Provide valid attendance sync dates in YYYY-MM-DD format."), 400
+        if (
+            history_start.isoformat() != start_text
+            or history_end.isoformat() != end_text
+            or history_end < history_start
+        ):
+            return jsonify(error="Provide a valid inclusive attendance sync period."), 400
+        if history_end > today:
+            return jsonify(error="Attendance cannot be synced for a future date."), 400
+        if (history_end - history_start).days > 363:
+            return jsonify(error="BambooHR attendance sync supports up to 365 inclusive days."), 400
+    api_start = history_start - timedelta(days=1)
+    start_text, end_text = api_start.isoformat(), history_end.isoformat()
+    api_key = bamboohr_api_key()
+    if not api_key:
+        return jsonify(error="The BambooHR API key is not configured for this business."), 503
+    try:
+        clock_data = bamboohr_json(
+            api_key,
+            "time_tracking/timesheet_entries",
+            {"start": start_text, "end": end_text},
+            "time-tracking",
+        )
+        time_off_data = bamboohr_json(
+            api_key,
+            "time_off/whos_out",
+            {"start": start_text, "end": end_text},
+            "time-off",
+        )
+        clock_entries = parse_bamboohr_clock_entries(clock_data)
+        approved_time_off = parse_bamboohr_time_off(time_off_data)
+    except AttendanceIntegrationError as error:
+        return jsonify(error=str(error)), 502
+
+    with closing(database_connect()) as connection, connection:
+        result = sync_attendance_data(
+            connection,
+            clock_entries,
+            approved_time_off,
+            now=now,
+            period_start=history_start,
+            period_end=history_end,
+        )
+    return jsonify(result)
+
+
+@app.post("/api/attendance/scores/<path:employee_id>/override")
+@app.delete("/api/attendance/scores/<path:employee_id>/override")
+def update_attendance_score_override(employee_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    reason = payload.get("reason") if isinstance(payload, dict) else None
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        return jsonify(error="Provide a reason of 1 to 500 characters for the attendance override."), 400
+    score = payload.get("score") if request.method == "POST" and isinstance(payload, dict) else None
+    if request.method == "POST" and (
+        isinstance(score, bool)
+        or not isinstance(score, (int, float))
+        or not math.isfinite(score)
+        or not 0 <= score <= 100
+    ):
+        return jsonify(error="Attendance score must be a number from 0 to 100."), 400
+    with closing(database_connect()) as connection, connection:
+        employee = connection.execute(
+            """
+            SELECT 1 FROM employees
+            WHERE tenant_id = ? AND employee_id = ?
+            """,
+            (active_tenant_id(), employee_id),
+        ).fetchone()
+        if not employee:
+            return jsonify(error="Employee was not found."), 404
+        previous = connection.execute(
+            """
+            SELECT score FROM attendance_score_overrides
+            WHERE tenant_id = ? AND employee_id = ?
+            """,
+            (active_tenant_id(), employee_id),
+        ).fetchone()
+        if request.method == "POST":
+            connection.execute(
+                """
+                INSERT INTO attendance_score_overrides
+                    (tenant_id, employee_id, score, reason, actor_id, actor_email, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (tenant_id, employee_id)
+                DO UPDATE SET score = excluded.score, reason = excluded.reason,
+                    actor_id = excluded.actor_id, actor_email = excluded.actor_email,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    active_tenant_id(), employee_id, float(score), reason.strip(),
+                    session.get("tenant_admin_id"), session.get("tenant_admin_email"),
+                ),
+            )
+            updated_score = float(score)
+        else:
+            connection.execute(
+                "DELETE FROM attendance_score_overrides WHERE tenant_id = ? AND employee_id = ?",
+                (active_tenant_id(), employee_id),
+            )
+            updated_score = None
+        connection.execute(
+            """
+            INSERT INTO attendance_score_audit_events
+                (id, tenant_id, employee_id, previous_score, score, reason, actor_id, actor_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                secrets.token_urlsafe(18), active_tenant_id(), employee_id,
+                previous[0] if previous else None, updated_score, reason.strip(),
+                session.get("tenant_admin_id"), session.get("tenant_admin_email"),
+            ),
+        )
+        result = attendance_payload(connection)
+    return jsonify(attendance=result)
+
+
+@app.post("/api/attendance/shifts/override")
+def override_attendance_shift():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="An attendance correction is required."), 400
+    run_id = payload.get("runId")
+    employee_id = payload.get("employeeId")
+    shift_text = payload.get("date")
+    status = payload.get("status")
+    reason = payload.get("reason")
+    if (
+        not isinstance(run_id, str)
+        or not run_id
+        or not isinstance(employee_id, str)
+        or not employee_id
+        or not isinstance(shift_text, str)
+        or not isinstance(reason, str)
+        or not 1 <= len(reason.strip()) <= 500
+        or status not in {"attended", "late", "absent", "sick", "vacation", "approved_leave"}
+    ):
+        return jsonify(error="Choose a valid attendance status and provide a reason of 1 to 500 characters."), 400
+    try:
+        shift_date = date.fromisoformat(shift_text)
+    except ValueError:
+        return jsonify(error="Provide a valid shift date in YYYY-MM-DD format."), 400
+    if shift_date.isoformat() != shift_text:
+        return jsonify(error="Provide a valid shift date in YYYY-MM-DD format."), 400
+    with closing(database_connect()) as connection, connection:
+        row = connection.execute(
+            """
+            SELECT shift_start, status, source, reason, employee_name, location,
+                   role, clock_in_at, clock_in_timezone
+            FROM attendance_shift_records
+            WHERE tenant_id = ? AND schedule_run_id = ? AND employee_id = ?
+                AND shift_date = ?
+            """,
+            (active_tenant_id(), run_id, employee_id, shift_text),
+        ).fetchone()
+        if not row:
+            return jsonify(error="The scheduled attendance record was not found. Sync attendance and retry."), 404
+        existing = {(run_id, employee_id, shift_text): (row[1], row[2], row[3])}
+        record_attendance_status(
+            connection,
+            run_id=run_id,
+            employee_id=employee_id,
+            shift_date=shift_text,
+            shift_start=row[0],
+            status=status,
+            source="manual",
+            reason=reason.strip(),
+            employee_name=row[4],
+            location=row[5],
+            role=row[6],
+            clock_in_at=row[7],
+            clock_in_timezone=row[8],
+            existing=existing,
+            preserve_manual=False,
+            actor_id=session.get("tenant_admin_id"),
+            actor_email=session.get("tenant_admin_email"),
+        )
+        result = attendance_payload(connection)
+    return jsonify(attendance=result)
 
 
 @app.get("/api/bamboohr/time-offs")

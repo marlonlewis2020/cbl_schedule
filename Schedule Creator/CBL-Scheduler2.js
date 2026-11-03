@@ -621,7 +621,7 @@ function downloadInputs(){
 const MENU_GROUPS=[
     {label:'Workspace',pages:[['home','Overview']]},
     {label:'Plan schedules',pages:[['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['meta','META · operating days'],['schedules','Weekly schedules']]},
-    {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations']]},
+    {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations'],['attendance','Attendance']]},
     {label:'Integrations',pages:[['publish','Publish to BambooHR'],['links','Workforce Links']]},
     {label:'Data & settings',pages:[['source','Source & backups']]}
 ];
@@ -664,7 +664,7 @@ function applyBranding(){
 }
 function businessSettingsPanel(){
     let c=businessConfig;
-    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs a read-only request to the tenant’s time-off endpoint. Only after a successful test can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business administrators',`<p>Add or remove administrators, and view your business approval status.</p><a class="button" href="/business">Manage administrators</a>`)
+    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs read-only requests to the tenant’s time-off and time-tracking endpoints. Only after both requests succeed can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business administrators',`<p>Add or remove administrators, and view your business approval status.</p><a class="button" href="/business">Manage administrators</a>`)
 }
 function pageAllowed(p){
     return p==='settings'||['controls','schedules'].includes(p)||PAGE_OPTIONS.some(([id])=>id===p&&appSettings().menus[id]!==false)
@@ -672,6 +672,51 @@ function pageAllowed(p){
 function settingsPage(){
     let s=appSettings();
     return heading('WORKSPACE / SETTINGS','Choose what your team sees.','Controls & lock and Weekly schedules always remain available. Settings stays accessible so you can re-enable other pages.')+businessSettingsPanel()+panel('Sidebar menu',`${MENU_GROUPS.map(group=>`<h3>${esc(group.label)}</h3><div class="settingschecks">${group.pages.map(([id,label])=>`<label class="setting-row"><input type="checkbox" data-menu-setting="${id}" ${pageAllowed(id)?'checked':''} ${['controls','schedules'].includes(id)?'disabled':''}><span><b>${label}</b><small>${['controls','schedules'].includes(id)?'Always available':'Show in sidebar'}</small></span></label>`).join('')}</div>`).join('')}<p class="note">Disabled pages cannot be opened through in-app shortcuts. These workspace preferences are not a security boundary or a replacement for user access permissions.</p>`)+panel('Schedule email',`<label class="setting-row"><input type="checkbox" id="workforceCcSetting" ${s.workforceCc?'checked':''}><span><b>Always Cc workforce@cbljm.co</b><small>Include Workforce in schedule review emails</small></span></label><p class="note">The Cc is fixed in the app’s email composer. Change this option here to omit it. External mail clients allow recipients to edit their drafts.</p><label>Additional non-working dates · one YYYY-MM-DD per line<textarea id="holidaySetting" rows="5" placeholder="2026-12-25">${esc(s.holidays)}</textarea></label><p class="note">Review deadlines exclude the sending date, Saturdays, Sundays and the dates listed above. Public holidays are excluded only when entered here. Dates use Jamaica time. If you send on a later day, regenerate the email to refresh the deadline.</p>`)+panel('Workspace file',`<p>Save this configuration and all saved schedules as a ZIP bundle. Extract all files before opening the included HTML.</p><p class="note">Bundle downloads require the app to be hosted because browsers block access to local CSS and JavaScript files.</p><button type="button" class="primary" data-action="portable">Download Portable ZIP Bundle</button><p class="note">BambooHR API credentials are excluded. Treat the exported bundle as confidential workforce data.</p>`)+overtimeSettingsPanel()
+}
+function attendancePage(){
+    let data=attendanceData,settings=data?.settings||{latenessToleranceMinutes:15,scorePeriodDays:30},selectedDate=data?.date||attendanceSelectedDate,currentDate=data?.currentDate||selectedDate;
+    let allShifts=data?.shifts||[],allScores=(data?.scores||[]).filter(item=>item.active);
+    let locations=[...new Set([...allShifts,...allScores].map(item=>item.location).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    let roles=[...new Set([...allShifts,...allScores].map(item=>item.role).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    if(!locations.includes(attendanceLocationFilter))attendanceLocationFilter='All';
+    if(!roles.includes(attendanceRoleFilter))attendanceRoleFilter='All';
+    let matchesFilter=item=>(attendanceLocationFilter==='All'||item.location===attendanceLocationFilter)&&(attendanceRoleFilter==='All'||item.role===attendanceRoleFilter);
+    let shifts=allShifts.filter(matchesFilter),scores=allScores.filter(matchesFilter);
+    let summary={expected:0,clockedIn:0,late:0,absent:0,approvedLeave:0,attendancePercent:null};
+    for(let item of shifts){
+        if(['approved_leave','sick','vacation'].includes(item.status)){
+            summary.approvedLeave++;
+            continue
+        }
+        summary.expected++;
+        if(['attended','late'].includes(item.status))summary.clockedIn++;
+        if(item.status==='late')summary.late++;
+        if(item.status==='absent')summary.absent++
+    }
+    if(summary.expected)summary.attendancePercent=summary.clockedIn*100/summary.expected;
+    let shiftRows=shifts.length?shifts.map(item=>`<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${esc(new Date(item.shiftStart).toLocaleTimeString())}</td><td>${item.clockIn?esc(new Date(item.clockIn).toLocaleTimeString()):'—'}</td><td>${badge(item.status,item.status==='absent'?'bad':item.status==='late'?'warn':item.status==='attended'?'good':'')}</td><td>${esc(item.reason||'')}</td><td><button type="button" data-action="editAttendanceShift" data-run-id="${esc(item.runId)}" data-employee-id="${esc(item.employeeId)}" data-shift-date="${esc(item.date)}" data-status="${esc(item.status)}" data-name="${esc(item.name)}">Correct</button></td></tr>`).join(''):(allShifts.length?'<tr><td colspan="9">No shifts match these filters.</td></tr>':'<tr><td colspan="9">No attendance records are available for this period.</td></tr>');
+    let scoreRows=scores.map(item=>`<tr><td>${esc(item.name)}<small>${esc(item.employeeId)}</small></td><td>${esc(item.location)}</td><td>${esc(item.role)}</td><td>${item.attended} / ${item.scheduled}</td><td>${item.computedScore===null?'No data':f(item.computedScore,2)+'%'}</td><td>${item.manualOverride?badge('Manual override','warn'):badge(item.score===null?'No data':f(item.score,2)+'%')}</td><td><button type="button" data-action="editAttendanceScore" data-employee-id="${esc(item.employeeId)}" data-score="${item.score??''}" data-name="${esc(item.name)}" data-manual="${item.manualOverride?'true':'false'}">Set override</button></td></tr>`).join('');
+    return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+
+        panel('BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
+        panel('Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
+        panel('Attendance rules',`<div class="formgrid"><label>Lateness tolerance · minutes<input id="attendanceTolerance" type="number" min="0" max="120" step="1" value="${settings.latenessToleranceMinutes}"></label><label>Attendance score period · days<input id="attendancePeriod" type="number" min="30" max="45" step="1" value="${settings.scorePeriodDays}"></label></div><div class="actions"><button type="button" class="primary" data-action="saveAttendanceSettings">Save attendance rules</button></div><p class="note">Clock entries count as attendance evidence even if they are awaiting BambooHR approval. Approved leave is excluded from absence classification and the score denominator.</p>`)+
+        stats([['Expected shifts',f(summary.expected),'Accepted shifts in selected period'],['Clocked in',f(summary.clockedIn),'Includes late arrivals'],['Attendance',summary.attendancePercent===null?'—':f(summary.attendancePercent,2)+'%','Clocked in ÷ expected'],['Late / absent',f(summary.late)+' / '+f(summary.absent),'Exceptions in selected period'],['Approved leave',f(summary.approvedLeave),'Excluded from attendance rate']])+
+        panel(`Attendance · ${esc(data?.periodStart||selectedDate||'')} to ${esc(data?.periodEnd||selectedDate||'')}`,`<div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Location</th><th>Role</th><th>Shift start</th><th>Clock-in</th><th>Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody>${shiftRows}</tbody></table></div>`)+
+        panel(`Attendance scores · selected period`,scores.length?`<div class="tablewrap"><table><thead><tr><th>Employee</th><th>Location</th><th>Role</th><th>Attended / scheduled</th><th>Calculated</th><th>Effective</th><th>Actions</th></tr></thead><tbody>${scoreRows}</tbody></table></div>`:(allScores.length?'<p>No active employees match these filters.</p>':'<p>No active employees are available.</p>'))+
+        '<dialog id="attendanceOverrideDialog" class="wide-dialog"></dialog>'
+}
+function openAttendanceScoreDialog(button){
+    let item=(attendanceData?.scores||[]).find(score=>String(score.employeeId)===button.dataset.employeeId);
+    if(!item)throw Error('The selected employee attendance score could not be found.');
+    let dialog=workflowDialog('attendanceOverrideDialog');
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE OVERRIDE</div><h2>Attendance score · ${esc(item.name)}</h2></div><button type="button" data-dialog-close="attendanceOverrideDialog" aria-label="Close">✕</button></div><p>Calculated score: ${item.computedScore===null?'No data':f(item.computedScore,2)+'%'} · ${item.attended} attended of ${item.scheduled} scheduled shifts.</p><label>Override score · 0–100<input id="attendanceOverrideScore" type="number" min="0" max="100" step="0.01" value="${item.score??''}"></label><label>Reason · required<textarea id="attendanceOverrideReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" data-action="saveAttendanceScoreOverride" data-employee-id="${esc(item.employeeId)}">Save override</button>${item.manualOverride?`<button type="button" class="danger" data-action="removeAttendanceScoreOverride" data-employee-id="${esc(item.employeeId)}">Remove override</button>`:''}<button type="button" data-dialog-close="attendanceOverrideDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
+}
+function openAttendanceShiftDialog(button){
+    let dialog=workflowDialog('attendanceOverrideDialog');
+    let options=[['attended','Attended'],['late','Late'],['absent','Absent'],['sick','Sick'],['vacation','Vacation'],['approved_leave','Approved leave']];
+    dialog.innerHTML=`<div class="dialoghead"><div><div class="eyebrow">AUDITABLE CORRECTION</div><h2>Attendance · ${esc(button.dataset.name)}</h2></div><button type="button" data-dialog-close="attendanceOverrideDialog" aria-label="Close">✕</button></div><p>${esc(button.dataset.shiftDate)} · Current status: ${esc(button.dataset.status)}</p><label>Corrected status ${select(options,button.dataset.status,'id="attendanceShiftStatus"')}</label><label>Reason · required<textarea id="attendanceShiftReason" maxlength="500" rows="3"></textarea></label><div class="actions"><button type="button" class="primary" data-action="saveAttendanceShiftOverride" data-run-id="${esc(button.dataset.runId)}" data-employee-id="${esc(button.dataset.employeeId)}" data-shift-date="${esc(button.dataset.shiftDate)}">Save correction</button><button type="button" data-dialog-close="attendanceOverrideDialog">Cancel</button></div>`;
+    if(!dialog.open)dialog.showModal()
 }
 function applyMenuSettings(){
     if(!pageAllowed(page))page='controls';
@@ -793,6 +838,23 @@ function mailtoUrl(p){
 document.addEventListener('change',e=>{
     if(!model)return;let t=e.target;if(t.dataset.menuSetting){
         let id=t.dataset.menuSetting;if(!['controls','schedules'].includes(id))appSettings().menus[id]=t.checked;render();queueSave()
+    }
+    if(t.id==='attendanceLocationFilter'||t.id==='attendanceRoleFilter'){
+        if(t.id==='attendanceLocationFilter')attendanceLocationFilter=t.value;
+        else attendanceRoleFilter=t.value;
+        render();
+        return
+    }
+    if(['attendancePeriodMode','attendanceDateFilter','attendanceStartMonth','attendanceEndMonth'].includes(t.id)){
+        if(t.id==='attendancePeriodMode')attendancePeriodMode=t.value;
+        if(t.id==='attendanceDateFilter')attendanceSelectedDate=t.value;
+        if(t.id==='attendanceStartMonth')attendanceStartMonth=t.value;
+        if(t.id==='attendanceEndMonth')attendanceEndMonth=t.value;
+        loadSelectedAttendance().catch(error=>{
+            attendanceSyncStatus=error.message;
+            if(page==='attendance')render(true)
+        });
+        return
     }
     if(t.id==='workforceCcSetting'){
         appSettings().workforceCc=t.checked;queueSave()
@@ -2053,8 +2115,8 @@ document.addEventListener('click',async e=>{
 }
 );
 let storageMode='unknown',storageReason='';
-let model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
-let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[];
+let model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
+let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0;
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }
@@ -2078,7 +2140,7 @@ async function directoryRequest(path,options={}){
             'Content-Type':'application/json',...(options.headers||{})
         }
     }),body=await response.json().catch(()=>({}));
-    if(!response.ok)throw Error(body.error||'Directory request failed with HTTP '+response.status+'.');
+    if(!response.ok)throw Error(body.error||'Request to '+path+' failed with HTTP '+response.status+'.');
     return body
 }
 function blankRosterProfile(employee,index){
@@ -2134,6 +2196,91 @@ async function loadDirectoryData(){
     catch(error){
         directoryError=error.message
     }
+}
+function applyAttendanceScores(data){
+    if(!Array.isArray(data?.scores))return false;
+    let scores=new Map(data.scores.map(item=>[String(item.employeeId),item.score===null?null:Number(item.score)])),changed=false;
+    for(let employee of model.roster){
+        let id=String(employee.id);
+        if(!scores.has(id))continue;
+        let score=scores.get(id);
+        if(employee.attendance!==score){
+            employee.attendance=score;
+            changed=true
+        }
+    }
+    return changed
+}
+function attendancePeriodRange(){
+    if(attendancePeriodMode==='day'){
+        let selectedDate=attendanceSelectedDate||attendanceData?.currentDate||attendanceData?.date;
+        if(!selectedDate)throw Error('Choose an attendance date.');
+        return {start:selectedDate,end:selectedDate}
+    }
+    if(!/^\d{4}-\d{2}$/.test(attendanceStartMonth)||!/^\d{4}-\d{2}$/.test(attendanceEndMonth))throw Error('Choose both a start and end month.');
+    if(attendanceStartMonth>attendanceEndMonth)throw Error('The start month must not be after the end month.');
+    let [startYear,startMonth]=attendanceStartMonth.split('-').map(Number),[endYear,endMonth]=attendanceEndMonth.split('-').map(Number);
+    if(startMonth<1||startMonth>12||endMonth<1||endMonth>12)throw Error('Choose valid calendar months.');
+    let start=`${attendanceStartMonth}-01`,end=new Date(Date.UTC(endYear,endMonth,0)).toISOString().slice(0,10),currentDate=attendanceData?.currentDate;
+    if(currentDate&&end>currentDate)end=currentDate;
+    if(currentDate&&start>currentDate)throw Error('The selected period cannot start in the future.');
+    if(startYear===endYear&&startMonth===endMonth&&end<start)throw Error('The selected month has no attendance dates yet.');
+    return {start,end}
+}
+async function loadSelectedAttendance(){
+    let range=attendancePeriodRange();
+    attendanceSyncStatus='Loading attendance…';
+    render();
+    await loadAttendanceData(range.start,range.end);
+    attendanceSyncStatus='';
+    if(page==='attendance')render(true)
+}
+async function loadAttendanceData(startDate,endDate){
+    let sequence=++attendanceLoadSequence,path=startDate&&endDate?'/attendance?start='+encodeURIComponent(startDate)+'&end='+encodeURIComponent(endDate):'/attendance';
+    let result=await directoryRequest(path);
+    if(sequence!==attendanceLoadSequence)return;
+    attendanceData=result;
+    attendanceSelectedDate=result.date||result.currentDate;
+    if(!attendanceStartMonth)attendanceStartMonth=result.currentDate.slice(0,7);
+    if(!attendanceEndMonth)attendanceEndMonth=result.currentDate.slice(0,7);
+    let changed=!startDate&&!endDate&&applyAttendanceScores(result);
+    if(changed)await saveState()
+}
+async function syncAttendance(silent=true,selectedPeriod=null){
+    if(!tenantAuthCsrfToken||document.hidden)return;
+    attendanceLastAttempt=Date.now();
+    attendanceSyncStatus='Syncing BambooHR attendance…';
+    try{
+        let synced=await directoryRequest('/attendance/sync',{
+            method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(selectedPeriod||{})
+        });
+        if(selectedPeriod){
+            attendanceData=synced;
+            attendanceSelectedDate=synced.currentDate
+        }
+        else{
+            if(applyAttendanceScores(synced))await saveState();
+            let range=attendancePeriodRange();
+            await loadAttendanceData(range.start,range.end)
+        }
+        attendanceSyncStatus='';
+        if(!silent)message('Attendance refreshed at '+new Date(synced.reportedAt).toLocaleTimeString()+'.');
+    }
+    catch(error){
+        attendanceSyncStatus=error.message;
+        if(!silent)message('Attendance sync failed: '+error.message,true)
+    }
+    if(page==='attendance')render(true)
+}
+function startAttendancePolling(){
+    if(attendanceSyncTimer)clearInterval(attendanceSyncTimer);
+    attendanceSyncTimer=setInterval(()=>{
+        if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
+    },60*1000);
+    document.addEventListener('visibilitychange',()=>{
+        if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
+    });
+    syncAttendance(true)
 }
 async function loadBambooPublishStatus(){
     try{
@@ -2832,7 +2979,7 @@ function render(preserveScroll=false){
     $('lockState').className=model.locked?'lock locked':'lock';
     storageStatus();
     $('content').innerHTML=({
-        home,pools,roster,employees:employeesPage,scheduleLocations:scheduleLocationsPage,controls,meta:metaPage,schedules,publish:bambooPublishPage,source:sourcePage,settings:settingsPage,links:workforceLinksPage
+        home,pools,roster,employees:employeesPage,scheduleLocations:scheduleLocationsPage,attendance:attendancePage,controls,meta:metaPage,schedules,publish:bambooPublishPage,source:sourcePage,settings:settingsPage,links:workforceLinksPage
     }
     [page])();
     document.querySelectorAll('#content [data-action="timeOffWorkbook"]').forEach(button=>{
@@ -3188,7 +3335,7 @@ async function action(a,element=null){
             if(!apiKey?.trim())throw Error('Enter an API key to test.');
             bambooPromotionToken='';
             $('promoteBambooKey').hidden=true;
-            $('businessKeyStatus').textContent='Testing a read-only BambooHR time-off request…';
+            $('businessKeyStatus').textContent='Testing read-only BambooHR time-off and time-tracking requests…';
             try{
                 let result=await directoryRequest('/bamboohr/validate-key',{method:'POST',body:JSON.stringify({tenantId,apiKey})});
                 bambooPromotionToken=result.promotionToken;
@@ -3220,6 +3367,72 @@ async function action(a,element=null){
             await loadDirectoryData();
             if(directoryError)throw Error(directoryError);
             render(true);
+            return
+        }
+        if(a==='syncAttendance'){
+            await syncAttendance(false,attendancePeriodRange());
+            return
+        }
+        if(a==='saveAttendanceSettings'){
+            let settings={
+                latenessToleranceMinutes:Number($('attendanceTolerance')?.value),
+                scorePeriodDays:Number($('attendancePeriod')?.value)
+            };
+            if(!Number.isInteger(settings.latenessToleranceMinutes)||settings.latenessToleranceMinutes<0||settings.latenessToleranceMinutes>120||!Number.isInteger(settings.scorePeriodDays)||settings.scorePeriodDays<30||settings.scorePeriodDays>45)throw Error('Set lateness tolerance from 0 to 120 minutes and the attendance period from 30 to 45 days.');
+            let result=await directoryRequest('/attendance/settings',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(settings)
+            });
+            if(attendanceData)attendanceData.settings=result.settings;
+            await syncAttendance(true);
+            render(true);
+            message('Attendance rules saved.');
+            return
+        }
+        if(a==='editAttendanceScore'){
+            openAttendanceScoreDialog(element);
+            return
+        }
+        if(a==='saveAttendanceScoreOverride'||a==='removeAttendanceScoreOverride'){
+            let employeeId=element.dataset.employeeId,reason=$('attendanceOverrideReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the attendance score override.');
+            let options={
+                method:a==='saveAttendanceScoreOverride'?'POST':'DELETE',
+                headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({reason})
+            };
+            if(a==='saveAttendanceScoreOverride'){
+                let score=$('attendanceOverrideScore')?.value;
+                if(score===''||score===undefined||!Number.isFinite(Number(score))||Number(score)<0||Number(score)>100)throw Error('Enter an attendance score from 0 to 100.');
+                options.body=JSON.stringify({score:Number(score),reason})
+            }
+            await directoryRequest('/attendance/scores/'+encodeURIComponent(employeeId)+'/override',options);
+            let attendanceRange=attendancePeriodRange();
+            await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+            $('attendanceOverrideDialog')?.close();
+            render(true);
+            await saveState();
+            message(a==='saveAttendanceScoreOverride'?'Attendance score override saved and audited.':'Attendance score override removed and audited.');
+            return
+        }
+        if(a==='editAttendanceShift'){
+            openAttendanceShiftDialog(element);
+            return
+        }
+        if(a==='saveAttendanceShiftOverride'){
+            let reason=$('attendanceShiftReason')?.value.trim();
+            if(!reason)throw Error('Enter a reason for the attendance correction.');
+            await directoryRequest('/attendance/shifts/override',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({
+                    runId:element.dataset.runId,employeeId:element.dataset.employeeId,
+                    date:element.dataset.shiftDate,status:$('attendanceShiftStatus')?.value,reason
+                })
+            });
+            let attendanceRange=attendancePeriodRange();
+            await loadAttendanceData(attendanceRange.start,attendanceRange.end);
+            $('attendanceOverrideDialog')?.close();
+            render(true);
+            message('Attendance correction saved and audited.');
             return
         }
         if(a==='refreshBambooStatus'){
@@ -4286,7 +4499,14 @@ async function init(){
         tenantAuthCsrfToken=authState.csrfToken;
         tenantMembership=authState.membership;
         model.user={firstName:authState.displayName||'',email:authState.email||''};
+        try{
+            await loadAttendanceData()
+        }
+        catch(error){
+            attendanceSyncStatus=error.message
+        }
         render();
+        startAttendancePolling();
     }
     catch(err){
         $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'

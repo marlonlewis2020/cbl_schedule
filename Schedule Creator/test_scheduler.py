@@ -1474,13 +1474,26 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
             self.assertEqual(first_test.status_code, 200)
             self.assertNotIn("apiKey", first_test.get_json())
             self.assertFalse(env_path.exists())
-            test_url = mocked_urlopen.call_args.args[0].full_url
+            test_urls = [
+                call.args[0].full_url for call in mocked_urlopen.call_args_list
+            ]
             self.assertTrue(
-                test_url.startswith(
-                    "https://cbljm.bamboohr.com/api/v1/time_off/whos_out?start="
+                any(
+                    url.startswith(
+                        "https://cbljm.bamboohr.com/api/v1/time_off/whos_out?start="
+                    )
+                    for url in test_urls
                 )
             )
-            self.assertIn("&end=", test_url)
+            self.assertTrue(
+                any(
+                    url.startswith(
+                        "https://cbljm.bamboohr.com/api/v1/time_tracking/timesheet_entries?start="
+                    )
+                    for url in test_urls
+                )
+            )
+            self.assertTrue(all("&end=" in url for url in test_urls))
 
             wrong_tenant = self.client.post(
                 "/api/bamboohr/promote-key",
@@ -2390,6 +2403,449 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         )
 
 
+class AttendanceAutomationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.original_database_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.temporary_directory.name) / "attendance.sqlite3"
+        scheduler.initialize_database()
+        scheduler.app.config["TESTING"] = True
+        self.client = scheduler.app.test_client()
+        authenticate_test_admin(self.client)
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_database_path
+        self.temporary_directory.cleanup()
+
+    def seed_attendance_schedule(self):
+        employees = (
+            ("attendance-111", "111", "Clocked employee"),
+            ("attendance-222", "222", "On leave employee"),
+            ("attendance-333", "333", "Absent employee"),
+        )
+        shifts = [
+            {
+                "id": employee_id,
+                "name": name,
+                "bamboohrId": bamboohr_id,
+                "location": "Kingston",
+                "role": "Cashier",
+                "slots": [6, None, None, None, None, None, None],
+            }
+            for employee_id, bamboohr_id, name in employees
+        ]
+        schedule = {
+            "id": "attendance-run",
+            "start": "2026-11-02",
+            "end": "2026-11-08",
+            "location": "Kingston",
+            "role": "Cashier",
+            "controls": {"span": 8, "hours": 8},
+            "employees": shifts,
+        }
+        with closing(scheduler.database_connect()) as connection, connection:
+            for employee_id, bamboohr_id, name in employees:
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id, tenant_id, bamboohr_id, name, location, role, active)
+                    VALUES (?, ?, ?, ?, 'Kingston', 'Cashier', 1)
+                    """,
+                    (
+                        employee_id,
+                        scheduler.DEFAULT_TENANT_ID,
+                        bamboohr_id,
+                        name,
+                    ),
+                )
+            connection.execute(
+                """
+                INSERT INTO accepted_schedules
+                    (run_id, tenant_id, week_start, location, role, payload)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule["id"],
+                    scheduler.DEFAULT_TENANT_ID,
+                    schedule["start"],
+                    schedule["location"],
+                    schedule["role"],
+                    json.dumps(schedule),
+                ),
+            )
+        return [
+            {
+                "id": "7685",
+                "bamboohrId": "111",
+                "date": "2026-11-02",
+                "start": "2026-11-02T11:20:00+00:00",
+                "end": "2026-11-02T13:20:00+00:00",
+                "timezone": "America/Jamaica",
+                "approved": False,
+            }
+        ], [
+            {
+                "bamboohrId": "222",
+                "start": "2026-11-02",
+                "end": "2026-11-02",
+            }
+        ]
+
+    def test_clock_entry_parser_uses_clock_starts_without_approval(self):
+        parsed = scheduler.parse_bamboohr_clock_entries(
+            [
+                {
+                    "id": 7685,
+                    "employeeId": 111,
+                    "type": "clock",
+                    "date": "2026-11-02",
+                    "start": "2026-11-02T05:00:00+00:00",
+                    "end": "2026-11-02T11:10:00+00:00",
+                    "timezone": "America/Bogota",
+                    "hours": 6.1667,
+                    "approved": False,
+                },
+                {
+                    "id": 9,
+                    "employeeId": 111,
+                    "type": "hour",
+                    "date": "2026-11-02",
+                },
+            ]
+        )
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["id"], "7685")
+        self.assertEqual(parsed[0]["bamboohrId"], "111")
+        self.assertFalse(parsed[0]["approved"])
+        with self.assertRaises(scheduler.AttendanceIntegrationError):
+            scheduler.parse_bamboohr_clock_entries(
+                [
+                    {
+                        "id": 10,
+                        "employeeId": 111,
+                        "type": "clock",
+                        "date": "2026-11-02",
+                        "start": "2026-11-02T05:00:00",
+                        "end": None,
+                        "timezone": "America/Jamaica",
+                    }
+                ]
+            )
+
+    def test_sync_classifies_late_absent_and_approved_leave_idempotently(self):
+        clock_entries, time_off = self.seed_attendance_schedule()
+        now = scheduler.datetime(2026, 11, 2, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+
+        class CapturingConnection:
+            def __init__(self, connection):
+                self.connection = connection
+                self.batch_parameters = None
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def executemany(self, query, parameters):
+                self.batch_parameters = list(parameters)
+                return self.connection.executemany(query, self.batch_parameters)
+
+        with closing(scheduler.database_connect()) as connection, connection:
+            capturing_connection = CapturingConnection(connection)
+            result = scheduler.sync_attendance_data(
+                capturing_connection, clock_entries, time_off, now=now
+            )
+            self.assertIs(type(capturing_connection.batch_parameters[0][-1]), int)
+            self.assertEqual(capturing_connection.batch_parameters[0][-1], 0)
+        statuses = {
+            item["employeeId"]: item["status"] for item in result["shifts"]
+        }
+        self.assertEqual(
+            statuses,
+            {
+                "attendance-111": "late",
+                "attendance-222": "approved_leave",
+                "attendance-333": "absent",
+            },
+        )
+        self.assertEqual(result["summary"]["expected"], 2)
+        self.assertEqual(result["summary"]["clockedIn"], 1)
+        self.assertEqual(result["summary"]["attendancePercent"], 50)
+        self.assertEqual(result["summary"]["late"], 1)
+        self.assertEqual(result["summary"]["absent"], 1)
+        self.assertEqual(result["summary"]["approvedLeave"], 1)
+        scores = {item["employeeId"]: item for item in result["scores"]}
+        self.assertEqual(scores["attendance-111"]["score"], 100)
+        self.assertIsNone(scores["attendance-222"]["score"])
+        self.assertEqual(scores["attendance-333"]["score"], 0)
+        self.assertEqual(result["classifiedChanges"], 3)
+
+        with closing(scheduler.database_connect()) as connection, connection:
+            repeated = scheduler.sync_attendance_data(
+                connection, clock_entries, time_off, now=now
+            )
+            audit_count = connection.execute(
+                "SELECT COUNT(*) FROM attendance_shift_audit_events"
+            ).fetchone()[0]
+        self.assertEqual(repeated["classifiedChanges"], 0)
+        self.assertEqual(audit_count, 3)
+
+    def test_attendance_api_returns_historical_day_and_rejects_future_dates(self):
+        base_datetime = scheduler.datetime
+
+        class FixedDateTime(base_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = base_datetime(
+                    2026, 11, 3, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE
+                )
+                return fixed if tz is None else fixed.astimezone(tz)
+
+        with patch.object(scheduler, "datetime", FixedDateTime):
+            clock_entries, time_off = self.seed_attendance_schedule()
+            with closing(scheduler.database_connect()) as connection, connection:
+                scheduler.sync_attendance_data(
+                    connection,
+                    clock_entries,
+                    time_off,
+                    now=base_datetime(
+                        2026, 11, 2, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO attendance_shift_records
+                        (tenant_id, schedule_run_id, employee_id, shift_date,
+                         shift_start, status, source, employee_name, location, role)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scheduler.DEFAULT_TENANT_ID,
+                        "attendance-october-run",
+                        "attendance-111",
+                        "2026-10-12",
+                        9,
+                        "attended",
+                        "manual",
+                        "Clocked employee",
+                        "Kingston",
+                        "Cashier",
+                    ),
+                )
+
+            response = self.client.get("/api/attendance?date=2026-11-02")
+            self.assertEqual(response.status_code, 200)
+            attendance = response.get_json()
+            self.assertEqual(attendance["date"], "2026-11-02")
+            self.assertEqual(attendance["currentDate"], "2026-11-03")
+            self.assertEqual(attendance["summary"]["expected"], 2)
+            self.assertEqual(attendance["summary"]["clockedIn"], 1)
+            self.assertEqual(len(attendance["shifts"]), 3)
+
+            self.assertEqual(
+                self.client.get("/api/attendance?date=not-a-date").status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.get("/api/attendance?date=2026-11-04").status_code,
+                400,
+            )
+
+            period = self.client.get(
+                "/api/attendance?start=2026-10-01&end=2026-11-02"
+            )
+            self.assertEqual(period.status_code, 200)
+            report = period.get_json()
+            self.assertEqual(report["date"], None)
+            self.assertEqual(report["periodStart"], "2026-10-01")
+            self.assertEqual(report["periodEnd"], "2026-11-02")
+            self.assertEqual(len(report["shifts"]), 4)
+            self.assertEqual(report["summary"]["expected"], 3)
+            self.assertEqual(report["summary"]["clockedIn"], 2)
+            self.assertAlmostEqual(report["summary"]["attendancePercent"], 66.67)
+            clocked_score = next(
+                item for item in report["scores"]
+                if item["employeeId"] == "attendance-111"
+            )
+            self.assertEqual(clocked_score["scheduled"], 2)
+            self.assertEqual(
+                self.client.get("/api/attendance?start=2026-11-01").status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.get(
+                    "/api/attendance?start=2026-11-02&end=2026-11-01"
+                ).status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.get(
+                    "/api/attendance?start=2026-11-03&end=2026-11-04"
+                ).status_code,
+                400,
+            )
+            with patch.object(scheduler, "bamboohr_api_key", return_value="test-key"):
+                too_long_sync = self.client.post(
+                    "/api/attendance/sync",
+                    headers={"X-CSRF-Token": "test-csrf-token"},
+                    json={"start": "2025-11-04", "end": "2026-11-03"},
+                )
+            self.assertEqual(too_long_sync.status_code, 400)
+
+    def test_admin_shift_correction_and_score_override_are_audited(self):
+        base_datetime = scheduler.datetime
+
+        class FixedDateTime(base_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = base_datetime(
+                    2026, 11, 2, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE
+                )
+                return fixed if tz is None else fixed.astimezone(tz)
+
+        datetime_patcher = patch.object(scheduler, "datetime", FixedDateTime)
+        datetime_patcher.start()
+        self.addCleanup(datetime_patcher.stop)
+        clock_entries, time_off = self.seed_attendance_schedule()
+        now = scheduler.datetime(2026, 11, 2, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+        with closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(
+                connection, clock_entries, time_off, now=now
+            )
+        csrf = "test-csrf-token"
+        corrected = self.client.post(
+            "/api/attendance/shifts/override",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "runId": "attendance-run",
+                "employeeId": "attendance-333",
+                "date": "2026-11-02",
+                "status": "attended",
+                "reason": "Verified with the manager.",
+            },
+        )
+        self.assertEqual(corrected.status_code, 200)
+        self.assertEqual(
+            next(
+                item["status"]
+                for item in corrected.get_json()["attendance"]["shifts"]
+                if item["employeeId"] == "attendance-333"
+            ),
+            "attended",
+        )
+        override = self.client.post(
+            "/api/attendance/scores/attendance-333/override",
+            headers={"X-CSRF-Token": csrf},
+            json={"score": 75, "reason": "Approved attendance review."},
+        )
+        self.assertEqual(override.status_code, 200)
+        employee_score = next(
+            item
+            for item in override.get_json()["attendance"]["scores"]
+            if item["employeeId"] == "attendance-333"
+        )
+        self.assertEqual(employee_score["computedScore"], 100)
+        self.assertEqual(employee_score["score"], 75)
+        self.assertTrue(employee_score["manualOverride"])
+        removed = self.client.delete(
+            "/api/attendance/scores/attendance-333/override",
+            headers={"X-CSRF-Token": csrf},
+            json={"reason": "Removing temporary review override."},
+        )
+        self.assertEqual(removed.status_code, 200)
+        employee_score = next(
+            item
+            for item in removed.get_json()["attendance"]["scores"]
+            if item["employeeId"] == "attendance-333"
+        )
+        self.assertEqual(employee_score["score"], 100)
+        self.assertFalse(employee_score["manualOverride"])
+        with closing(scheduler.database_connect()) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM attendance_shift_audit_events"
+                ).fetchone()[0],
+                4,
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM attendance_score_audit_events"
+                ).fetchone()[0],
+                2,
+            )
+
+    def test_attendance_settings_require_csrf_and_validate_bounds(self):
+        invalid = self.client.put(
+            "/api/attendance/settings",
+            json={"latenessToleranceMinutes": 121, "scorePeriodDays": 30},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        saved = self.client.put(
+            "/api/attendance/settings",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"latenessToleranceMinutes": 30, "scorePeriodDays": 45},
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(
+            saved.get_json()["settings"],
+            {"latenessToleranceMinutes": 30, "scorePeriodDays": 45},
+        )
+
+    def test_attendance_sync_requests_bounded_time_tracking_and_time_off_ranges(self):
+        today = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date()
+        historical_start = today - scheduler.timedelta(days=60)
+        with (
+            patch.object(scheduler, "bamboohr_api_key", return_value="test-key"),
+            patch.object(scheduler, "bamboohr_json", side_effect=[[], [], [], []]) as fetch,
+        ):
+            response = self.client.post(
+                "/api/attendance/sync",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={},
+            )
+            historical = self.client.post(
+                "/api/attendance/sync",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={"start": historical_start.isoformat(), "end": today.isoformat()},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(historical.status_code, 200)
+        self.assertEqual(historical.get_json()["periodStart"], historical_start.isoformat())
+        self.assertEqual(historical.get_json()["periodEnd"], today.isoformat())
+        self.assertEqual(
+            [call.args[1] for call in fetch.call_args_list],
+            [
+                "time_tracking/timesheet_entries",
+                "time_off/whos_out",
+                "time_tracking/timesheet_entries",
+                "time_off/whos_out",
+            ],
+        )
+        ranges = [call.args[2] for call in fetch.call_args_list]
+        self.assertEqual(ranges[0], ranges[1])
+        self.assertLessEqual(
+            (
+                scheduler.date.fromisoformat(ranges[0]["end"])
+                - scheduler.date.fromisoformat(ranges[0]["start"])
+            ).days,
+            365,
+        )
+        self.assertEqual(ranges[2]["start"], (historical_start - scheduler.timedelta(days=1)).isoformat())
+        self.assertEqual(ranges[2]["end"], today.isoformat())
+
+    def test_key_validation_requires_time_tracking_read_access(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        denied = HTTPError("https://acme.bamboohr.com", 403, "Forbidden", {}, None)
+        with patch.object(
+            scheduler,
+            "urlopen",
+            side_effect=[response, denied],
+        ):
+            failure = scheduler.check_bamboohr_credentials("acme", "test-key")
+        self.assertEqual(failure[1], 403)
+        self.assertIn("time-tracking", failure[0])
+
+
 class DeveloperChangeRequestTests(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -2402,6 +2858,60 @@ class DeveloperChangeRequestTests(unittest.TestCase):
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
+
+    def test_attendance_automation_migration_refreshes_only_active_request(self):
+        definition = next(
+            request
+            for request in scheduler.DEVELOPER_REQUESTS
+            if request[0] == "attendance-automation"
+        )
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE developer_change_requests
+                SET title = 'Old attendance title', description = 'Old attendance text',
+                    status = 'in_progress'
+                WHERE request_id = 'attendance-automation'
+                """
+            )
+            connection.execute(
+                "DELETE FROM app_migrations WHERE migration_id = ?",
+                ("attendance-automation-implementation-v1",),
+            )
+        scheduler.initialize_database()
+        with closing(scheduler.database_connect()) as connection:
+            active = connection.execute(
+                """
+                SELECT title, description, status FROM developer_change_requests
+                WHERE request_id = 'attendance-automation'
+                """
+            ).fetchone()
+        self.assertEqual(active, (definition[1], definition[2], "in_progress"))
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE developer_change_requests SET
+                    title = 'Completed title', description = 'Completed description',
+                    status = 'done'
+                WHERE request_id = 'attendance-automation'
+                """
+            )
+            connection.execute(
+                "DELETE FROM app_migrations WHERE migration_id = ?",
+                ("attendance-automation-implementation-v1",),
+            )
+        scheduler.initialize_database()
+        with closing(scheduler.database_connect()) as connection:
+            done = connection.execute(
+                """
+                SELECT title, description, status FROM developer_change_requests
+                WHERE request_id = 'attendance-automation'
+                """
+            ).fetchone()
+        self.assertEqual(
+            done,
+            ("Completed title", "Completed description", "done"),
+        )
 
     def test_live_attendance_request_migration_refreshes_only_active_requests(self):
         definitions = {

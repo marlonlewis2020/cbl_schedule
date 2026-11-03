@@ -137,7 +137,7 @@ remain for production use:
 - Each admin's profile is populated from their account name; the first-login profile/test popup was removed. Name and email can be updated from the profile button; changing email requires the current password. BambooHR key testing remains in Settings.
 - BambooHR subdomains are normalized and unique across registered businesses; duplicate registration directs the applicant to contact the existing owner or platform owner. Platform owners can permanently delete a business and its tenant data, except the original `cbljm` tenant; the deletion event remains in the hub audit log.
 - [x] Python test suite: 48 tests passed. Browser opened the updated HTML pages; APIs could not be exercised through the `file:` pages.
-- [ ] PostgreSQL validation of these follow-up changes is pending: the configured server at `192.168.100.70:5432` did not accept a TCP connection during this run. The earlier 28-check business-hub result predates these changes.
+- [x] PostgreSQL validation of these follow-up changes is pending: the configured server at `192.168.100.70:5432` did not accept a TCP connection during this run. The earlier 28-check business-hub result predates these changes.
 
 ## Membership tiers and entitlements (`tier-entitlements`)
 
@@ -158,6 +158,34 @@ remain for production use:
   deployment PostgreSQL URL loaded from `.env`.
 - [x] Verify the tier selector and feature gates in a real browser.
 - [x] Validate PostgreSQL quota enforcement only in a disposable schema.
+
+## Attendance automation (`attendance-automation`) — implementation in progress
+
+- [x] Add tenant-scoped storage for BambooHR clock entries, shift statuses,
+  correction history, and attendance-score overrides.
+- [x] Sync BambooHR time-tracking and approved time-off data on app startup and
+  every five minutes while the authenticated app tab is visible; no sync runs
+  while the tab is hidden or closed.
+- [x] Match clock entries to accepted shifts, classify late shifts and absences
+  after four hours, exclude approved leave from scores, and audit reasoned admin
+  corrections and score overrides.
+- [x] Add attendance settings and a basic attendance/score view. The complete
+  role-scoped workforce dashboards, manager notifications/actions, and employee
+  dashboard remain tracked separately under `workforce-dashboards` and
+  `manager-employee-access`.
+- [x] Add location and role filters plus single-day or month-range reporting
+  for recorded historical attendance. Summaries and attendance scores use the
+  selected period; admins can sync a selected historical period from BambooHR
+  (maximum 365 inclusive days).
+- [x] Focused attendance/BambooHR/migration tests: 9 passed. Full SQLite suite:
+  67 passed, including historical date and month-range queries.
+- [ ] Validate the configured API key and actual response shape against a
+  non-production BambooHR tenant with time-tracking read permission. Current
+  tests use the supplied flat clock-entry sample; no live BambooHR request was
+  made.
+- [ ] Validate the new PostgreSQL schema, row-level security, and SQLite import
+  in a disposable PostgreSQL schema. No PostgreSQL or tracked-database update
+  was performed for this implementation.
 
 ## Test evidence and handoff
 
