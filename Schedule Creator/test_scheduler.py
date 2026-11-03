@@ -3255,6 +3255,64 @@ class AttendanceAutomationTests(unittest.TestCase):
         self.assertEqual(repeated["classifiedChanges"], 0)
         self.assertEqual(audit_count, 3)
 
+    def test_timesheet_must_cover_an_hour_and_flags_early_leave_and_overtime(self):
+        self.seed_attendance_schedule()
+        now = scheduler.datetime(2026, 11, 2, 16, 0, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+
+        def entry(entry_id, bamboohr_id, start_hour, end_hour):
+            return {
+                "id": entry_id, "bamboohrId": bamboohr_id, "date": "2026-11-02",
+                "start": f"2026-11-02T{start_hour}:00+00:00",
+                "end": f"2026-11-02T{end_hour}:00+00:00",
+                "timezone": "America/Jamaica", "approved": False,
+            }
+
+        clock_entries = [
+            entry("1", "111", "11:00", "11:30"),
+            entry("2", "222", "11:00", "17:00"),
+            entry("3", "333", "11:00", "20:30"),
+        ]
+        with closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection, clock_entries, [], now=now)
+            rows = {
+                row[0]: row[1:]
+                for row in connection.execute(
+                    """
+                    SELECT employee_id, status, worked_minutes, early_minutes,
+                           overtime_minutes, reason
+                    FROM attendance_shift_records
+                    """
+                ).fetchall()
+            }
+            notifications = connection.execute(
+                "SELECT employee_id, kind FROM attendance_notifications"
+            ).fetchall()
+        self.assertEqual(rows["attendance-111"][0], "absent")
+        self.assertEqual(rows["attendance-111"][1], 30)
+        self.assertIn("at least 60", rows["attendance-111"][4])
+        self.assertEqual(rows["attendance-222"][:4], ("attended", 360, 120, 0))
+        self.assertIn("Left 120 minutes", rows["attendance-222"][4])
+        self.assertEqual(rows["attendance-333"][:4], ("attended", 480, 0, 90))
+        self.assertIn(("attendance-222", "early_leave"), notifications)
+        self.assertNotIn(("attendance-333", "early_leave"), notifications)
+
+    def test_overnight_overlap_under_an_hour_does_not_count_for_next_shift(self):
+        zone = scheduler.ATTENDANCE_TIMEZONE
+        start = scheduler.datetime(2026, 11, 3, 0, 0, tzinfo=zone)
+        end = start + scheduler.timedelta(hours=8)
+        previous_night = {
+            "start": "2026-11-02T16:00:00-05:00",
+            "end": "2026-11-03T00:40:00-05:00",
+        }
+        now = end + scheduler.timedelta(hours=1)
+        result = scheduler.evaluate_shift_timesheet([previous_night], start, end, now)
+        self.assertFalse(result["qualifies"])
+        self.assertEqual(result["workedMinutes"], 40)
+        long_overlap = {**previous_night, "end": "2026-11-03T01:30:00-05:00"}
+        self.assertTrue(
+            scheduler.evaluate_shift_timesheet([long_overlap], start, end, now)["qualifies"]
+        )
+
     def test_attendance_api_returns_historical_day_and_rejects_future_dates(self):
         base_datetime = scheduler.datetime
 

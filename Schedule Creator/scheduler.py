@@ -768,6 +768,10 @@ def initialize_database() -> None:
                 role TEXT NOT NULL DEFAULT '',
                 clock_in_at TEXT,
                 clock_in_timezone TEXT NOT NULL DEFAULT '',
+                clock_out_at TEXT,
+                worked_minutes INTEGER,
+                early_minutes INTEGER NOT NULL DEFAULT 0,
+                overtime_minutes INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (tenant_id, schedule_run_id, employee_id, shift_date)
             );
@@ -1417,6 +1421,19 @@ def initialize_database() -> None:
             if column not in location_columns:
                 connection.execute(
                     f"ALTER TABLE schedule_locations ADD COLUMN {column} {definition}"
+                )
+        shift_record_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(attendance_shift_records)")
+        }
+        for column, definition in (
+            ("clock_out_at", "TEXT"),
+            ("worked_minutes", "INTEGER"),
+            ("early_minutes", "INTEGER NOT NULL DEFAULT 0"),
+            ("overtime_minutes", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in shift_record_columns:
+                connection.execute(
+                    f"ALTER TABLE attendance_shift_records ADD COLUMN {column} {definition}"
                 )
         employee_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(employees)")
@@ -3787,6 +3804,10 @@ ATTENDANCE_RECORD_COLUMNS = (
     "schedule_run_id, employee_id, shift_date, shift_start, status, source, reason, "
     "employee_name, location, role, clock_in_at"
 )
+ATTENDANCE_TIMESHEET_COLUMNS = (
+    ATTENDANCE_RECORD_COLUMNS
+    + ", clock_out_at, worked_minutes, early_minutes, overtime_minutes"
+)
 
 
 def attendance_record_json(row) -> dict[str, object]:
@@ -3794,6 +3815,8 @@ def attendance_record_json(row) -> dict[str, object]:
         "runId": row[0], "employeeId": row[1], "date": row[2], "shiftStart": row[3],
         "status": row[4], "source": row[5], "reason": row[6], "employeeName": row[7],
         "location": row[8], "role": row[9], "clockInAt": row[10],
+        "clockOutAt": row[11], "workedMinutes": row[12],
+        "earlyMinutes": row[13] or 0, "overtimeMinutes": row[14] or 0,
     }
 
 
@@ -3927,7 +3950,7 @@ def scoped_attendance_records(
 ) -> list[dict[str, object]]:
     rows = connection.execute(
         f"""
-        SELECT {ATTENDANCE_RECORD_COLUMNS}
+        SELECT {ATTENDANCE_TIMESHEET_COLUMNS}
         FROM attendance_shift_records
         WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
         ORDER BY shift_date DESC, shift_start DESC, employee_name
@@ -6531,6 +6554,73 @@ def schedule_shift_datetime(shift_date: date, start: object) -> datetime:
     )
 
 
+ATTENDANCE_MIN_WORKED_MINUTES = 60
+ATTENDANCE_EARLY_OVERTIME_GRACE_MINUTES = 60
+ATTENDANCE_ABSENT_AFTER_HOURS = 4
+
+
+def evaluate_shift_timesheet(
+    entries: list[dict[str, object]],
+    shift_start: datetime,
+    shift_end: datetime,
+    now: datetime,
+) -> dict[str, object]:
+    """Measure how much of a scheduled shift the clock entries actually cover."""
+    worked = 0.0
+    first_entry = None
+    first_start = None
+    last_end = None
+    open_entry = False
+    for entry in entries:
+        started = datetime.fromisoformat(str(entry["start"]))
+        ended = datetime.fromisoformat(str(entry["end"])) if entry["end"] else None
+        overlap = (
+            min(ended or max(now, started), shift_end) - max(started, shift_start)
+        ).total_seconds() / 60
+        if overlap <= 0:
+            continue
+        worked += overlap
+        if first_start is None or started < first_start:
+            first_entry, first_start = entry, started
+        if ended is None:
+            open_entry = True
+        elif last_end is None or ended > last_end:
+            last_end = ended
+    shift_minutes = (shift_end - shift_start).total_seconds() / 60
+    required = min(ATTENDANCE_MIN_WORKED_MINUTES, shift_minutes)
+    qualifies = first_entry is not None and worked + 1e-6 >= required
+    early = overtime = 0
+    if qualifies:
+        if open_entry:
+            if now > shift_end:
+                overtime = int((now - shift_end).total_seconds() // 60)
+        elif last_end is not None:
+            if last_end > shift_end:
+                overtime = int((last_end - shift_end).total_seconds() // 60)
+            elif now >= shift_end or now >= last_end + timedelta(
+                minutes=ATTENDANCE_MIN_WORKED_MINUTES
+            ):
+                early = int((shift_end - last_end).total_seconds() // 60)
+    grace = ATTENDANCE_EARLY_OVERTIME_GRACE_MINUTES
+    worked_minutes = int(round(worked))
+    return {
+        "first": first_entry,
+        "workedMinutes": worked_minutes,
+        "requiredMinutes": int(required),
+        "qualifies": qualifies,
+        "inProgress": (
+            first_entry is not None and not qualifies and open_entry and now < shift_end
+        ),
+        "clockOutAt": (
+            last_end.isoformat() if last_end is not None and not open_entry else None
+        ),
+        "earlyMinutes": early if early > grace else 0,
+        "overtimeMinutes": overtime if overtime > grace else 0,
+        "partial": qualifies and worked_minutes + grace < shift_minutes,
+        "shiftMinutes": int(shift_minutes),
+    }
+
+
 def record_attendance_status(
     connection: DatabaseConnection,
     *,
@@ -6550,6 +6640,7 @@ def record_attendance_status(
     preserve_manual: bool = True,
     actor_id: str | None = None,
     actor_email: str | None = None,
+    timesheet: dict[str, object] | None = None,
 ) -> bool:
     tenant_id = active_tenant_id()
     key = (run_id, employee_id, shift_date)
@@ -6579,6 +6670,39 @@ def record_attendance_status(
         ),
     )
     existing[key] = (status, source, reason)
+    if timesheet is not None:
+        connection.execute(
+            """
+            UPDATE attendance_shift_records
+            SET clock_out_at = ?, worked_minutes = ?, early_minutes = ?,
+                overtime_minutes = ?
+            WHERE tenant_id = ? AND schedule_run_id = ? AND employee_id = ?
+                AND shift_date = ?
+            """,
+            (
+                timesheet["clockOutAt"], timesheet["workedMinutes"],
+                timesheet["earlyMinutes"], timesheet["overtimeMinutes"],
+                tenant_id, run_id, employee_id, shift_date,
+            ),
+        )
+        if timesheet["earlyMinutes"]:
+            connection.execute(
+                """
+                INSERT INTO attendance_notifications
+                    (id, tenant_id, dedupe_key, kind, employee_id, employee_name,
+                     location, shift_date, message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
+                """,
+                (
+                    secrets.token_urlsafe(18), tenant_id,
+                    f"{run_id}|{employee_id}|{shift_date}|early_leave", "early_leave",
+                    employee_id, employee_name, location, shift_date,
+                    f"{employee_name or employee_id} left {timesheet['earlyMinutes']} "
+                    f"minutes before the end of the {shift_date} shift"
+                    f"{' at ' + location if location else ''}.",
+                ),
+            )
     if status in {"scheduled"} or (prior_status == status and prior_source == source):
         return False
     connection.execute(
@@ -6637,7 +6761,8 @@ def attendance_payload(
         """
         SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
                source, reason, employee_name, location, role, clock_in_at,
-               clock_in_timezone
+               clock_in_timezone, clock_out_at, worked_minutes, early_minutes,
+               overtime_minutes
         FROM attendance_shift_records
         WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
         ORDER BY shift_date, location, role, shift_start, employee_name
@@ -6664,6 +6789,10 @@ def attendance_payload(
             "role": row[9],
             "clockIn": row[10],
             "clockInTimezone": row[11],
+            "clockOut": row[12],
+            "workedMinutes": row[13],
+            "earlyMinutes": row[14] or 0,
+            "overtimeMinutes": row[15] or 0,
         }
         current_shifts.append(item)
         if row[4] in {"approved_leave", "sick", "vacation"}:
@@ -7641,14 +7770,23 @@ def sync_attendance_data(
                         bamboohr_id, []
                     )
                 )
-                clock_in = matching_entries[0] if matching_entries else None
+                timesheet = evaluate_shift_timesheet(
+                    matching_entries, shift_start, shift_end, now
+                )
+                clock_in = timesheet["first"]
+                absent_point = min(
+                    shift_end,
+                    shift_start + timedelta(hours=ATTENDANCE_ABSENT_AFTER_HOURS),
+                )
+                recorded_entry = None
                 if on_leave:
                     status, source, reason = (
                         "approved_leave",
                         "bamboohr",
                         "Approved BambooHR time off.",
                     )
-                elif clock_in:
+                elif clock_in and (timesheet["qualifies"] or timesheet["inProgress"]):
+                    recorded_entry = clock_in
                     clock_time = datetime.fromisoformat(str(clock_in["start"]))
                     status = (
                         "late"
@@ -7658,8 +7796,40 @@ def sync_attendance_data(
                         )).astimezone(timezone.utc)
                         else "attended"
                     )
-                    source, reason = "bamboohr", ""
-                elif now >= shift_start + timedelta(hours=4):
+                    if timesheet["inProgress"]:
+                        if status == "attended":
+                            status = "scheduled"
+                        source, reason = (
+                            "bamboohr",
+                            "Clocked in; attendance is confirmed after "
+                            f"{timesheet['requiredMinutes']} minutes worked within the shift.",
+                        )
+                    else:
+                        notes = []
+                        if timesheet["earlyMinutes"]:
+                            notes.append(
+                                f"Left {timesheet['earlyMinutes']} minutes before the shift ended."
+                            )
+                        elif timesheet["partial"]:
+                            notes.append(
+                                f"Partial shift: worked {timesheet['workedMinutes']} of "
+                                f"{timesheet['shiftMinutes']} minutes."
+                            )
+                        if timesheet["overtimeMinutes"]:
+                            notes.append(
+                                f"Worked {timesheet['overtimeMinutes']} minutes past the shift end."
+                            )
+                        source, reason = "bamboohr", " ".join(notes)
+                elif clock_in and now >= absent_point:
+                    status, source, reason = (
+                        "absent",
+                        "attendance_rule",
+                        f"Timesheet covers only {timesheet['workedMinutes']} minutes of the "
+                        f"shift; at least {timesheet['requiredMinutes']} are required.",
+                    )
+                elif now >= shift_start + timedelta(
+                    hours=ATTENDANCE_ABSENT_AFTER_HOURS
+                ):
                     status, source, reason = (
                         "absent",
                         "attendance_rule",
@@ -7693,9 +7863,12 @@ def sync_attendance_data(
                         scheduled_employee.get("location") or employee["location"]
                     ),
                     role=str(scheduled_employee.get("role") or employee["role"]),
-                    clock_in_at=str(clock_in["start"]) if clock_in else None,
-                    clock_in_timezone=str(clock_in["timezone"]) if clock_in else "",
+                    clock_in_at=str(recorded_entry["start"]) if recorded_entry else None,
+                    clock_in_timezone=(
+                        str(recorded_entry["timezone"]) if recorded_entry else ""
+                    ),
                     existing=existing,
+                    timesheet=timesheet,
                 )
     for key in existing.keys() - active_keys:
         connection.execute(

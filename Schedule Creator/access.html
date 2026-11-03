@@ -22,6 +22,10 @@
     .bell { position: relative; font-size: 1.1rem; background: #eef5f8; color: #183044; }
     .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 1px 5px; border-radius: 10px; background: #c62828; color: white; font-size: .75rem; }
     .filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 8px 0 12px; }
+    tr.overtime td { background: #fff3c4; }
+    tr.early td { background: #fde8e0; }
+    tr.overtime .flag { display: block; color: #6b4500; }
+    tr.early .flag { display: block; color: #9a3412; }
     .filter label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; }
     #panel { position: absolute; right: 28px; z-index: 20; width: min(400px, 92vw); max-height: 70vh; overflow: auto; margin-top: 4px; padding: 12px; border: 1px solid #9fb4c2; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px #0004; }
     #panel .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
@@ -90,7 +94,7 @@
       <button id="filterToday" class="secondary" type="button">Today</button>
     </form>
     <table>
-      <thead><tr><th>Date</th><th>Shift time</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
+      <thead><tr><th>Date</th><th>Shift time</th><th>Clock in – out</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <p id="appMessage" class="error" role="alert" aria-live="polite"></p>
@@ -121,6 +125,10 @@
       return td;
     }
 
+    function clockLabel(value) {
+      return new Date(value).toLocaleTimeString("en-US", { timeZone: "America/Jamaica", hour: "numeric", minute: "2-digit" });
+    }
+
     function renderRecords(records) {
       const body = $("#rows");
       body.replaceChildren();
@@ -128,6 +136,20 @@
         const row = document.createElement("tr");
         cell(row, record.date);
         cell(row, record.shiftStart == null ? "" : `${hourLabel(Number(record.shiftStart))} start`);
+        const punch = cell(row, record.clockInAt ? `${clockLabel(record.clockInAt)} – ${record.clockOutAt ? clockLabel(record.clockOutAt) : "still in / no clock-out"}` : "—");
+        if (record.overtimeMinutes) {
+          row.classList.add("overtime");
+          const flag = document.createElement("strong");
+          flag.className = "flag";
+          flag.textContent = `+${record.overtimeMinutes} min past shift end`;
+          punch.append(flag);
+        } else if (record.earlyMinutes) {
+          row.classList.add("early");
+          const flag = document.createElement("strong");
+          flag.className = "flag";
+          flag.textContent = `Left ${record.earlyMinutes} min early`;
+          punch.append(flag);
+        }
         cell(row, record.employeeName || record.employeeId);
         cell(row, record.location);
         cell(row, record.role);
@@ -146,7 +168,7 @@
       if (!records.length) {
         const row = document.createElement("tr");
         const td = cell(row, role === "manager" ? "No attendance records for the selected dates." : "No attendance records in the last 30 days.");
-        td.colSpan = 8;
+        td.colSpan = 9;
         body.append(row);
       }
     }
@@ -205,7 +227,7 @@
     function detailList(item) {
       const dl = document.createElement("dl");
       const rows = [
-        ["Status", item.kind === "absent" ? "Absent" : "Late"],
+        ["Status", { absent: "Absent", early_leave: "Left early" }[item.kind] || "Late"],
         ["Employee", `${item.employeeName || item.employeeId} (${item.employeeId})`],
         ["Location", item.location || "Not recorded"],
         ["Shift date", item.date],

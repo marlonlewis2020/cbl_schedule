@@ -11,6 +11,7 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-03", "Attendance validation: a shift is attended only if the timesheet covers at least 60 minutes of it; early departures are recorded and notify the manager; overtime beyond the shift end is highlighted on the admin and manager attendance tables."),
     ("2026-11-03", "Manager and employee attendance tables now show a Shift time (start) column."),
     ("2026-11-03", "Manager attendance page: added From/To date filters that default to today."),
     ("2026-11-03", "Sidebar groups are collapsed by default and open one at a time when the group title is selected; Plan schedules is the second-to-last group."),
@@ -176,6 +177,8 @@ SECTIONS = [
                 "title": "5.9 Attendance",
                 "blocks": [
                     ("p", "Tracks BambooHR clock-ins against shifts. The page syncs BambooHR time tracking and approved time off while open and rechecks every five minutes. Absences are classified automatically four hours after shift start. Clock entries count as evidence even if awaiting BambooHR approval; approved leave is excluded from absence classification and the score denominator."),
+                    ("p", "Worked-time validation: a shift counts as attended only when the timesheet covers at least 60 minutes of the scheduled shift (or the whole shift if it is shorter). Overnight timesheets are compared against the real shift date and time, so time carried over from the previous night does not count toward the next shift. If the timesheet overlaps by less than 60 minutes, the shift is marked absent with the reason 'Timesheet covers only N minutes of the shift'. While someone is still clocked in and has not yet reached 60 minutes, the shift stays scheduled. Working at least 60 minutes but not the full shift still counts as attended and is noted as partial."),
+                    ("p", "Early departure and overtime: when the last clock-out is more than 60 minutes before the shift end, the minutes left early are recorded, appear in the Reason column and the clock-in cell, and a 'Left early' notification is sent to the location manager and the admin. When the employee works more than 60 minutes past the shift end, the row is highlighted amber with '+N min past shift end' on both the admin Attendance page and the manager attendance page. A clock-out is treated as an early departure only once the shift has ended or the employee has been out for an hour, so short breaks are not reported."),
                     ("h3", "Collapsible sections"),
                     ("p", "BambooHR attendance sync, Attendance shift source, Unresolved BambooHR shift discrepancies (BambooHR source only), Attendance filters and Attendance rules start collapsed. Click a section title to expand or collapse it. Your choices are remembered while you stay on the page. The two tables (Attendance and Attendance scores) are always visible."),
                     ("h3", "BambooHR attendance sync"),
