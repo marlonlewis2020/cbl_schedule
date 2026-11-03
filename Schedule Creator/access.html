@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manager and employee access | CBL Schedule</title>
+  <style>
+    :root { color-scheme: light; font-family: Segoe UI, Arial, sans-serif; color: #183044; background: #f3f6f8; }
+    body { margin: 0; padding: 24px; box-sizing: border-box; }
+    main { position: relative; max-width: 980px; margin: 0 auto; background: white; border-radius: 12px; padding: 28px; box-shadow: 0 8px 32px #1830441a; }
+    main.narrow { max-width: 430px; margin-top: 6vh; }
+    h1 { margin: 0 0 8px; font-size: 1.5rem; }
+    label { display: block; margin: 14px 0 6px; font-weight: 600; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    button { padding: 10px 14px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #51667a; }
+    form button[type=submit] { width: 100%; margin-top: 18px; }
+    [hidden] { display: none !important; }
+    .error { color: #a12121; min-height: 1.4em; }
+    .notice { margin-top: 14px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
+    header.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .bell { position: relative; font-size: 1.1rem; background: #eef5f8; color: #183044; }
+    .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 1px 5px; border-radius: 10px; background: #c62828; color: white; font-size: .75rem; }
+    .filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 8px 0 12px; }
+    tr.overtime td { background: #fff3c4; }
+    tr.early td { background: #fde8e0; }
+    tr.overtime .flag { display: block; color: #6b4500; }
+    tr.early .flag { display: block; color: #9a3412; }
+    .filter label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; }
+    #panel { position: absolute; right: 28px; z-index: 20; width: min(400px, 92vw); max-height: 70vh; overflow: auto; margin-top: 4px; padding: 12px; border: 1px solid #9fb4c2; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px #0004; }
+    #panel .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    #panel ul { list-style: none; margin: 0; padding: 0; }
+    .nitem { margin: 6px 0; border: 1px solid #cfdbe3; border-radius: 6px; background: #eef3f6; color: #4f6676; }
+    .nitem.unread { background: #fff3c4; border-color: #e0a800; color: #4a3300; font-weight: 700; }
+    .nitem .summary { display: block; width: 100%; padding: 9px 10px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; font-weight: inherit; }
+    .nitem dl { margin: 0; padding: 8px 10px 10px; border-top: 1px solid #cfdbe3; background: #f8fbfc; color: #183044; font-weight: 400; border-radius: 0 0 6px 6px; }
+    .nitem dt { font-size: .75rem; text-transform: uppercase; color: #52697a; margin-top: 6px; }
+    .nitem dd { margin: 0; }
+    .nrow { display: flex; align-items: stretch; }
+    .nrow .summary { flex: 1; }
+    .nitem .remove { width: auto; margin: 0; padding: 0 12px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+    .nitem .remove:hover { color: #a33a12; }
+    #panel .foot { margin-top: 8px; text-align: center; }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { padding: 8px; border-bottom: 1px solid #e0e7ec; text-align: left; vertical-align: top; }
+    .status { text-transform: capitalize; font-weight: 600; }
+    .status.late { color: #b26a00; } .status.absent { color: #a12121; } .status.attended { color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <main id="loginView" class="narrow">
+    <h1>CBL Schedule</h1>
+    <p id="intro">Managers and employees sign in here. Administrators sign in on the <a href="/">main page</a>.</p>
+    <form id="loginForm">
+      <label for="subdomain">BambooHR subdomain</label>
+      <input id="subdomain" maxlength="63" required>
+      <label for="identifier">Email or employee ID</label>
+      <input id="identifier" autocomplete="username" maxlength="254" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <div id="newPasswordField" hidden>
+        <label for="newPassword">New password (at least 14 characters)</label>
+        <input id="newPassword" type="password" autocomplete="new-password" minlength="14">
+      </div>
+      <div id="codeField" hidden>
+        <label for="code">Authenticator code (managers)</label>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+      </div>
+      <button type="submit">Sign in</button>
+    </form>
+    <form id="mfaForm" hidden>
+      <p>Scan this QR code with an authenticator app, then enter the six-digit code.</p>
+      <img id="qrCode" alt="QR code for the authenticator app" width="220" height="220" style="display:block;margin:12px auto">
+      <details class="notice"><summary>Can't scan? Enter the key manually</summary><p id="secret"></p></details>
+      <label for="setupCode">Six-digit code</label>
+      <input id="setupCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
+      <button type="submit">Verify and continue</button>
+    </form>
+    <p id="message" class="error" role="alert" aria-live="polite"></p>
+  </main>
+
+  <main id="appView" hidden>
+    <header class="bar">
+      <div><h1 id="title"></h1><div id="subtitle"></div></div>
+      <div>
+        <button id="bell" class="bell" type="button" aria-label="Notifications" hidden>🔔<span id="badge" class="badge" hidden>0</span></button>
+        <button id="logout" class="secondary" type="button">Sign out</button>
+      </div>
+    </header>
+    <section id="panel" hidden>
+      <div class="head"><b id="panelTitle">Attendance notifications</b><div><button id="markAll" class="secondary" type="button">Mark all read</button> <button id="closePanel" class="secondary" type="button" aria-label="Close notifications">Close</button></div></div>
+      <ul id="notificationList"></ul>
+      <div class="foot"><button id="archiveToggle" class="secondary" type="button">View archives</button></div>
+    </section>
+    <p id="summary"></p>
+    <form id="dateFilter" class="filter" hidden>
+      <label for="filterStart">From <input id="filterStart" type="date" required></label>
+      <label for="filterEnd">To <input id="filterEnd" type="date" required></label>
+      <button type="submit">Apply</button>
+      <button id="filterToday" class="secondary" type="button">Today</button>
+    </form>
+    <table>
+      <thead><tr><th>Date</th><th>Shift time</th><th>Clock in – out</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="appMessage" class="error" role="alert" aria-live="polite"></p>
+  </main>
+
+  <script>
+    const $ = selector => document.querySelector(selector);
+    let csrfToken = "";
+    let role = "";
+    let timer = null;
+
+    async function api(path, method = "GET", payload) {
+      const response = await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: payload === undefined ? undefined : JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The request failed.");
+      return result;
+    }
+
+    function cell(row, text, className) {
+      const td = document.createElement("td");
+      td.textContent = text || "";
+      if (className) td.className = className;
+      row.append(td);
+      return td;
+    }
+
+    function clockLabel(value) {
+      return new Date(value).toLocaleTimeString("en-US", { timeZone: "America/Jamaica", hour: "numeric", minute: "2-digit" });
+    }
+
+    function renderRecords(records) {
+      const body = $("#rows");
+      body.replaceChildren();
+      for (const record of records) {
+        const row = document.createElement("tr");
+        cell(row, record.date);
+        cell(row, record.shiftStart == null ? "" : `${hourLabel(Number(record.shiftStart))} start`);
+        const punch = cell(row, record.clockInAt ? `${clockLabel(record.clockInAt)} – ${record.clockOutAt ? clockLabel(record.clockOutAt) : "still in / no clock-out"}` : "—");
+        if (record.overtimeMinutes) {
+          row.classList.add("overtime");
+          const flag = document.createElement("strong");
+          flag.className = "flag";
+          flag.textContent = `+${record.overtimeMinutes} min past shift end`;
+          punch.append(flag);
+        } else if (record.earlyMinutes) {
+          row.classList.add("early");
+          const flag = document.createElement("strong");
+          flag.className = "flag";
+          flag.textContent = `Left ${record.earlyMinutes} min early`;
+          punch.append(flag);
+        }
+        cell(row, record.employeeName || record.employeeId);
+        cell(row, record.location);
+        cell(row, record.role);
+        cell(row, record.status.replace("_", " "), "status " + record.status);
+        cell(row, record.reason);
+        const action = cell(row, "");
+        if (role === "manager" && record.status === "late") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Mark absent";
+          button.addEventListener("click", () => markAbsent(record));
+          action.append(button);
+        }
+        body.append(row);
+      }
+      if (!records.length) {
+        const row = document.createElement("tr");
+        const td = cell(row, role === "manager" ? "No attendance records for the selected dates." : "No attendance records in the last 30 days.");
+        td.colSpan = 9;
+        body.append(row);
+      }
+    }
+
+    async function markAbsent(record) {
+      const reason = window.prompt(`Reason for marking ${record.employeeName || record.employeeId} absent on ${record.date}:`);
+      if (!reason || !reason.trim()) return;
+      $("#appMessage").textContent = "";
+      try {
+        await api("/api/access/manager/mark-absent", "POST", {
+          runId: record.runId, employeeId: record.employeeId, date: record.date, reason
+        });
+        await loadData();
+        await pollNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    function todayInJamaica() {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Jamaica" }).format(new Date());
+    }
+
+    async function loadData() {
+      let path = "/api/access/me/attendance";
+      if (role === "manager") {
+        const start = $("#filterStart").value, end = $("#filterEnd").value;
+        if (!start || !end || end < start) throw new Error("Choose a valid date range.");
+        path = `/api/access/manager/attendance?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+      }
+      const result = await api(path);
+      renderRecords(result.records);
+      $("#summary").textContent = role === "manager"
+        ? `Showing ${result.start === result.end ? result.start : result.start + " to " + result.end} for ${result.scopeEmployees} employee(s) at your locations.`
+        : `Your attendance from ${result.start} to ${result.end}: ` +
+          (Object.entries(result.counts).map(([status, count]) => `${count} ${status.replace("_", " ")}`).join(", ") || "no shifts");
+    }
+
+    let notifications = [];
+    let archivedNotifications = [];
+    let notificationView = "active";
+    const expanded = new Set();
+
+    function renderBadge() {
+      const unread = notifications.filter(item => !item.read).length;
+      $("#badge").textContent = unread;
+      $("#badge").hidden = unread === 0;
+    }
+
+    function hourLabel(value) {
+      const hours = ((value % 24) + 24) % 24;
+      let whole = Math.floor(hours);
+      let minutes = Math.round((hours - whole) * 60);
+      if (minutes === 60) { whole = (whole + 1) % 24; minutes = 0; }
+      return `${whole % 12 || 12}:${String(minutes).padStart(2, "0")} ${whole >= 12 ? "PM" : "AM"}`;
+    }
+
+    function detailList(item) {
+      const dl = document.createElement("dl");
+      const rows = [
+        ["Status", { absent: "Absent", early_leave: "Left early" }[item.kind] || "Late"],
+        ["Employee", `${item.employeeName || item.employeeId} (${item.employeeId})`],
+        ["Location", item.location || "Not recorded"],
+        ["Shift date", item.date],
+        ["Shift time", item.shiftStart == null ? "Not recorded" : `${hourLabel(Number(item.shiftStart))} start`],
+        ["Detected", item.createdAt]
+      ];
+      for (const [label, value] of rows) {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        dl.append(dt, dd);
+      }
+      return dl;
+    }
+
+    function renderNotifications() {
+      renderBadge();
+      const list = $("#notificationList");
+      const archive = notificationView === "archive";
+      const items = archive ? archivedNotifications : notifications;
+      list.replaceChildren();
+      $("#panelTitle").textContent = archive ? "Archived notifications" : "Attendance notifications";
+      $("#markAll").hidden = archive;
+      $("#archiveToggle").textContent = archive ? "← Back to notifications" : "View archives";
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.className = "nitem" + (item.read || archive ? "" : " unread");
+        const row = document.createElement("div");
+        row.className = "nrow";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "summary";
+        button.style.cssText = "background:transparent;color:inherit;width:100%;margin:0";
+        button.textContent = `${item.date}: ${item.message}`;
+        button.setAttribute("aria-expanded", String(expanded.has(item.id)));
+        button.addEventListener("click", () => openNotification(item));
+        row.append(button);
+        if (!archive) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "remove";
+          remove.textContent = "✕";
+          remove.title = "Remove (moves to archives)";
+          remove.setAttribute("aria-label", "Remove notification");
+          remove.addEventListener("click", () => archiveNotification(item));
+          row.append(remove);
+        }
+        li.append(row);
+        if (expanded.has(item.id)) li.append(detailList(item));
+        list.append(li);
+      }
+      if (!items.length) {
+        const li = document.createElement("li");
+        li.className = "nitem";
+        li.textContent = archive ? "No archived notifications." : "No notifications.";
+        li.style.padding = "9px 10px";
+        list.append(li);
+      }
+    }
+
+    async function archiveNotification(item) {
+      try {
+        await api("/api/access/notifications/archive", "POST", { ids: [item.id] });
+        expanded.delete(item.id);
+        await pollNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    async function toggleArchive() {
+      try {
+        if (notificationView === "archive") {
+          notificationView = "active";
+        } else {
+          archivedNotifications = (await api("/api/access/notifications?archived=1")).notifications;
+          notificationView = "archive";
+        }
+        renderNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    async function openNotification(item) {
+      if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
+      if (!item.read && !item.archived) {
+        item.read = true;
+        try {
+          await api("/api/access/notifications/read", "POST", { ids: [item.id] });
+        } catch (error) {
+          item.read = false;
+          $("#appMessage").textContent = error.message;
+        }
+      }
+      renderNotifications();
+    }
+
+    async function pollNotifications() {
+      try {
+        const result = await api("/api/access/notifications");
+        notifications = result.notifications;
+        renderNotifications();
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    async function showApp(user) {
+      role = user.role;
+      $("#loginView").hidden = true;
+      $("#appView").hidden = false;
+      $("#title").textContent = user.role === "manager" ? "Manager attendance" : "My attendance";
+      $("#subtitle").textContent = `${user.name} · ${user.businessName}`;
+      $("#actionHead").hidden = user.role !== "manager";
+      $("#bell").hidden = user.role !== "manager";
+      $("#dateFilter").hidden = user.role !== "manager";
+      if (user.role === "manager") {
+        $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
+      }
+      try {
+        await loadData();
+        if (user.role === "manager") {
+          await pollNotifications();
+          timer = setInterval(pollNotifications, 30000);
+        }
+      } catch (error) {
+        $("#appMessage").textContent = error.message;
+      }
+    }
+
+    $("#dateFilter").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#appMessage").textContent = "";
+      try { await loadData(); } catch (error) { $("#appMessage").textContent = error.message; }
+    });
+    $("#filterToday").addEventListener("click", () => {
+      $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
+      $("#dateFilter").requestSubmit();
+    });
+    $("#bell").addEventListener("click", () => {
+      $("#panel").hidden = !$("#panel").hidden;
+      if (!$("#panel").hidden && notificationView === "archive") { notificationView = "active"; renderNotifications(); }
+    });
+    $("#closePanel").addEventListener("click", () => { $("#panel").hidden = true; });
+    $("#archiveToggle").addEventListener("click", toggleArchive);
+    $("#markAll").addEventListener("click", async () => {
+      await api("/api/access/notifications/read", "POST", {});
+      await pollNotifications();
+    });
+    $("#logout").addEventListener("click", async () => {
+      try { await api("/api/access/logout", "POST", {}); } finally { clearInterval(timer); window.location.reload(); }
+    });
+
+    $("#loginForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#message").textContent = "";
+      const payload = {
+        bamboohrSubdomain: $("#subdomain").value.trim(),
+        identifier: $("#identifier").value,
+        password: $("#password").value
+      };
+      if (!$("#newPasswordField").hidden) payload.newPassword = $("#newPassword").value;
+      if ($("#code").value) payload.code = $("#code").value;
+      try {
+        const result = await api("/api/access/login", "POST", payload);
+        if (result.passwordChangeRequired) {
+          $("#newPasswordField").hidden = false;
+          $("#newPassword").required = true;
+          $("#codeField").hidden = false;
+          $("#message").textContent = "Set a new password to continue. Managers also enter their authenticator code if already enrolled.";
+        } else if (result.mfaCodeRequired) {
+          $("#codeField").hidden = false;
+          $("#message").textContent = "Enter your authenticator code.";
+        } else if (result.mfaEnrollmentRequired) {
+          csrfToken = result.csrfToken;
+          $("#loginForm").hidden = true;
+          $("#mfaForm").hidden = false;
+          $("#secret").textContent = result.secret;
+          $("#qrCode").src = result.qrCode;
+        } else {
+          csrfToken = result.csrfToken;
+          await start();
+        }
+      } catch (error) {
+        $("#message").textContent = error.message;
+      }
+    });
+
+    $("#mfaForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#message").textContent = "";
+      try {
+        const result = await api("/api/access/verify-mfa", "POST", { code: $("#setupCode").value });
+        csrfToken = result.csrfToken;
+        await start();
+      } catch (error) {
+        $("#message").textContent = error.message;
+      }
+    });
+
+    async function start() {
+      const state = await (await fetch("/api/access/state")).json();
+      csrfToken = state.csrfToken;
+      if (state.authenticated) await showApp(state.user);
+    }
+
+    start().catch(() => { $("#message").textContent = "The service is unavailable. Try again shortly."; });
+  </script>
+</body>
+</html>

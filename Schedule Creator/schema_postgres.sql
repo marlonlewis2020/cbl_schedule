@@ -224,6 +224,67 @@ CREATE POLICY tenant_isolation ON attendance_reconciliation_audit_events
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
+-- Manager and employee sign-in accounts (looked up by BambooHR subdomain before
+-- the tenant is known, so like tenant_admins this table has no row-level policy;
+-- every query scopes by tenant_id explicitly).
+CREATE TABLE IF NOT EXISTS tenant_users (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    role TEXT NOT NULL CHECK (role IN ('manager', 'employee')),
+    email TEXT,
+    employee_id TEXT,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 1 CHECK (must_change_password IN (0, 1)),
+    temp_password_expires_at INTEGER NOT NULL DEFAULT 0,
+    mfa_secret TEXT,
+    mfa_enabled INTEGER NOT NULL DEFAULT 0 CHECK (mfa_enabled IN (0, 1)),
+    mfa_pending_secret TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    auth_version INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_email_unique ON tenant_users (tenant_id, email);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_employee_unique ON tenant_users (tenant_id, employee_id);
+
+CREATE TABLE IF NOT EXISTS attendance_notifications (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    employee_name TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    shift_date TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, dedupe_key)
+);
+CREATE TABLE IF NOT EXISTS attendance_notification_reads (
+    tenant_id TEXT NOT NULL,
+    notification_id TEXT NOT NULL,
+    reader_key TEXT NOT NULL,
+    read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    archived INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant_id, notification_id, reader_key)
+);
+
+ALTER TABLE attendance_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_notifications FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_notifications;
+CREATE POLICY tenant_isolation ON attendance_notifications
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE attendance_notification_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_notification_reads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_notification_reads;
+CREATE POLICY tenant_isolation ON attendance_notification_reads
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
 -- Initial tenant (must match SCHEDULE_CREATOR_TENANT_ID, default 'cbljm').
 -- Change the values here if you use a different tenant ID or business name.
 INSERT INTO tenants (tenant_id, business_name)

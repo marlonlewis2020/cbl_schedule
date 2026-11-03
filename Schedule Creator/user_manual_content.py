@@ -11,6 +11,15 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-03", "Notifications can be removed with ✕; removed items move to a per-user archive viewable with View archives at the bottom of the list (admin and manager)."),
+    ("2026-11-03", "Attendance validation: a shift is attended only if the timesheet covers at least 60 minutes of it; early departures are recorded and notify the manager; overtime beyond the shift end is highlighted on the admin and manager attendance tables."),
+    ("2026-11-03", "Manager and employee attendance tables now show a Shift time (start) column."),
+    ("2026-11-03", "Manager attendance page: added From/To date filters that default to today."),
+    ("2026-11-03", "Sidebar groups are collapsed by default and open one at a time when the group title is selected; Plan schedules is the second-to-last group."),
+    ("2026-11-03", "Expanded notification details now include the shift time (start)."),
+    ("2026-11-03", "Notification bell: the list pops up below the bell and can be closed; unread alerts are highlighted, selecting one expands its details and marks it read (shown pale)."),
+    ("2026-11-03", "Removed the Print / PDF button; moved Upload source from the header to Settings; the temporary MFA bypass now also applies to manager accounts."),
+    ("2026-11-03", "Manager and employee access: admin-created manager/employee accounts with temporary passwords, /access sign-in (MFA for managers), location-scoped manager attendance with mark-absent, employee own-attendance view, and in-app late/absent notification bells."),
     ("2026-11-03", "Attendance page: sections above the attendance tables are collapsible and start collapsed; both attendance tables sort by clicking a column heading; row actions use the same button style as the Employees table."),
     ("2026-11-03", "Attendance: BambooHR scheduled-shift read fix (numeric BambooHR IDs only, literal commas, whole-second end time) for HTTP 422 responses."),
     ("2026-11-03", "Attendance: shift source selection (app or BambooHR), discrepancy list and reasoned two-way reconciliation with audit records."),
@@ -51,12 +60,12 @@ SECTIONS = [
         "id": "navigation",
         "title": "3. Finding your way around",
         "blocks": [
-            ("p", "The sidebar groups the pages. Controls & lock, Weekly schedules and Settings are always available; other pages can be hidden or shown in Settings."),
+            ("p", "The sidebar groups the pages. All groups start collapsed; select a group title to show its pages, which collapses any other open group. Controls & lock, Weekly schedules and Settings are always available; other pages can be hidden or shown in Settings."),
             ("table", ["Group", "Pages"], [
                 ["Workspace", "Overview"],
-                ["Plan schedules", "Location roles, Roster settings, Controls & lock, META · operating days, Weekly schedules"],
                 ["People", "Employees, Schedule locations, Attendance"],
                 ["Integrations", "Publish to BambooHR, Workforce Links"],
+                ["Plan schedules", "Location roles, Roster settings, Controls & lock, META · operating days, Weekly schedules"],
                 ["Data & settings", "Source & backups"],
             ]),
             ("note", "Features such as employee schedule access, shift trades, schedule history and overtime forecasting depend on the business membership tier (see section 8)."),
@@ -169,6 +178,8 @@ SECTIONS = [
                 "title": "5.9 Attendance",
                 "blocks": [
                     ("p", "Tracks BambooHR clock-ins against shifts. The page syncs BambooHR time tracking and approved time off while open and rechecks every five minutes. Absences are classified automatically four hours after shift start. Clock entries count as evidence even if awaiting BambooHR approval; approved leave is excluded from absence classification and the score denominator."),
+                    ("p", "Worked-time validation: a shift counts as attended only when the timesheet covers at least 60 minutes of the scheduled shift (or the whole shift if it is shorter). Overnight timesheets are compared against the real shift date and time, so time carried over from the previous night does not count toward the next shift. If the timesheet overlaps by less than 60 minutes, the shift is marked absent with the reason 'Timesheet covers only N minutes of the shift'. While someone is still clocked in and has not yet reached 60 minutes, the shift stays scheduled. Working at least 60 minutes but not the full shift still counts as attended and is noted as partial."),
+                    ("p", "Early departure and overtime: when the last clock-out is more than 60 minutes before the shift end, the minutes left early are recorded, appear in the Reason column and the clock-in cell, and a 'Left early' notification is sent to the location manager and the admin. When the employee works more than 60 minutes past the shift end, the row is highlighted amber with '+N min past shift end' on both the admin Attendance page and the manager attendance page. A clock-out is treated as an early departure only once the shift has ended or the employee has been out for an hour, so short breaks are not reported."),
                     ("h3", "Collapsible sections"),
                     ("p", "BambooHR attendance sync, Attendance shift source, Unresolved BambooHR shift discrepancies (BambooHR source only), Attendance filters and Attendance rules start collapsed. Click a section title to expand or collapse it. Your choices are remembered while you stay on the page. The two tables (Attendance and Attendance scores) are always visible."),
                     ("h3", "BambooHR attendance sync"),
@@ -225,7 +236,7 @@ SECTIONS = [
                 "title": "5.12 Source & backups",
                 "blocks": [
                     ("ul", [
-                        "Upload updated source replaces the configuration basis with a pre-filled workbook. During import the app pauses for a mapping review: confirm the app location, role and optional schedule location for every employee. Unknown employees are added only if you choose Add manually, and they start inactive.",
+                        "Upload source replaces the configuration basis with a pre-filled workbook. During import the app pauses for a mapping review: confirm the app location, role and optional schedule location for every employee. Unknown employees are added only if you choose Add manually, and they start inactive.",
                         "Download workspace backup and Restore backup save and restore the workspace.",
                         "Download configured inputs · XLSX exports the current inputs.",
                     ]),
@@ -240,11 +251,38 @@ SECTIONS = [
                         "Business branding: business name, team name (default Schedule Management), logo (PNG/JPEG/WebP up to 2 MB), colours and the BambooHR tenant ID. Branding appears throughout the app and in the email signature.",
                         "BambooHR API key: Test key for saved tenant runs a read-only check. Use as app API key explicitly promotes a successfully tested key to the server.",
                         "Business membership & administrators: view the tier and manage administrators (see section 8).",
+                        "Manager & employee access: create manager and employee sign-in accounts, reset passwords (optionally MFA) and disable or enable accounts (see section 5.14).",
+                        "Upload source (also available here, no longer in the page header): replaces the configuration basis with a pre-filled workbook; see Source & backups for the mapping review.",
                         "Sidebar menu: show or hide pages. This is a preference, not a security boundary.",
                         "Schedule email: the fixed Cc to the workforce mailbox can be switched off, and additional non-working dates (one YYYY-MM-DD per line) can be added. Deadlines exclude the sending day, weekends and the listed dates (Jamaica time).",
                         "Workspace file: Download Portable ZIP Bundle exports configuration and saved schedules. API credentials are excluded; treat the bundle as confidential.",
                         "Overtime planning (Gold and above): overtime forecasting and warehouse FTE volume capacity.",
                     ]),
+                ],
+            },
+            {
+                "id": "access",
+                "title": "5.14 Manager and employee access",
+                "blocks": [
+                    ("p", "Managers and employees sign in at /access (for example http://127.0.0.1:5001/access) with the BambooHR subdomain, their email (managers) or email/employee ID (employees) and password. Administrators keep signing in on the main page."),
+                    ("h3", "Creating accounts (administrators)"),
+                    ("ol", [
+                        "Open Settings → Manager & employee access.",
+                        "Choose Manager or Employee, enter the name, and an email (required for managers). For employees choose the active employee; employee accounts require the Silver tier or above.",
+                        "Select Create account. A temporary password is shown once; share it securely. It expires after 72 hours.",
+                        "Use Reset password (or Reset password & MFA) if it is lost, and Disable to end an account's access immediately.",
+                    ]),
+                    ("note", "A manager sees only employees at schedule locations whose manager email matches the manager's email (set on the Schedule locations page). An account with no matching location shows 'no matching schedule location'."),
+                    ("h3", "Managers"),
+                    ("ul", [
+                        "At first sign-in the manager replaces the temporary password (at least 14 characters) and enrols an authenticator app. MFA is mandatory for managers; later sign-ins need the six-digit code (unless the temporary MFA bypass is enabled on the server).",
+                        "The attendance page has From and To date filters that default to today (Jamaica time) when it opens; change the dates and select Apply, or Today to reset. The table lists the manager's own employees for that range, with each shift's date and start time. Mark absent is offered for late shifts and needs a reason; it is audited.",
+                        "The bell shows the unread count of late and absent alerts for the manager's employees and refreshes every 30 seconds. Select the bell to open a list below it and Close to hide it. Unread alerts are highlighted in amber; select one to expand its details (status, employee, location, shift date, time detected) and it turns pale as read. Mark all read clears the count for that manager only. Select the ✕ beside an alert to remove it: it moves to the archives (for that manager only) and stops counting. Select View archives at the bottom of the list to see removed alerts, and Back to notifications to return. Alerts appear only in the app; no email is sent.",
+                    ]),
+                    ("h3", "Employees"),
+                    ("p", "Employees replace the temporary password at first sign-in (no MFA) and then see only their own attendance for the last 30 days with a status summary."),
+                    ("h3", "Administrator bell"),
+                    ("p", "The bell in the app header shows unread late and absent alerts for the whole business, with its own read state, and refreshes every 30 seconds. It works like the manager bell: the list opens below the bell, can be closed, highlights unread alerts, and expands an alert's details when selected, after which it shows pale."),
                 ],
             },
         ],
