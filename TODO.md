@@ -159,7 +159,23 @@ remain for production use:
 - [x] Verify the tier selector and feature gates in a real browser.
 - [x] Validate PostgreSQL quota enforcement only in a disposable schema.
 
-## Attendance automation (`attendance-automation`) — implementation in progress
+## Business admin membership controls (`business-membership-controls`)
+
+- [x] Let only the main business administrator change the tier, pause/resume,
+  or cancel membership from the business status page.
+- [x] Require explicit confirmation, show immediate access/plan-limit effects,
+  and explain that billing is not processed by this app.
+- [x] Preserve business data on pause/cancellation; pause can be resumed by the
+  main admin and cancellation restoration is reserved for the platform owner.
+- [x] Audit the acting admin and prior/new tier or membership state.
+- [x] SQLite lifecycle regression test covers primary-admin permissions,
+  confirmation, access gating, retained data, and audit records.
+- [x] Full SQLite test suite: 68 tests passed; the change-request tracker now
+  marks this request complete.
+- [x] Validate the new PostgreSQL column migration and row-level access path in
+  a disposable schema. The configured PostgreSQL server was not available.
+
+## Attendance automation (`attendance-automation`) — complete
 
 - [x] Add tenant-scoped storage for BambooHR clock entries, shift statuses,
   correction history, and attendance-score overrides.
@@ -179,13 +195,50 @@ remain for production use:
   (maximum 365 inclusive days).
 - [x] Focused attendance/BambooHR/migration tests: 9 passed. Full SQLite suite:
   67 passed, including historical date and month-range queries.
-- [ ] Validate the configured API key and actual response shape against a
-  non-production BambooHR tenant with time-tracking read permission. Current
-  tests use the supplied flat clock-entry sample; no live BambooHR request was
-  made.
-- [ ] Validate the new PostgreSQL schema, row-level security, and SQLite import
-  in a disposable PostgreSQL schema. No PostgreSQL or tracked-database update
-  was performed for this implementation.
+- [x] Validate the configured API key and actual response shape against the
+  configured BambooHR tenant using user-approved, read-only production access;
+  no non-production tenant is available.
+  - [x] Read-only live validation against the currently configured `cbljm`
+    tenant on 2026-11-03: `time_tracking/timesheet_entries` returned 374
+    records for 2026-10-26 through 2026-11-03; all 374 clock entries parsed.
+    `time_off/whos_out` returned 93 records; all 93 leave entries parsed.
+    The observed clock fields included `employeeId`, `date`, `start`, `end`,
+    `timezone`, and `approved`; time-off fields included `employeeId`, `start`,
+    and `end`. No employee values or credentials were displayed, and no
+    records were persisted.
+  - [x] Extended read-only validation over the maximum 365-day range
+    (2025-11-04 through 2026-11-03): 6,743 clock entries and 2,688 leave
+    entries parsed. The selected profile had 29 clock entries and 13 approved
+    leave entries, but no accepted app shifts in that period.
+  - [x] Exercised attendance matching in a disposable SQLite fixture with one
+    real clock entry and a test-only accepted shift. It matched as attended
+    with BambooHR as the source. The fixture and its pre-test backup were
+    removed; no production app or BambooHR records were written.
+- [x] Validate the new PostgreSQL schema, row-level security, and SQLite import
+  in a disposable PostgreSQL schema. No attendance, schedule, or BambooHR
+  records were written during live validation. Before completion, backed up all
+  15 change-request rows and 20 dependencies, then marked this request `done`.
+
+## Attendance shift-source selection and reconciliation (`attendance-shift-source-reconciliation`) — blocked
+
+- [x] Persist the selected attendance shift source per tenant; the app's
+  accepted schedules remain the active source.
+- [x] Add an Attendance-page source control that keeps BambooHR shifts
+  unavailable until the integration contract is verified. The API rejects
+  BambooHR source selection with an explicit unavailable response.
+- [x] Show that discrepancy status is unknown, not zero, while BambooHR
+  schedules cannot be read.
+- [x] Attendance automation regression tests: 8 passed; `git diff --check`
+  passed. The Python suite exercised the source API gate and app-source save.
+- [ ] Read BambooHR scheduled shifts and compare employee, date, start/end time,
+  and location. Blocked: a read-only `GET /api/v1/scheduling/shifts` probe
+  returned HTTP 422 (“Invalid data provided”); no usable read contract is
+  established.
+- [ ] Resolve confirmed discrepancies in either direction with confirmation
+  and audit history. Blocked: the user confirmed the existing scheduling POST
+  only adds shifts; no safe update/delete operation has been verified.
+- No production schedule writes were made. Keep this request blocked until
+  BambooHR documents or confirms the read and update/delete operations.
 
 ## Test evidence and handoff
 

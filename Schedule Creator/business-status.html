@@ -12,7 +12,7 @@
     h2 { margin: 28px 0 8px; font-size: 1.15rem; }
     p { line-height: 1.5; }
     label { display: block; margin: 12px 0 6px; font-weight: 600; }
-    input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    input, select { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
     button, a.button { display: inline-block; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
     button.secondary { background: #5b6b78; }
     button.danger { background: #a12121; margin: 0; padding: 6px 12px; }
@@ -21,6 +21,7 @@
     .badge.pending { background: #fff1c7; }
     .badge.active { background: #d9f2d0; }
     .badge.suspended { background: #f8d7d7; }
+    .badge.paused, .badge.cancelled { background: #f8d7d7; }
     .note { margin-top: 14px; padding: 12px; border-radius: 6px; background: #eef5f8; overflow-wrap: anywhere; }
     .error { color: #a12121; }
     .success { color: #236d2b; }
@@ -42,6 +43,26 @@
     <p id="statusText"></p>
     <p id="statusNote" class="note" hidden></p>
     <a id="openApp" class="button" href="/" hidden>Open the scheduler</a>
+
+    <section id="membershipSection">
+      <h2>Membership</h2>
+      <p>Plan: <strong id="membershipTier">…</strong></p>
+      <p>Membership status: <span id="membershipStatus" class="badge">…</span></p>
+      <p id="membershipText" class="note"></p>
+      <div id="membershipControls" hidden>
+        <label for="membershipTierChoice">Change membership tier</label>
+        <select id="membershipTierChoice">
+          <option value="bronze">Bronze</option>
+          <option value="silver">Silver</option>
+          <option value="gold">Gold</option>
+          <option value="platinum">Platinum</option>
+        </select>
+        <button id="changeTier" type="button">Change tier</button>
+        <button id="pauseMembership" class="secondary" type="button" hidden>Pause membership</button>
+        <button id="resumeMembership" type="button" hidden>Resume membership</button>
+        <button id="cancelMembership" class="danger" type="button" hidden>Cancel membership</button>
+      </div>
+    </section>
 
     <section id="adminSection" hidden>
       <h2>Administrators</h2>
@@ -74,6 +95,11 @@
       pending: "Your registration is waiting for approval. Scheduling is unavailable until the platform owner approves your business. You can sign in to check back at any time.",
       active: "Your business is active.",
       suspended: "Your business is suspended. Scheduling is unavailable. Contact the platform owner to restore access."
+    };
+    const membershipDescriptions = {
+      active: "Membership changes apply immediately. This app does not currently collect membership payments. Lower tiers keep existing records but may block new additions when usage exceeds a plan limit.",
+      paused: "Membership is paused. Scheduler access is disabled, but your business data is retained. The main administrator can resume the membership at any time. No billing changes are processed by this app.",
+      cancelled: "Membership is cancelled and scheduler access is disabled. Your business data is retained, not deleted. Contact the platform owner if you need access restored. No billing changes are processed by this app."
     };
 
     async function request(path, options = {}) {
@@ -210,12 +236,58 @@
       $("#statusText").textContent = descriptions[status.status] || "";
       $("#statusNote").hidden = !status.note;
       $("#statusNote").textContent = status.note ? `Note from the platform owner: ${status.note}` : "";
-      $("#openApp").hidden = status.status !== "active";
+      const membership = status.membership;
+      $("#membershipTier").textContent = membership.tierName;
+      $("#membershipStatus").textContent = membership.status;
+      $("#membershipStatus").className = `badge ${membership.status}`;
+      $("#membershipText").textContent = membershipDescriptions[membership.status] || "";
+      $("#membershipTierChoice").value = membership.tier;
+      const canManageMembership = isPrimary && status.status === "active" && membership.status !== "cancelled";
+      $("#membershipControls").hidden = !canManageMembership;
+      $("#changeTier").hidden = !canManageMembership;
+      $("#pauseMembership").hidden = !canManageMembership || membership.status !== "active";
+      $("#resumeMembership").hidden = !canManageMembership || membership.status !== "paused";
+      $("#cancelMembership").hidden = !canManageMembership;
+      $("#membershipTierChoice").disabled = !canManageMembership;
+      $("#openApp").hidden = status.status !== "active" || membership.status !== "active";
       $("#adminSection").hidden = false;
       $("#adminForm").hidden = !isPrimary;
       const adminResult = await (await fetch("/api/business/admins")).json();
       renderAdmins(adminResult.admins);
     }
+
+    async function changeMembership(action, tier) {
+      const messages = {
+        change_tier: `Change the membership tier to ${tier}? The change takes effect immediately. Existing data remains, but new additions can be blocked if usage is above the selected plan limits. This app does not currently process membership payments.`,
+        pause: "Pause membership now? Scheduler access will stop immediately. Your data will be retained, and the main administrator can resume later. This app does not process billing.",
+        resume: "Resume membership and restore scheduler access now?",
+        cancel: "Cancel membership now? Scheduler access will stop immediately. Your business data will be retained, not deleted. Cancellation cannot be undone here; contact the platform owner to restore access. This app does not process billing."
+      };
+      if (!window.confirm(messages[action])) return;
+      message.textContent = "";
+      try {
+        await request("/api/business/membership", {
+          method: "POST",
+          body: JSON.stringify({ action, tier, confirmed: true })
+        });
+        await load();
+        message.className = "success";
+        message.textContent = {
+          change_tier: "Membership tier updated.",
+          pause: "Membership paused.",
+          resume: "Membership resumed.",
+          cancel: "Membership cancelled."
+        }[action];
+      } catch (error) {
+        message.className = "error";
+        message.textContent = error.message;
+      }
+    }
+
+    $("#changeTier").addEventListener("click", () => changeMembership("change_tier", $("#membershipTierChoice").value));
+    $("#pauseMembership").addEventListener("click", () => changeMembership("pause"));
+    $("#resumeMembership").addEventListener("click", () => changeMembership("resume"));
+    $("#cancelMembership").addEventListener("click", () => changeMembership("cancel"));
 
     $("#adminForm").addEventListener("submit", async event => {
       event.preventDefault();

@@ -194,7 +194,7 @@
       const usageText = key => membership.limits[key] === null
         ? `${membership.usage[key]} / unlimited`
         : `${membership.usage[key]} / ${membership.limits[key]}`;
-      usage.textContent = `Usage · Admin seats ${usageText("admins")} · Teams ${usageText("teams")} · Active employees ${usageText("employees")} · Locations ${usageText("locations")}`;
+      usage.textContent = `Membership · ${membership.status} · Usage · Admin seats ${usageText("admins")} · Teams ${usageText("teams")} · Active employees ${usageText("employees")} · Locations ${usageText("locations")}`;
       const tierControls = document.createElement("div");
       tierControls.className = "actions";
       const tierSelect = document.createElement("select");
@@ -256,6 +256,23 @@
           } catch (error) { message.textContent = error.message; }
         });
         actions.append(button);
+      }
+      if (membership.status === "cancelled") {
+        const restore = document.createElement("button");
+        restore.type = "button";
+        restore.className = "good";
+        restore.textContent = "Restore cancelled membership";
+        restore.addEventListener("click", async () => {
+          if (!window.confirm(`Restore ${business.name}'s cancelled membership and enable scheduler access?`)) return;
+          message.textContent = "";
+          try {
+            await send(`/api/hub/businesses/${encodeURIComponent(business.id)}/membership-status`, {
+              confirmed: true
+            });
+            await loadBusinesses();
+          } catch (error) { message.textContent = error.message; }
+        });
+        actions.append(restore);
       }
       if (business.id !== "cbljm") {
         const remove = document.createElement("button");

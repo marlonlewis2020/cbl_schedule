@@ -129,6 +129,15 @@ usage is grandfathered, but new additions that exceed the selected tier are
 blocked until usage falls within its limits. Removals, deactivations, and
 changes that do not increase over-limit usage remain available.
 
+The main business administrator can view the current tier and membership
+status at `/business`, change tiers, pause, resume, or cancel membership. These
+actions take effect immediately and require confirmation. Pausing disables
+scheduler access but can be resumed by the main administrator. Cancellation
+also disables access, retains all business data, and requires the platform
+owner to restore access. This deployment does not process membership billing.
+Membership actions are recorded in the tenant audit log with the acting
+administrator and the prior/new tier or status.
+
 ## BambooHR configuration
 
 The Flask server reads `BAMBOOHR_API_KEY` from `Schedule Creator\.env`. Create
@@ -159,6 +168,14 @@ when the warning appears.
 
 Publishing accepted shifts sends changes to BambooHR. Review the selected
 shifts and payload preview, and explicitly confirm before posting.
+
+Attendance uses accepted shifts in this app as its shift source. BambooHR
+scheduled shifts cannot yet be selected: the existing integration's scheduling
+POST adds shifts, and the BambooHR API operation for reading existing shifts
+has not been verified. The Attendance page reports that comparison and
+discrepancy resolution are unavailable rather than showing an empty
+discrepancy list. The server rejects attempts to select BambooHR as the source,
+so reconciliation cannot create duplicate shifts or imply an update succeeded.
 
 ## Scheduling workflow
 

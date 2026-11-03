@@ -594,6 +594,164 @@ class BusinessHubTests(unittest.TestCase):
             400,
         )
 
+    def test_primary_admin_can_change_pause_resume_and_cancel_membership(self):
+        self.register()
+        tenant_id = self.tenant_id()
+        self.make_owner()
+        owner, owner_csrf = self.sign_in_owner()
+        self.assertEqual(
+            self.set_status(owner, owner_csrf, tenant_id, "active").status_code,
+            200,
+        )
+        admin, csrf = self.sign_in_admin()
+        headers = {"X-CSRF-Token": csrf}
+
+        rejected = admin.post(
+            "/api/business/membership",
+            headers=headers,
+            json={"action": "pause"},
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(
+            admin.post(
+                "/api/business/membership",
+                headers={"X-CSRF-Token": "invalid"},
+                json={"action": "pause", "confirmed": True},
+            ).status_code,
+            400,
+        )
+
+        added = admin.post(
+            "/api/business/admins",
+            headers=headers,
+            json={
+                "name": "Secondary Admin",
+                "email": "secondary@acme.example",
+                "password": "secondary-long-password",
+            },
+        )
+        self.assertEqual(added.status_code, 201)
+        secondary, secondary_csrf = self.sign_in_admin(
+            "secondary@acme.example", "secondary-long-password"
+        )
+        denied = secondary.post(
+            "/api/business/membership",
+            headers={"X-CSRF-Token": secondary_csrf},
+            json={"action": "change_tier", "tier": "gold", "confirmed": True},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        changed = admin.post(
+            "/api/business/membership",
+            headers=headers,
+            json={"action": "change_tier", "tier": "gold", "confirmed": True},
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.get_json()["membership"]["tier"], "gold")
+
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO accepted_schedules
+                    (run_id, tenant_id, week_start, location, role, payload)
+                VALUES ('membership-preserved', ?, '2026-11-02',
+                        'Kingston', 'Cashier', '{}')
+                """,
+                (tenant_id,),
+            )
+
+        paused = admin.post(
+            "/api/business/membership",
+            headers=headers,
+            json={"action": "pause", "confirmed": True},
+        )
+        self.assertEqual(paused.status_code, 200)
+        self.assertEqual(paused.get_json()["membership"]["status"], "paused")
+        self.assertFalse(paused.get_json()["accessEnabled"])
+        blocked = admin.get("/api/employees")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(blocked.get_json()["membershipStatus"], "paused")
+        status_page = admin.get("/")
+        self.assertEqual(status_page.get_data(), (scheduler.APP_DIRECTORY / "business-status.html").read_bytes())
+        status_page.close()
+
+        resumed = admin.post(
+            "/api/business/membership",
+            headers=headers,
+            json={"action": "resume", "confirmed": True},
+        )
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.get_json()["membership"]["status"], "active")
+        self.assertTrue(resumed.get_json()["accessEnabled"])
+        self.assertEqual(admin.get("/api/employees").status_code, 200)
+
+        cancelled = admin.post(
+            "/api/business/membership",
+            headers=headers,
+            json={"action": "cancel", "confirmed": True},
+        )
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.get_json()["membership"]["status"], "cancelled")
+        self.assertFalse(cancelled.get_json()["accessEnabled"])
+        self.assertEqual(
+            admin.get("/api/employees").get_json()["membershipStatus"], "cancelled"
+        )
+        self.assertEqual(
+            self.query(
+                "SELECT membership_status, membership_tier FROM tenants WHERE tenant_id = ?",
+                (tenant_id,),
+            ),
+            [("cancelled", "gold")],
+        )
+        self.assertEqual(
+            self.query(
+                "SELECT run_id FROM accepted_schedules WHERE tenant_id = ?",
+                (tenant_id,),
+            ),
+            [("membership-preserved",)],
+        )
+        membership_audit = self.query(
+                "SELECT actor_email, action FROM tenant_audit_events "
+                "WHERE tenant_id = ? AND action LIKE 'membership-%' ORDER BY created_at, action",
+                (tenant_id,),
+            )
+        self.assertEqual(
+            set(membership_audit),
+            {
+                ("ada@acme.example", "membership-status-active-to-cancelled"),
+                ("ada@acme.example", "membership-status-active-to-paused"),
+                ("ada@acme.example", "membership-status-paused-to-active"),
+                ("ada@acme.example", "membership-tier-bronze-to-gold"),
+            },
+        )
+        for action, extra in (
+            ("resume", {}),
+            ("change_tier", {"tier": "silver"}),
+        ):
+            denied_after_cancel = admin.post(
+                "/api/business/membership",
+                headers=headers,
+                json={"action": action, "confirmed": True} | extra,
+            )
+            self.assertEqual(denied_after_cancel.status_code, 409)
+
+        restored = owner.post(
+            f"/api/hub/businesses/{tenant_id}/membership-status",
+            headers={"X-CSRF-Token": owner_csrf},
+            json={"confirmed": True},
+        )
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.get_json()["membership"]["status"], "active")
+        self.assertEqual(admin.get("/api/employees").status_code, 200)
+        self.assertEqual(
+            self.query(
+                "SELECT COUNT(*) FROM hub_audit_events "
+                "WHERE tenant_id = ? AND action = ?",
+                (tenant_id, "membership-status-cancelled-to-active"),
+            )[0][0],
+            1,
+        )
+
     def test_platform_owner_requires_mfa_enrollment_and_valid_codes(self):
         self.make_owner()
         client = scheduler.app.test_client()
@@ -2416,6 +2574,56 @@ class AttendanceAutomationTests(unittest.TestCase):
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
+
+    def query(self, sql, parameters=()):
+        with closing(scheduler.database_connect()) as connection:
+            return connection.execute(sql, parameters).fetchall()
+
+    def test_attendance_source_keeps_bamboohr_disabled_until_reconciliation_is_supported(self):
+        response = self.client.get("/api/attendance")
+        self.assertEqual(response.status_code, 200)
+        source = response.get_json()["shiftSource"]
+        self.assertEqual(source["selected"], "app")
+        self.assertFalse(source["bamboohrAvailable"])
+        self.assertIsNone(source["unresolvedDiscrepancies"])
+        self.assertIn("only adds shifts", source["bamboohrUnavailableReason"])
+
+        rejected = self.client.put(
+            "/api/attendance/source",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"source": "bamboohr"},
+        )
+        self.assertEqual(rejected.status_code, 503)
+        self.assertEqual(rejected.get_json()["selected"], "app")
+        self.assertEqual(
+            self.query(
+                "SELECT setting_value FROM application_settings "
+                "WHERE tenant_id = ? AND setting_key = 'attendance_shift_source'",
+                (scheduler.DEFAULT_TENANT_ID,),
+            ),
+            [],
+        )
+
+        saved = self.client.put(
+            "/api/attendance/source",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"source": "app"},
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(
+            self.query(
+                "SELECT setting_value FROM application_settings "
+                "WHERE tenant_id = ? AND setting_key = 'attendance_shift_source'",
+                (scheduler.DEFAULT_TENANT_ID,),
+            ),
+            [("app",)],
+        )
+        invalid = self.client.put(
+            "/api/attendance/source",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"source": "other"},
+        )
+        self.assertEqual(invalid.status_code, 400)
 
     def seed_attendance_schedule(self):
         employees = (

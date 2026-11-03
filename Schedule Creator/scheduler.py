@@ -501,14 +501,20 @@ def membership_usage(
 def membership_summary(
     connection: DatabaseConnection, tenant_id: str | None = None
 ) -> dict:
+    selected_tenant = tenant_id or active_tenant_id()
     tier = tenant_membership_tier(connection, tenant_id)
     policy = MEMBERSHIP_TIERS[tier]
+    status = connection.execute(
+        "SELECT membership_status FROM tenants WHERE tenant_id = ?",
+        (selected_tenant,),
+    ).fetchone()
     return {
         "tier": tier,
         "tierName": policy["name"],
+        "status": status[0] if status else "active",
         "limits": policy["limits"],
         "features": policy["features"],
-        "usage": membership_usage(connection, tenant_id),
+        "usage": membership_usage(connection, selected_tenant),
         "userLicenses": policy["limits"]["admins"],
     }
 
@@ -828,6 +834,11 @@ def initialize_database() -> None:
             ("reviewed_at", "TEXT"),
             ("bamboohr_subdomain", "TEXT"),
             ("membership_tier", "TEXT NOT NULL DEFAULT 'bronze'"),
+            (
+                "membership_status",
+                "TEXT NOT NULL DEFAULT 'active' CHECK "
+                "(membership_status IN ('active', 'paused', 'cancelled'))",
+            ),
         ):
             if column not in tenant_columns:
                 connection.execute(f"ALTER TABLE tenants ADD COLUMN {column} {definition}")
@@ -2243,7 +2254,8 @@ def tenant_authenticated() -> bool:
     with closing(database_connect()) as connection:
         account = connection.execute(
             """
-            SELECT a.auth_version, a.active, a.mfa_enabled, t.status
+            SELECT a.auth_version, a.active, a.mfa_enabled, t.status,
+                   t.membership_status
             FROM tenant_admins a
             JOIN tenants t ON t.tenant_id = a.tenant_id
             WHERE a.id = ? AND a.tenant_id = ? AND t.status != 'rejected'
@@ -2257,6 +2269,7 @@ def tenant_authenticated() -> bool:
         g.tenant_id = DEFAULT_TENANT_ID
         return False
     g.tenant_status = account[3]
+    g.tenant_membership_status = account[4]
     return True
 
 
@@ -2376,6 +2389,7 @@ def cross_origin_request() -> bool:
 def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
     g.tenant_status = None
+    g.tenant_membership_status = None
     if DATABASE_URL and not request.is_secure and not http_allowed_for_client():
         return (
             "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
@@ -2394,10 +2408,14 @@ def enforce_tenant_authentication():
             return jsonify(error="Sign in as a business administrator to continue."), 401
         if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
             return jsonify(error="Cross-origin requests are not allowed."), 403
-        if g.tenant_status != "active" and not request.path.startswith("/api/business/"):
+        if (
+            (g.tenant_status != "active" or g.tenant_membership_status != "active")
+            and not request.path.startswith("/api/business/")
+        ):
             return jsonify(
-                error="This business is not active. Scheduling is unavailable until it is approved.",
+                error="This business membership is not active. Scheduling is unavailable.",
                 businessStatus=g.tenant_status,
+                membershipStatus=g.tenant_membership_status,
             ), 403
     return None
 
@@ -3148,6 +3166,38 @@ def hub_set_business_tier(tenant_id: str):
     return jsonify(membership=summary)
 
 
+@app.post("/api/hub/businesses/<tenant_id>/membership-status")
+def hub_restore_cancelled_membership(tenant_id: str):
+    denied = platform_owner_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+        return jsonify(error="Explicit confirmation is required to restore membership."), 400
+    with closing(database_connect()) as connection, connection:
+        tenant = connection.execute(
+            "SELECT membership_status FROM tenants WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        if not tenant:
+            return jsonify(error="Business was not found."), 404
+        if tenant[0] != "cancelled":
+            return jsonify(error="Only a cancelled membership can be restored by the platform owner."), 409
+        connection.execute(
+            "UPDATE tenants SET membership_status = 'active' WHERE tenant_id = ?",
+            (tenant_id,),
+        )
+        hub_audit(
+            connection,
+            "membership-status-cancelled-to-active",
+            tenant_id,
+            "Platform owner restored cancelled membership.",
+            session.get("platform_owner_email"),
+        )
+        summary = membership_summary(connection, tenant_id)
+    return jsonify(membership=summary)
+
+
 @app.delete("/api/hub/businesses/<tenant_id>")
 def hub_delete_business(tenant_id: str):
     denied = platform_owner_guard()
@@ -3338,8 +3388,92 @@ def primary_admin_guard():
             (session.get("tenant_admin_id"), active_tenant_id()),
         ).fetchone()
     if not admin or not admin[0]:
-        return jsonify(error="Only the main business administrator can manage administrators."), 403
+        return jsonify(error="Only the main business administrator can manage administrators or membership."), 403
     return None
+
+
+@app.post("/api/business/membership")
+def update_business_membership():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+        return jsonify(error="Explicit confirmation is required for membership changes."), 400
+    action = payload.get("action")
+    if not isinstance(action, str) or action not in {
+        "change_tier", "pause", "resume", "cancel"
+    }:
+        return jsonify(error="Choose a valid membership action."), 400
+
+    with closing(database_connect()) as connection, connection:
+        tenant = connection.execute(
+            """
+            SELECT status, membership_status, membership_tier
+            FROM tenants WHERE tenant_id = ?
+            """,
+            (active_tenant_id(),),
+        ).fetchone()
+        if not tenant:
+            return jsonify(error="The business membership could not be found."), 404
+        business_status, membership_status, current_tier = tenant
+        if business_status != "active":
+            return jsonify(error="Only an active business can change its membership."), 409
+
+        if action == "change_tier":
+            next_tier = payload.get("tier")
+            if not isinstance(next_tier, str) or next_tier not in MEMBERSHIP_TIERS:
+                return jsonify(error="Choose Bronze, Silver, Gold, or Platinum."), 400
+            if membership_status == "cancelled":
+                return jsonify(error="A cancelled membership cannot be changed. Contact the platform owner to restore access."), 409
+            if current_tier == next_tier:
+                return jsonify(
+                    membership=membership_summary(connection),
+                    accessEnabled=membership_status == "active",
+                    unchanged=True,
+                )
+            connection.execute(
+                "UPDATE tenants SET membership_tier = ? WHERE tenant_id = ?",
+                (next_tier, active_tenant_id()),
+            )
+            audit_action = f"membership-tier-{current_tier}-to-{next_tier}"
+        else:
+            transitions = {
+                "pause": {"active": "paused"},
+                "resume": {"paused": "active"},
+                "cancel": {"active": "cancelled", "paused": "cancelled"},
+            }
+            next_status = transitions[action].get(membership_status)
+            if next_status is None:
+                return jsonify(
+                    error=f"A {membership_status} membership cannot {action.replace('_', ' ')}."
+                ), 409
+            connection.execute(
+                "UPDATE tenants SET membership_status = ? WHERE tenant_id = ?",
+                (next_status, active_tenant_id()),
+            )
+            audit_action = f"membership-status-{membership_status}-to-{next_status}"
+
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18),
+                active_tenant_id(),
+                session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"),
+                audit_action,
+                request.endpoint or "update_business_membership",
+            ),
+        )
+        membership = membership_summary(connection)
+    return jsonify(
+        membership=membership,
+        accessEnabled=membership["status"] == "active",
+    )
 
 
 @app.get("/api/business/admins")
@@ -3555,7 +3689,7 @@ def reset_business_admin_mfa(admin_id: str):
 def index():
     if not tenant_authenticated():
         return send_from_directory(APP_DIRECTORY, "tenant-login.html")
-    if g.tenant_status != "active":
+    if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return send_from_directory(APP_DIRECTORY, "business-status.html")
     return send_from_directory(APP_DIRECTORY, "CBL-Scheduler2.html")
 
@@ -5394,6 +5528,10 @@ DEFAULT_ATTENDANCE_SETTINGS = {
     "latenessToleranceMinutes": 15,
     "scorePeriodDays": 30,
 }
+ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE = (
+    "BambooHR shift reconciliation is unavailable because the existing-shift read "
+    "contract is unverified and the configured scheduling POST only adds shifts."
+)
 
 
 class AttendanceIntegrationError(Exception):
@@ -5798,7 +5936,28 @@ def attendance_payload(
         "shifts": current_shifts,
         "scores": scores,
         "settings": settings,
+        "shiftSource": {
+            "selected": attendance_shift_source(connection),
+            "bamboohrAvailable": False,
+            "bamboohrUnavailableReason": ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
+            "unresolvedDiscrepancies": None,
+        },
     }
+
+
+def attendance_shift_source(connection: DatabaseConnection) -> str:
+    row = connection.execute(
+        """
+        SELECT setting_value FROM application_settings
+        WHERE tenant_id = ? AND setting_key = 'attendance_shift_source'
+        """,
+        (active_tenant_id(),),
+    ).fetchone()
+    if not row:
+        return "app"
+    if row[0] != "app":
+        raise RuntimeError("Stored attendance shift source is invalid.")
+    return row[0]
 
 
 def sync_attendance_data(
@@ -6252,6 +6411,37 @@ def update_attendance_settings():
             ],
         )
     return jsonify(settings={"latenessToleranceMinutes": tolerance, "scorePeriodDays": period})
+
+
+@app.put("/api/attendance/source")
+def update_attendance_shift_source():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    source = payload.get("source") if isinstance(payload, dict) else None
+    if not isinstance(source, str) or source not in {"app", "bamboohr"}:
+        return jsonify(error="Choose either app or BambooHR shifts as the attendance source."), 400
+    if source == "bamboohr":
+        return jsonify(
+            error=ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
+            selected="app",
+            bamboohrAvailable=False,
+        ), 503
+    with closing(database_connect()) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+            VALUES ('attendance_shift_source', 'app', ?)
+            ON CONFLICT (tenant_id, setting_key)
+            DO UPDATE SET setting_value = excluded.setting_value
+            """,
+            (active_tenant_id(),),
+        )
+    return jsonify(
+        selected="app",
+        bamboohrAvailable=False,
+        bamboohrUnavailableReason=ATTENDANCE_BAMBOOHR_SOURCE_UNAVAILABLE,
+    )
 
 
 @app.post("/api/attendance/sync")
