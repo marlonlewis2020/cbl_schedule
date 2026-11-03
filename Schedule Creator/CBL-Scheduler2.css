@@ -68,8 +68,20 @@ aside{
 }
 nav{
     display:grid;
-    gap:3px;
+    gap:12px;
     overflow:auto
+}
+.nav-group{
+    display:grid;
+    gap:3px
+}
+.nav-group-title{
+    padding:0 13px 3px;
+    color:var(--muted);
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:1.2px;
+    text-transform:uppercase
 }
 nav button{
     border:0;
@@ -686,7 +698,14 @@ button:disabled{
     }
     nav{
         display:flex;
+        align-items:flex-start;
         overflow:auto
+    }
+    .nav-group{
+        flex:0 0 auto
+    }
+    .nav-group-title{
+        padding:0 10px 3px
     }
     nav button{
         white-space:nowrap;
@@ -1349,6 +1368,62 @@ td small,th small{
     flex-wrap:wrap;
     margin:14px 0
 }
+.assignment-split{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+    gap:14px;
+    align-items:stretch;
+    margin:18px 0
+}
+.assignment-split section{
+    min-width:0;
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:12px
+}
+.assignment-split h3{
+    font-size:13px;
+    margin:0 0 10px
+}
+.assignment-list{
+    max-height:46vh;
+    overflow:auto
+}
+.assignment-list label{
+    display:flex;
+    align-items:flex-start;
+    gap:9px;
+    padding:9px 5px;
+    border-bottom:1px solid var(--line);
+    font-size:12px
+}
+.assignment-list label span{
+    min-width:0
+}
+.assignment-list small{
+    display:block;
+    color:var(--muted);
+    margin-top:3px
+}
+.assignment-arrows{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:8px
+}
+.assignment-arrows button{
+    font-size:22px;
+    color:var(--blue)
+}
+@media(max-width:720px){
+    .assignment-split{
+        grid-template-columns:1fr
+    }
+    .assignment-arrows{
+        flex-direction:row;
+        justify-content:center
+    }
+}
 .formgrid{
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -1685,6 +1760,20 @@ dialog input[type=checkbox]{
 #emailDeadline{
     font-weight:600;
     color:#176454
+}
+#employeeSyncDialog{
+    width:min(820px,92vw)
+}
+#sourceImportReviewDialog{
+    width:min(1200px,96vw)
+}
+#sourceImportReviewDialog .tablewrap{
+    max-height:58vh;
+    overflow:auto
+}
+#sourceImportReviewDialog select{
+    min-width:125px;
+    max-width:220px
 }
 [data-theme=dark] dialog{
     background:#142e39;
@@ -2121,4 +2210,57 @@ dialog input[type=checkbox]{
 }
 [data-theme=dark] .sharepoint-search{
     border-color:var(--line)
+}
+.shift-options{
+    display:flex;
+    align-items:end;
+    flex-wrap:wrap;
+    gap:8px;
+    min-width:260px
+}
+.shift-options label{
+    min-width:88px;
+    font-size:10px
+}
+.shift-option{
+    display:flex;
+    align-items:end;
+    gap:4px
+}
+.shift-option label{
+    min-width:78px
+}
+.shift-options input{
+    min-width:88px;
+    padding:6px
+}
+.shift-remove{
+    min-width:28px;
+    min-height:30px;
+    padding:4px 8px;
+    color:var(--bad,#a33)
+}
+.accepted-schedule{
+    border-top:1px solid var(--line);
+    padding:12px 0
+}
+.accepted-schedule summary{
+    cursor:pointer;
+    font-weight:600
+}
+.schedule select[data-schedule-shift]{
+    width:100%;
+    min-width:94px;
+    border:0;
+    background:transparent;
+    padding:5px 2px;
+    font-size:11px
+}
+.developer-link{
+    display:block;
+    color:var(--muted);
+    font-size:11px;
+    margin:10px 0;
+    text-decoration:underline;
+    text-underline-offset:3px
 }
