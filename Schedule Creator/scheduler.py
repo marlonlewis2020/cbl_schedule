@@ -180,8 +180,8 @@ DEVELOPER_REQUESTS = (
     ),
     (
         "snapshot-email-reports",
-        "Scheduled snapshot report emails",
-        "Priority: Low. Let the workforce admin choose how often snapshot reports are emailed (for example daily, weekly or custom) and who receives them: all scheduled employees, schedule-location managers, and a user-defined distribution list. Reuse the configured email client, respect each recipient's team scope so employees and managers only receive data they are entitled to see, include unsubscribe/opt-out handling for the distribution list, log delivery success and failure, and honor the tier of each report (interval snapshots Gold and Platinum, attendance Silver and above). Never include other teams' data in a recipient's report.",
+        "Scheduled and on-demand attendance snapshots and report emails",
+        "Priority: Low. Generate attendance snapshot files automatically every day at 7 AM, 3 PM and 11 PM in America/Jamaica, and upon authorised request from the Attendance page. Persist timestamped, immutable snapshots with a history list and authorised downloads. Produce a styled XLSX workbook and HTML email summary closely resembling the supplied Oct 27, 2026 Automated Workforce Interval Snapshot message and workbook: blue headings, location summaries of scheduled/present/absent/attendance percentage, role and shift breakdowns, and employee-level attendance exceptions with shift times and clock-in/out. Highlight late employees' names in amber and absent employees' names in red, with explicit status labels. Report attendance as of each cutoff, distinguish future/pending shifts and approved leave, preserve overnight matching, minimum worked-time validation, lateness tolerance and four-hour absence rules, and record source-data freshness. Use a reliable background scheduler independent of an open browser tab, refresh BambooHR before capture, clearly flag refresh failures, prevent duplicate scheduled runs, and record generation failures and missed runs. Allow download only, email only, or both. Let the workforce admin configure email cadence (including these three daily times, daily, weekly or custom) and recipients: scheduled employees, schedule-location managers and a user-defined distribution list. Reuse the configured email profile where supported; the existing default-mail-client draft flow cannot send unattended or attach files automatically, so require an authenticated server-side sending integration such as Microsoft Graph or supported SMTP for automatic dissemination. Include the formatted summary and XLSX attachment, respect each recipient's team scope, include distribution-list unsubscribe/opt-out handling, and log delivery success, failures and retries without duplicate sends. Honor each report's tier (interval staffing-vs-demand snapshots Gold and Platinum, attendance reports Silver and above). Never include other teams' data in a recipient's report. Full reproduction of unrelated workbook analytics is outside this request.",
         ("workforce-dashboards",),
     ),
 )
@@ -1086,6 +1086,21 @@ def initialize_database() -> None:
         ).rowcount:
             request = next(
                 row for row in DEVELOPER_REQUESTS if row[0] == "attendance-automation"
+            )
+            connection.execute(
+                """
+                UPDATE developer_change_requests
+                SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE request_id = ? AND status IN ('pending', 'in_progress', 'blocked')
+                """,
+                (request[1], request[2], request[0]),
+            )
+        if connection.execute(
+            "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
+            ("scheduled-attendance-snapshot-request-v1",),
+        ).rowcount:
+            request = next(
+                row for row in DEVELOPER_REQUESTS if row[0] == "snapshot-email-reports"
             )
             connection.execute(
                 """

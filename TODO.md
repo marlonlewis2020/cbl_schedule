@@ -269,6 +269,23 @@ remain for production use:
 - [ ] The SQLite→PostgreSQL import does not copy the three new tables (they
   have no legacy data).
 
+## Planned change request: attendance snapshots (`snapshot-email-reports`)
+
+Recorded on 2026-11-04; not implemented. This extends the existing request and
+retains its `workforce-dashboards` prerequisite.
+
+- Generate daily snapshots at **7 AM, 3 PM and 11 PM (Jamaica time)** and on
+  demand from Attendance; save timestamped history for authorised downloads.
+- Produce styled XLSX files and HTML email summaries similar to the supplied
+  Oct 27 snapshot, with location/role/shift summaries and employee exceptions.
+  Highlight late names in amber and absent names in red, with status labels.
+- Support downloads, optional email distribution, or both. Automatic sending
+  requires an authenticated sending integration; the current mail-client drafts
+  do not send unattended or attach files automatically.
+- Run independently of browser visibility; preserve attendance cutoff, leave,
+  overnight and worked-time rules, show data freshness/failures, prevent duplicate
+  generation/delivery, and enforce recipient scope and report-tier entitlements.
+
 ## Test evidence and handoff
 
 - [x] PostgreSQL 18.6, server on the local network. The tests ran in

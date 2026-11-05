@@ -3584,6 +3584,49 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
 
+    def test_snapshot_request_migration_preserves_status_and_completed_requests(self):
+        definition = next(
+            item for item in scheduler.DEVELOPER_REQUESTS
+            if item[0] == "snapshot-email-reports"
+        )
+        for status in ("pending", "in_progress", "blocked", "done", "rejected"):
+            with self.subTest(status=status):
+                with closing(scheduler.database_connect()) as connection, connection:
+                    connection.execute(
+                        """
+                        UPDATE developer_change_requests
+                        SET title = 'Old title', description = 'Old description', status = ?
+                        WHERE request_id = 'snapshot-email-reports'
+                        """,
+                        (status,),
+                    )
+                    connection.execute(
+                        "DELETE FROM app_migrations WHERE migration_id = ?",
+                        ("scheduled-attendance-snapshot-request-v1",),
+                    )
+                scheduler.initialize_database()
+                scheduler.initialize_database()
+                with closing(scheduler.database_connect()) as connection:
+                    row = connection.execute(
+                        """
+                        SELECT title, description, status FROM developer_change_requests
+                        WHERE request_id = 'snapshot-email-reports'
+                        """
+                    ).fetchone()
+                expected = (
+                    (definition[1], definition[2], status)
+                    if status in {"pending", "in_progress", "blocked"}
+                    else ("Old title", "Old description", status)
+                )
+                self.assertEqual(row, expected)
+        for requirement in (
+            "7 AM, 3 PM and 11 PM", "America/Jamaica", "upon authorised request",
+            "XLSX", "HTML", "amber", "red", "freshness", "Microsoft Graph",
+            "independent of an open browser tab",
+        ):
+            self.assertIn(requirement, definition[2])
+        self.assertEqual(definition[3], ("workforce-dashboards",))
+
     def test_attendance_automation_migration_refreshes_only_active_request(self):
         definition = next(
             request
