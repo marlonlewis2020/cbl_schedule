@@ -520,6 +520,24 @@ These requests are recorded as pending; no feature behavior has changed.
   maximum, warn before expiry, stop polling/clear protected views, and require
   normal sign-in/MFA again. Verify real activity renewal, polling-only expiry,
   cross-tab behavior, exact thresholds and all account types.
+- **Executive end-of-day download report** (`executive-end-of-day-report`):
+  admins configure automatic generation 0–24 hours after the reporting day
+  ends in Jamaica time. Reuse the interval snapshot's visual format for
+  executive attendance/staffing/location summaries and significant exceptions.
+  Retain dated authorized download history, show source freshness/incomplete
+  overnight shifts, and attribute shifts to their start date without duplicates.
+  Run without an open browser and surface failures. Download only, no automatic
+  emailing. Verify exact timing limits and day boundaries.
+  Depends on `snapshot-email-reports`. Approved; implementation pending.
+- **Lock employee trade location** (`employee-trade-location-lock`):
+  automatically populate the initiating employee's current verified location
+  and make it uneditable; include linked managers in personal employee mode.
+  Management-mode managers/admins retain authorized location choices. Enforce
+  assignment/location restrictions on choices, options and submission server-side,
+  preserve existing trade rules, and explain missing assignments/eligible schedules.
+  Verify reassignment, tampered requests, all modes and tenant isolation.
+  Depends on `shift-trades` and `manager-employee-dual-access`.
+  Approved; implementation pending.
 
 ## Test evidence and handoff
 
