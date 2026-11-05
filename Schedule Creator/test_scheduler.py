@@ -6,6 +6,7 @@ import time
 import unittest
 import base64
 from contextlib import closing
+from datetime import timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
@@ -4124,6 +4125,388 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
             json={"role": "employee", "employeeId": "emp-b"},
         )
         self.assertEqual(denied.status_code, 403)
+
+    def portal_employee_client(self):
+        created = self.create_account(role="employee", employeeId="emp-a").get_json()
+        client = self.new_client()
+        response = client.post(
+            "/api/access/login", headers=self.csrf,
+            json={"bamboohrSubdomain": "acme", "identifier": "emp-a",
+                  "password": created["temporaryPassword"],
+                  "newPassword": "Employee-New-Password-26!"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.csrf = {"X-CSRF-Token": response.get_json()["csrfToken"]}
+        return client
+
+    def test_access_role_round_trip_preserves_identity_and_enforces_mfa_and_scope(self):
+        employee = self.portal_employee_client()
+        account = self.admin.get("/api/access-accounts").get_json()["accounts"][0]
+        user_id = account["id"]
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        changed = self.admin.put(f"/api/access-accounts/{user_id}/role", headers=headers,
+                                 json={"role": "manager", "previousRole": "employee",
+                                       "authVersion": account["authVersion"], "email": "MGR@acme.example"})
+        self.assertEqual(changed.status_code, 200, changed.get_json())
+        self.assertFalse(employee.get("/api/access/state").get_json()["authenticated"])
+        client = self.new_client()
+        enrollment = client.post("/api/access/login", headers=self.csrf, json={
+            "bamboohrSubdomain": "acme", "identifier": "emp-a",
+            "password": "Employee-New-Password-26!",
+        }).get_json()
+        self.assertTrue(enrollment["mfaEnrollmentRequired"])
+        self.csrf = {"X-CSRF-Token": enrollment["csrfToken"]}
+        verified = client.post("/api/access/verify-mfa", headers=self.csrf,
+                               json={"code": scheduler.totp_value(enrollment["secret"], int(time.time() // 30))})
+        self.assertEqual(verified.status_code, 200, verified.get_json())
+        attendance = client.get("/api/access/manager/attendance?start=2026-11-01&end=2026-11-30")
+        self.assertEqual([r["employeeId"] for r in attendance.get_json()["records"]], ["emp-a"])
+        changed = self.admin.put(f"/api/access-accounts/{user_id}/role", headers=headers,
+                                 json={"role": "employee", "previousRole": "manager",
+                                       "authVersion": self.admin.get("/api/access-accounts").get_json()["accounts"][0]["authVersion"]})
+        self.assertEqual(changed.status_code, 200, changed.get_json())
+        self.assertFalse(client.get("/api/access/state").get_json()["authenticated"])
+        client = self.new_client()
+        signed_in = client.post("/api/access/login", headers=self.csrf, json={
+            "bamboohrSubdomain": "acme", "identifier": "emp-a", "password": "Employee-New-Password-26!",
+        })
+        self.assertTrue(signed_in.get_json()["authenticated"])
+        self.assertEqual(client.get("/api/access/manager/attendance?start=2026-11-01&end=2026-11-30").status_code, 403)
+        current = self.admin.get("/api/access-accounts").get_json()["accounts"][0]
+        self.assertEqual(current["id"], user_id)
+        self.assertEqual(current["employeeId"], "emp-a")
+        self.assertEqual(current["displayName"], account["displayName"])
+        self.assertTrue(current["mfaEnabled"])
+        with closing(scheduler.database_connect()) as connection:
+            events = connection.execute("SELECT detail FROM hub_audit_events WHERE action='access-account-role-change'").fetchall()
+        self.assertEqual([json.loads(r[0])["role"] for r in events], ["manager", "employee"])
+
+    def test_access_role_validation_conflicts_and_permissions(self):
+        account = self.create_account(role="manager", displayName="Manager", email="mgr@acme.example").get_json()["account"]
+        path = f"/api/access-accounts/{account['id']}/role"
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        payload = {"role": "employee", "previousRole": "manager", "authVersion": account["authVersion"]}
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload).status_code, 400)
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"employeeId": "missing"}).status_code, 400)
+        self.assertEqual(self.admin.put(path, json=payload).status_code, 400)
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"role": "admin"}).status_code, 400)
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"previousRole": "employee"}).status_code, 409)
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"authVersion": 0}).status_code, 409)
+        employee = self.portal_employee_client()
+        self.assertEqual(employee.put(path, headers=self.csrf, json=payload).status_code, 401)
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"employeeId": "emp-a"}).status_code, 409)
+        employee_account = next(a for a in self.admin.get("/api/access-accounts").get_json()["accounts"] if a["role"] == "employee")
+        promote_path = f"/api/access-accounts/{employee_account['id']}/role"
+        promotion = {"role": "manager", "previousRole": "employee", "authVersion": employee_account["authVersion"]}
+        self.assertEqual(self.admin.put(promote_path, headers=headers, json=promotion).status_code, 400)
+        self.assertEqual(self.admin.put(promote_path, headers=headers, json=promotion | {"email": "mgr@acme.example"}).status_code, 409)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='bronze' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+        self.assertEqual(self.admin.put(path, headers=headers, json=payload | {"employeeId": "emp-b"}).status_code, 403)
+
+    def test_access_role_change_keeps_disabled_state_and_blocks_cross_tenant_target(self):
+        account = self.create_account(role="manager", displayName="Manager", email="mgr@acme.example").get_json()["account"]
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        self.admin.post(f"/api/access-accounts/{account['id']}/active", headers=headers, json={"active": False})
+        payload = {"role": "employee", "previousRole": "manager", "employeeId": "emp-b",
+                   "authVersion": account["authVersion"] + 1}
+        response = self.admin.put(f"/api/access-accounts/{account['id']}/role", headers=headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse(self.admin.get("/api/access-accounts").get_json()["accounts"][0]["active"])
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("INSERT INTO tenants(tenant_id,business_name) VALUES('other','Other')")
+            connection.execute("UPDATE tenant_users SET tenant_id='other' WHERE id=?", (account["id"],))
+        self.assertEqual(self.admin.put(f"/api/access-accounts/{account['id']}/role", headers=headers,
+                                       json={"role": "manager", "previousRole": "employee", "email": "mgr@acme.example"}).status_code, 404)
+
+    def seed_portal_schedule(self, run_id="portal-a", employee_id="emp-a",
+                             location="Kingston", weeks_ahead=0):
+        today = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date()
+        start = today - timedelta(days=today.weekday()) + timedelta(weeks=weeks_ahead)
+        payload = {
+            "id": run_id, "start": start.isoformat(), "location": location,
+            "role": "Cashier", "controls": {"span": 9, "confidential": "not public"},
+            "employees": [
+                {"id": employee_id, "name": "Untrusted snapshot name",
+                 "slots": [23, None, 7, None, None, None, None],
+                 "privateEmail": "do-not-expose@example.test"},
+            ],
+            "confidential": "not public",
+        }
+        response = self.admin.post(
+            "/api/accepted-shifts", headers={"X-CSRF-Token": "test-csrf-token"},
+            json=payload,
+        )
+        self.assertEqual(response.status_code, 200)
+        return payload
+
+    def portal_codes(self, *run_ids):
+        response = self.admin.post(
+            "/api/schedule-portal/codes", headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"runIds": list(run_ids)},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()["codes"]
+
+    def test_portal_employee_requires_code_and_returns_only_assigned_team(self):
+        self.seed_portal_schedule()
+        self.seed_portal_schedule("portal-b", "emp-b", "Montego Bay")
+        codes = self.portal_codes("portal-a", "portal-b")
+        self.assertNotEqual(codes[0]["code"], codes[1]["code"])
+        client = self.portal_employee_client()
+        listed = client.get("/api/access/schedules").get_json()
+        self.assertEqual(listed["visibilityWeeks"], 4)
+        self.assertEqual([g["runId"] for g in listed["schedules"]], ["portal-a"])
+        self.assertNotIn("employees", listed["schedules"][0])
+        self.assertNotIn("managerEmail", listed["schedules"][0])
+        code = next(c for c in codes if c["runId"] == "portal-a")
+        body = {"runId": "portal-a", "locationId": "loc1", "code": code["code"]}
+        self.assertEqual(client.post("/api/access/schedules/unlock", json=body).status_code, 400)
+        unlocked = client.post("/api/access/schedules/unlock", headers=self.csrf, json=body)
+        self.assertEqual(unlocked.status_code, 200)
+        group = unlocked.get_json()["schedule"]
+        self.assertEqual([e["id"] for e in group["employees"]], ["emp-a"])
+        self.assertEqual(group["employees"][0]["name"], "Ann Kingston")
+        self.assertEqual(group["shiftDuration"], 9)
+        self.assertNotIn("privateEmail", group["employees"][0])
+        self.assertNotIn("confidential", group)
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf,
+            json=body | {"runId": "portal-b", "locationId": "loc2"},
+        ).status_code, 403)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE employees SET schedule_location_id='loc2' WHERE employee_id='emp-a'")
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf, json=body,
+        ).status_code, 403)
+
+    def test_portal_code_can_choose_only_visible_assigned_schedules(self):
+        self.seed_portal_schedule()
+        self.seed_portal_schedule(run_id="revision-a")
+        self.seed_portal_schedule(run_id="portal-b", employee_id="emp-b", location="Montego Bay")
+        codes = self.portal_codes("portal-a", "revision-a", "portal-b")
+        client = self.portal_employee_client()
+        code = next(item for item in codes if item["locationId"] == "loc1")["code"]
+        unlocked = client.post("/api/access/schedules/unlock", headers=self.csrf, json={"code": code})
+        self.assertEqual(unlocked.status_code, 200, unlocked.get_json())
+        self.assertEqual({schedule["runId"] for schedule in unlocked.get_json()["schedules"]}, {"portal-a", "revision-a"})
+        selected = client.post("/api/access/schedules/unlock", headers=self.csrf, json={
+            "code": code, "runId": "revision-a", "locationId": "loc1",
+        })
+        self.assertEqual(len(selected.get_json()["schedules"]), 1)
+        foreign = next(item for item in codes if item["locationId"] == "loc2")["code"]
+        self.assertEqual(client.post("/api/access/schedules/unlock", headers=self.csrf, json={"code": foreign}).status_code, 403)
+        self.assertEqual(client.post("/api/access/schedules/unlock", headers=self.csrf, json={"code": code, "runId": "portal-a"}).status_code, 400)
+        self.assertEqual(client.post("/api/access/schedules/unlock", json={"code": code}).status_code, 400)
+
+    def test_portal_codes_reuse_period_expire_and_throttle_guessing(self):
+        schedule = self.seed_portal_schedule()
+        with patch.object(scheduler.secrets, "randbelow", return_value=7):
+            code = self.portal_codes("portal-a")[0]
+        self.assertEqual(code["code"], "000007")
+        end = scheduler.date.fromisoformat(schedule["start"]) + timedelta(days=7)
+        self.assertEqual(
+            code["expiresAt"],
+            scheduler.datetime.combine(end, scheduler.time.min,
+                                       tzinfo=scheduler.ATTENDANCE_TIMEZONE).isoformat(),
+        )
+        self.assertEqual(self.portal_codes("portal-a")[0]["code"], code["code"])
+        self.seed_portal_schedule("revision-a")
+        self.assertEqual(self.portal_codes("revision-a")[0]["code"], code["code"])
+        client = self.portal_employee_client()
+        body = {"runId": "portal-a", "locationId": "loc1", "code": "999999"}
+        for _ in range(5):
+            self.assertEqual(client.post(
+                "/api/access/schedules/unlock", headers=self.csrf, json=body,
+            ).status_code, 403)
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf,
+            json=body | {"code": code["code"]},
+        ).status_code, 429)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("DELETE FROM tenant_login_attempts")
+            connection.execute("UPDATE schedule_portal_codes SET expires_at = ?",
+                               (int(time.time()),))
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf,
+            json=body | {"code": code["code"]},
+        ).status_code, 403)
+        with closing(scheduler.database_connect()) as connection:
+            stored = connection.execute(
+                "SELECT code_hash, encrypted_code FROM schedule_portal_codes"
+            ).fetchone()
+        self.assertNotEqual(stored[0], code["code"])
+        self.assertNotEqual(stored[1], code["code"])
+
+    def test_portal_shared_schedule_group_does_not_expose_another_role(self):
+        payload = self.seed_portal_schedule()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE employees SET role='Warehouse' WHERE employee_id='emp-a'")
+            for employee_id, role in (("emp-c", "Warehouse"), ("emp-d", "DC Associate")):
+                connection.execute(
+                    """
+                    INSERT INTO employees
+                        (employee_id,tenant_id,name,location,role,schedule_location_id,source_type)
+                    VALUES (?,?,'Test colleague','Kingston',?,'loc1','manual')
+                    """,
+                    (employee_id, scheduler.DEFAULT_TENANT_ID, role),
+                )
+        payload["role"] = "Warehouse/Delivery"
+        payload["employees"].extend(
+            {"id": employee_id, "slots": [7, None, None, None, None, None, None]}
+            for employee_id in ("emp-c", "emp-d")
+        )
+        self.admin.put("/api/accepted-shifts/portal-a",
+                       headers={"X-CSRF-Token": "test-csrf-token"}, json=payload)
+        code = self.portal_codes("portal-a")[0]["code"]
+        client = self.portal_employee_client()
+        unlocked = client.post(
+            "/api/access/schedules/unlock", headers=self.csrf,
+            json={"runId": "portal-a", "locationId": "loc1", "code": code},
+        )
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(
+            {e["id"] for e in unlocked.get_json()["schedule"]["employees"]},
+            {"emp-a", "emp-c"},
+        )
+
+    def test_portal_visibility_settings_and_manager_multiple_locations(self):
+        self.seed_portal_schedule()
+        self.seed_portal_schedule("portal-b", "emp-b", "Montego Bay")
+        self.seed_portal_schedule("future", weeks_ahead=4)
+        client, _, _ = self.sign_in_manager()
+        self.assertEqual([g["runId"] for g in client.get(
+            "/api/access/schedules").get_json()["schedules"]], ["portal-a"])
+        self.assertEqual(client.put(
+            "/api/schedule-portal/settings", headers=self.csrf,
+            json={"visibilityWeeks": 52},
+        ).status_code, 401)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE schedule_locations SET manager_email='mgr@acme.example' WHERE id='loc2'")
+        visible = client.get("/api/access/schedules").get_json()["schedules"]
+        self.assertEqual({g["runId"] for g in visible}, {"portal-a", "portal-b"})
+        self.assertTrue(all("employees" in g for g in visible))
+        for invalid in (0, 53, True, 2.5, "4"):
+            response = self.admin.put(
+                "/api/schedule-portal/settings", headers={"X-CSRF-Token": "test-csrf-token"},
+                json={"visibilityWeeks": invalid},
+            )
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.admin.put(
+            "/api/schedule-portal/settings", json={"visibilityWeeks": 5},
+        ).status_code, 400)
+        updated = self.admin.put(
+            "/api/schedule-portal/settings", headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"visibilityWeeks": 5},
+        )
+        self.assertEqual(updated.get_json()["visibilityWeeks"], 5)
+        self.assertIn("future", {g["runId"] for g in client.get(
+            "/api/access/schedules").get_json()["schedules"]})
+
+    def test_portal_unassigned_employee_and_bronze_cannot_view_schedule(self):
+        payload = self.seed_portal_schedule()
+        code = self.portal_codes("portal-a")[0]
+        client = self.portal_employee_client()
+        body = {"runId": "portal-a", "locationId": "loc1", "code": code["code"]}
+        payload["employees"][0]["slots"] = [None] * 7
+        self.admin.put("/api/accepted-shifts/portal-a",
+                       headers={"X-CSRF-Token": "test-csrf-token"}, json=payload)
+        self.assertEqual(client.get("/api/access/schedules").get_json()["schedules"], [])
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf, json=body,
+        ).status_code, 403)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='bronze' WHERE tenant_id=?",
+                               (scheduler.DEFAULT_TENANT_ID,))
+        self.assertEqual(client.get("/api/access/schedules").status_code, 403)
+        self.assertEqual(client.get("/api/access/me/team-attendance").status_code, 403)
+        self.assertEqual(client.post(
+            "/api/access/schedules/unlock", headers=self.csrf, json=body,
+        ).status_code, 403)
+
+    def test_employee_team_dashboard_counts_only_current_location_role(self):
+        client = self.portal_employee_client()
+        today = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date().isoformat()
+        with closing(scheduler.database_connect()) as connection, connection:
+            for employee_id, status in (("emp-a", "attended"), ("emp-b", "absent")):
+                scheduler.record_attendance_status(
+                    connection, run_id="dashboard", employee_id=employee_id,
+                    shift_date=today, shift_start=0, status=status, source="manual",
+                    reason="Test", employee_name="Test", location="Test", role="Cashier",
+                    clock_in_at=None, clock_in_timezone="", existing={},
+                )
+        result = client.get("/api/access/me/team-attendance").get_json()
+        self.assertEqual(result["counts"], {"attended": 1})
+        self.assertEqual(result["attendancePercent"], 100)
+        self.assertNotIn("records", result)
+        self.assertEqual(result["timezone"], "America/Jamaica")
+
+    def test_portal_code_generation_validates_accepted_schedules_and_collisions(self):
+        self.seed_portal_schedule()
+        self.seed_portal_schedule("portal-b", "emp-b", "Montego Bay")
+        with patch.object(scheduler.secrets, "randbelow", side_effect=[1, 1, 2]):
+            codes = self.portal_codes("portal-a", "portal-b")
+        self.assertEqual({c["code"] for c in codes}, {"000001", "000002"})
+        for ids in ([], ["missing"], ["portal-a", "portal-a"], [False]):
+            response = self.admin.post(
+                "/api/schedule-portal/codes", headers={"X-CSRF-Token": "test-csrf-token"},
+                json={"runIds": ids},
+            )
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.admin.post(
+            "/api/schedule-portal/codes", json={"runIds": ["portal-a"]},
+        ).status_code, 400)
+        self.assertEqual(scheduler.app.test_client().get(
+            "/api/access/schedules").status_code, 401)
+
+    def test_manager_link_revokes_session_and_keeps_scopes_separate(self):
+        client, secret, created = self.sign_in_manager()
+        account_id = created["account"]["id"]
+        linked = self.admin.put(
+            f"/api/access-accounts/{account_id}/employee",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={"employeeId": "emp-b"},
+        )
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual(client.get("/api/access/manager/attendance").status_code, 401)
+        client = self.new_client()
+        response = client.post("/api/access/login", headers=self.csrf, json={
+            "bamboohrSubdomain": "acme", "identifier": "mgr@acme.example",
+            "password": "Manager-New-Password-2026!",
+            "code": scheduler.totp_value(secret, int(time.time() // 30)),
+        })
+        self.assertTrue(response.get_json()["authenticated"])
+        self.csrf = {"X-CSRF-Token": response.get_json()["csrfToken"]}
+        self.seed_portal_schedule("own", "emp-b", "Montego Bay")
+        self.seed_portal_schedule("team", "emp-a", "Kingston")
+        own = client.get("/api/access/me/shifts").get_json()["schedules"]
+        self.assertEqual({g["runId"] for g in own}, {"own"})
+        self.assertEqual({e["id"] for g in own for e in g["employees"]}, {"emp-b"})
+        managed = client.get("/api/access/schedules").get_json()["schedules"]
+        self.assertEqual({g["runId"] for g in managed}, {"team"})
+        personal = client.get("/api/access/schedules?view=employee").get_json()["schedules"]
+        self.assertEqual({g["runId"] for g in personal}, {"own"})
+        self.assertNotIn("employees", personal[0])
+        self.assertEqual(client.post(
+            "/api/access/manager/mark-absent", headers=self.csrf,
+            json={"runId": "run-1", "employeeId": "emp-b", "date": "2026-11-02",
+                  "reason": "self correction"},
+        ).status_code, 403)
+
+    def test_manager_link_conflicts_invalid_link_and_tier_checks(self):
+        client, _, created = self.sign_in_manager()
+        user_id = created["account"]["id"]
+        self.create_account(role="employee", employeeId="emp-b")
+        for employee_id, status in (("emp-b", 409), ("missing", 400)):
+            self.assertEqual(self.admin.put(
+                f"/api/access-accounts/{user_id}/employee",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={"employeeId": employee_id},
+            ).status_code, status)
+        self.assertEqual(client.get("/api/access/me/shifts").status_code, 403)
+        self.assertEqual(self.admin.put(
+            f"/api/access-accounts/{user_id}/employee",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={"employeeId": None},
+        ).status_code, 200)
 
     def test_temporary_mfa_bypass_applies_to_managers(self):
         created = self.create_account(

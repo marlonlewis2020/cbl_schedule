@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shift trade inbox</title>
+  <style>
+    body{font:16px "Segoe UI",Arial,sans-serif;background:#f3f6f8;color:#183044;margin:24px}
+    main{max-width:1100px;margin:auto;background:white;padding:24px;border-radius:12px}
+    label{display:block;margin:12px 0}input,select,textarea,button{font:inherit;padding:8px;border:1px solid #aebcc6;border-radius:6px}
+    button{cursor:pointer;background:#167da8;color:white;margin:4px}
+    table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid #ddd;padding:10px}
+    .scroll{overflow:auto}.error{color:#a12121}pre{white-space:pre-wrap;overflow-wrap:anywhere}
+    [hidden]{display:none!important}
+  </style>
+  <link rel="stylesheet" href="workforce-ui.css">
+  <script src="trade-picker.js"></script>
+</head>
+<body class="trade-page"><main>
+  <header class="trade-page-header"><div><h1>Shift trade inbox</h1><p>Review swaps, exceptions and approvals in one place.</p></div><button id="theme" type="button">Dark mode</button></header>
+  <p><a href="/access">Manager / employee portal</a> · <a href="/">Administrator app</a></p>
+  <p class="trade-rule">Both employees must finish the selected week with at least <strong>5 shifts</strong>. Other scheduling violations are warnings, not blockers. Exception trades require both employees' consent, manager acceptance and administrator approval. Only administrators may trade started shifts.</p>
+  <p id="identity"></p>
+  <p id="views" hidden><a href="/trades">Manage team trades</a> · <a href="/trades?view=employee">My personal trades</a></p>
+  <button id="create" type="button">Shift trade</button>
+  <section id="override" hidden><details><summary>Administrator manual shift / day off (separate from trades)</summary>
+    <label>Accepted schedule ID<input id="run" required maxlength="200"></label>
+    <label>Day in schedule (1–7)<input id="day" type="number" min="1" max="7" value="1" required></label>
+    <label>Offering employee ID<input id="employeeA" required maxlength="200"></label>
+    <form id="manual"><p>Uses the schedule ID, day and offering employee ID above. Nothing changes until you preview and apply the approved override.</p>
+      <label>New start (HH:MM) <input id="manualStart" type="time" step="900" value="06:00"></label>
+      <label><input id="dayOff" type="checkbox"> Assign day off</label>
+      <label><input id="overrideConstraints" type="checkbox"> Explicitly override scheduling constraints (audit reason required)</label>
+      <label>Override reason<textarea id="manualReason" maxlength="500" required></textarea></label>
+      <button type="submit">Prepare approved override</button>
+    </form>
+  </details></section>
+  <button id="refresh" type="button">Refresh inbox</button>
+  <p id="message" class="error" role="alert"></p>
+  <div id="rows" class="trade-list"></div>
+  <section id="preview" hidden><h2>Publishing preview</h2><p id="warning"></p><div id="previewWarnings" class="trade-warning" hidden></div><details><summary>Publishing operations and technical details</summary><pre id="operations"></pre></details><button id="apply" type="button">Confirm and apply trade</button></section>
+</main><script>
+const $=s=>document.querySelector(s);
+let token="",base="",role="",employeeId=null,currentPreview=null;
+function theme(value){document.documentElement.dataset.theme=value;$("#theme").textContent=value==="dark"?"Light mode":"Dark mode";TradePicker.rememberTheme(value);}
+theme(TradePicker.restoreTheme());
+$("#theme").onclick=()=>theme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+async function api(path,method="GET",body){
+  if(path.startsWith("/api/access/")&&new URLSearchParams(location.search).get("view")==="employee")path+="?view=employee";
+  const response=await fetch(path,{method,headers:{"Content-Type":"application/json","X-CSRF-Token":token},body:body===undefined?undefined:JSON.stringify(body)});
+  const result=await response.json();if(!response.ok)throw Error(result.error||"Request failed");return result;
+}
+function td(row,text){const cell=document.createElement("p");cell.textContent=text;row.append(cell);return cell;}
+function button(cell,label,action){const b=document.createElement("button");b.type="button";b.textContent=label;b.onclick=async()=>{try{$("#message").textContent="";await action();}catch(e){$("#message").textContent=e.message;}};cell.append(b);}
+async function load(){
+  const result=await api(base);$("#rows").replaceChildren();$("#identity").textContent=`${role} · ${result.unread} unread trade updates`;
+  if(!result.trades.length)$("#rows").textContent="No trades yet. Select Shift trade to propose a swap.";
+  for(const trade of result.trades){
+    const card=document.createElement("details");card.className="trade-card";
+    const summary=document.createElement("summary");summary.className="trade-summary";
+    const week=document.createElement("span");week.className="trade-week";
+    const start=trade.start?new Date(trade.start+"T12:00:00"):null;
+    const end=start?new Date(start):null;if(end)end.setDate(end.getDate()+6);
+    const format={month:"short",day:"numeric",year:"numeric"};
+    week.textContent=start?`Week: ${start.toLocaleDateString(undefined,format)} – ${end.toLocaleDateString(undefined,format)}`:"Week unavailable";
+    const initiator=document.createElement("span");initiator.textContent=`Initiated by ${trade.initiatorName} (${trade.initiatedRole})`;
+    const status=document.createElement("span");status.className="trade-status";
+    status.textContent=({requested:"Awaiting employee consent",confirmed:"Awaiting manager acceptance",manager_accepted:"Awaiting administrator approval",approved:"Approved — ready to apply",applied:"Applied",published:"Published",rejected:"Rejected",withdrawn:"Withdrawn"}[trade.state]||trade.state.replaceAll("_"," "))+(trade.remoteState?" · publishing: "+trade.remoteState:"");
+    summary.append(week,initiator,status);
+    if(trade.unread){const unread=document.createElement("span");unread.className="trade-unread";unread.textContent="Unread update";summary.append(unread);}
+    const row=document.createElement("div");row.className="trade-content";card.append(summary,row);
+    const heading=document.createElement("h2");heading.textContent=`${trade.employeeNameA} ↔ ${trade.employeeNameB}`;row.append(heading);
+    td(row,`${trade.start||"Schedule"} · ${trade.runId}`);
+    const timeline=td(row,"Employee consent → Manager acceptance → Administrator approval → Apply");timeline.className="trade-timeline";
+    const grid=document.createElement("div");grid.className="trade-swap-grid";
+    for(const swap of trade.swaps){
+      const block=document.createElement("section"),date=document.createElement("h3");
+      const day=trade.start?new Date(trade.start+"T12:00:00"):null;if(day)day.setDate(day.getDate()+swap.day);
+      date.textContent=day?day.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):`Day ${swap.day+1}`;block.append(date);
+      td(block,`${trade.employeeNameA}: ${TradePicker.shift(swap.slotA,trade.shiftDuration)} → ${TradePicker.shift(swap.slotB,trade.shiftDuration)}`);
+      td(block,`${trade.employeeNameB}: ${TradePicker.shift(swap.slotB,trade.shiftDuration)} → ${TradePicker.shift(swap.slotA,trade.shiftDuration)}`);
+      grid.append(block);
+    }
+    row.append(grid);
+    if(Object.keys(trade.shiftCounts).length)td(row,"Resulting weekly shifts: "+Object.entries(trade.shiftCounts).map(([id,count])=>`${id===trade.employeeA?trade.employeeNameA:trade.employeeNameB}: ${count}`).join(" · "));
+    td(row,"Reason: "+trade.reason);
+    const actions=document.createElement("div");actions.className="trade-actions";row.append(actions);
+    for(const action of trade.actions){
+      if(action==="apply"){
+        button(actions,"Preview application",async()=>{
+          const remote=confirm("Include BambooHR publishing? Cancel selects app-only and leaves remote shifts unchanged.");
+          const result=await api(`${base}/${trade.id}/preview`,"POST",{remoteMode:remote?"bamboohr":"app_only"});
+          currentPreview={tradeId:trade.id,...result};$("#warning").textContent=result.warning;$("#operations").textContent=JSON.stringify({operations:result.operations,violations:result.violations,overrideReason:result.overrideReason},null,2);$("#preview").hidden=false;
+          TradePicker.warnings($("#previewWarnings"),result.restWarnings,{[trade.employeeA]:trade.employeeNameA,[trade.employeeB]:trade.employeeNameB});
+          $("#previewWarnings").hidden=!Object.keys(result.restWarnings).length;
+        });
+      }else button(actions,{confirm:"Accept trade",acknowledge:"Acknowledge & accept",accept:"Manager accept",approve:"Administrator approve",reject:"Reject trade",withdraw:"Withdraw trade"}[action]||action,async()=>{
+        const warnings=trade.constraintPolicy==="warnings-five"?trade.warnings:trade.restWarnings[employeeId]||[];
+        const hasWarnings=trade.constraintPolicy==="warnings-five"?Object.keys(warnings).length>0:warnings.length>0;
+        let acknowledgeRest=false;
+        if(["confirm","acknowledge","accept","approve"].includes(action)&&hasWarnings){
+          const text=Array.isArray(warnings)?warnings.map(item=>item.message).join("\n"):Object.entries(warnings).map(([person,entries])=>`${person===trade.employeeA?trade.employeeNameA:trade.employeeNameB}:\n${entries.map(item=>item.message).join("\n")}`).join("\n\n");
+          acknowledgeRest=confirm("Review the scheduling exceptions:\n\n"+text+"\n\nI have reviewed all warnings and accept these exceptions. This does not replace the other approvals.");
+          if(!acknowledgeRest)return;
+        }
+        const reason=prompt(`Reason for ${action}:`);if(!reason?.trim())return;
+        await api(`${base}/${trade.id}/action`,"POST",{action,version:trade.version,reason,acknowledgeWarnings:acknowledgeRest,warnings,acknowledgeRest,restWarnings:warnings});await load();
+      });
+    }
+    if(trade.unread)button(actions,"Mark as read",async()=>{await api(`${base}/${trade.id}/read`,"POST",{version:trade.version});await load();});
+    if(role==="admin"&&["failed","pending"].includes(trade.remoteState))button(actions,"Retry missing/failed publishing",async()=>{
+      if(!confirm("Retry only failed remote operations?"))return;
+      await api(`${base}/${trade.id}/retry`,"POST",{confirmed:true});await load();
+    });
+    if(role==="admin"&&["failed","unknown","running"].includes(trade.remoteState))button(actions,"Reconcile remote state",async()=>{
+      const reason=prompt("Confirm a read-only BambooHR reconciliation. Reason:");if(!reason?.trim())return;
+      const result=await api(`${base}/${trade.id}/reconcile`,"POST",{confirmed:true,reason});$("#message").textContent=result.warning;await load();
+    });
+    const history=document.createElement("details"),historySummary=document.createElement("summary"),text=document.createElement("pre");
+    if(Object.keys(trade.restWarnings).length){
+      const warning=document.createElement("div");warning.className="trade-warning";
+      TradePicker.warnings(warning,trade.warnings,{[trade.employeeA]:trade.employeeNameA,[trade.employeeB]:trade.employeeNameB});
+      const acknowledgement=td(warning,`${trade.employeeNameA}: ${trade.acknowledged.includes(trade.employeeA)?"acknowledged":"awaiting consent"} · ${trade.employeeNameB}: ${trade.acknowledged.includes(trade.employeeB)?"acknowledged":"awaiting consent"}`);
+      if(trade.constraintPolicy==="warnings-five")acknowledgement.textContent+=` · Manager: ${trade.acknowledged.some(v=>v.startsWith("manager:"))?"acknowledged":"awaiting review"} · Admin: ${trade.acknowledged.some(v=>v.startsWith("admin:"))?"acknowledged":"awaiting review"}`;
+      row.insertBefore(warning,actions);
+    }
+    historySummary.textContent="History";text.textContent=trade.history.map(e=>`${e.createdAt} · ${e.state} · ${e.actorId} · ${e.reason}`).join("\n");history.append(historySummary,text);actions.append(history);
+    $("#rows").append(card);
+  }
+}
+$("#create").onclick=()=>TradePicker.open({api,base,onCreated:load}).catch(error=>$("#message").textContent=error.message);
+$("#manual").onsubmit=async e=>{
+  e.preventDefault();try{
+    const [hour,minute]=$("#manualStart").value.split(":").map(Number);
+    await api("/api/shift-overrides","POST",{confirmed:true,runId:$("#run").value.trim(),day:Number($("#day").value)-1,
+      employeeId:$("#employeeA").value.trim(),start:$("#dayOff").checked?null:hour+minute/60,
+      reason:$("#manualReason").value,overrideConstraints:$("#overrideConstraints").checked});
+    await load();
+  }catch(error){$("#message").textContent=error.message;}
+};
+$("#refresh").onclick=()=>load().catch(e=>$("#message").textContent=e.message);
+$("#apply").onclick=async()=>{
+  const reason=prompt("Audit reason for applying this trade:");if(!reason?.trim()||!currentPreview)return;
+  try{await api(`${base}/${currentPreview.tradeId}/apply`,"POST",{fingerprint:currentPreview.fingerprint,confirmed:true,reason});$("#preview").hidden=true;currentPreview=null;await load();}
+  catch(e){$("#message").textContent=e.message;await load();}
+};
+async function start(){
+  const access=await (await fetch("/api/access/state")).json();
+  if(access.authenticated){role=access.user.role;employeeId=access.user.employeeId;$("#views").hidden=role!=="manager"||!access.user.employeeId;if(role==="manager"&&new URLSearchParams(location.search).get("view")==="employee")role="employee";token=access.csrfToken;base="/api/access/trades";$("#identity").textContent=access.user.name;}
+  else{const admin=await (await fetch("/api/tenant-auth/state")).json();if(!admin.authenticated)throw Error("Sign in before opening the trade inbox.");role="admin";token=admin.csrfToken;base="/api/shift-trades";$("#identity").textContent="Business administrator";$("#override").hidden=false;}
+  await load();
+}
+start().catch(e=>{$("#message").textContent=e.message;$("#create").hidden=true;});
+</script></body></html>

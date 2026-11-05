@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
 import base64
 import hashlib
 import io
@@ -45,6 +46,8 @@ from directory_seed import (
     SCHEDULE_LOCATIONS,
     UNMAPPED_ROSTER_EMPLOYEE,
 )
+import workforce_trades
+import membership_billing
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -92,6 +95,8 @@ STATIC_ASSETS = {
     "CBL-Scheduler2.config.js",
     "CBL-Scheduler2.js",
     "CBL-MicrosoftAuth.html",
+    "workforce-ui.css",
+    "trade-picker.js",
 }
 DEVELOPER_REQUESTS = (
     (
@@ -137,9 +142,15 @@ DEVELOPER_REQUESTS = (
         ("manager-employee-access",),
     ),
     (
+        "manager-employee-dual-access",
+        "Manager personal shifts and employee view",
+        "Link a scheduled manager's existing account to their verified employee record within the same business. Use one identity and password with separate My shifts and Manage teams views; retain manager MFA in both views. Show personal accepted shifts and own attendance by linked employee ID, even when the manager works at a location they do not manage. Apply the existing employee schedule visibility, assignment, team-code and membership-tier checks when accessing employee team schedules or dashboards. Keep employee-view permissions separate from management permissions: personal assignment must not grant management access to another location. Prevent manager attendance corrections to their own employee record; require an authorised administrator and preserve audit history. Validate active, same-tenant employee links, handle existing employee-account conflicts explicitly without duplicate/ambiguous sign-ins or silent account merging, and revoke stale access after account/link changes. Test a manager scheduled outside their management scope, both views, MFA, tier restrictions, reassignment, disabling and rejection of self-corrections.",
+        ("manager-employee-access", "schedule-portal"),
+    ),
+    (
         "shift-trades",
         "Authenticated shift-trade workflow",
-        "Add server-side trade records, inbox/notifications, schedule indicators, and an auditable status history: employee request, affected-employee confirmation, manager acceptance, workforce-admin approval, and applied/published, with rejection/withdrawal states. Managers may initiate on an employee's behalf with employee confirmation skipped but workforce approval retained. Employees cannot approve manager or workforce-admin trades. Block non-admin trades for started or past shifts.",
+        "Add authenticated, auditable trades with employee consent, manager acceptance, admin approval, application/publishing, rejection and withdrawal. Use themed, readable popup/inbox cards with scoped location x exact-role team, accepted week/period and employee dropdowns; employee 1 is fixed in personal mode. Show dated before/after shifts, selected checkbox days and combined weekly counts. Enforce at least five assigned shifts per employee in the selected schedule week at submission and every approval/application, not exactly five. All other scheduling violations, including overlaps, availability, leave, weekly caps and rest, become explicit warnings requiring both employees' consent, manager acceptance and admin approval, including management-initiated exception trades. Persist warnings and actor acknowledgements; changed warnings require renewed consent through a new request. Retain tenant/team authorization, valid assignments, stale/version and pending-intersection safeguards, non-admin past-shift blocking and the separate manual-override workflow.",
         ("manager-employee-access", "schedule-portal"),
     ),
     (
@@ -183,6 +194,36 @@ DEVELOPER_REQUESTS = (
         "Scheduled and on-demand attendance snapshots and report emails",
         "Priority: Low. Generate attendance snapshot files automatically every day at 7 AM, 3 PM and 11 PM in America/Jamaica, and upon authorised request from the Attendance page. Persist timestamped, immutable snapshots with a history list and authorised downloads. Produce a styled XLSX workbook and HTML email summary closely resembling the supplied Oct 27, 2026 Automated Workforce Interval Snapshot message and workbook: blue headings, location summaries of scheduled/present/absent/attendance percentage, role and shift breakdowns, and employee-level attendance exceptions with shift times and clock-in/out. Highlight late employees' names in amber and absent employees' names in red, with explicit status labels. Report attendance as of each cutoff, distinguish future/pending shifts and approved leave, preserve overnight matching, minimum worked-time validation, lateness tolerance and four-hour absence rules, and record source-data freshness. Use a reliable background scheduler independent of an open browser tab, refresh BambooHR before capture, clearly flag refresh failures, prevent duplicate scheduled runs, and record generation failures and missed runs. Allow download only, email only, or both. Let the workforce admin configure email cadence (including these three daily times, daily, weekly or custom) and recipients: scheduled employees, schedule-location managers and a user-defined distribution list. Reuse the configured email profile where supported; the existing default-mail-client draft flow cannot send unattended or attach files automatically, so require an authenticated server-side sending integration such as Microsoft Graph or supported SMTP for automatic dissemination. Include the formatted summary and XLSX attachment, respect each recipient's team scope, include distribution-list unsubscribe/opt-out handling, and log delivery success, failures and retries without duplicate sends. Honor each report's tier (interval staffing-vs-demand snapshots Gold and Platinum, attendance reports Silver and above). Never include other teams' data in a recipient's report. Full reproduction of unrelated workbook analytics is outside this request.",
         ("workforce-dashboards",),
+    ),
+    (
+        "saved-schedule-register-management",
+        "Saved schedule register deletion and six-record scrolling",
+        "Allow authenticated business administrators to delete schedules directly from the Saved schedule register on Weekly schedules, with explicit confirmation and tenant-scoped authorisation. Persist the deletion and refresh the register, selected schedule, filters, counts and export/email selections consistently. Clearly distinguish saved workspace schedules from accepted database copies and BambooHR-published shifts; explicitly confirm the intended deletion scope rather than silently deleting accepted or remote records. Preserve unrelated schedules and audit history, and surface deletion failures. Make the register vertically scrollable with a viewport no taller than six record rows plus its header; shorter lists should not leave unnecessary empty space. Keep the header visible, support keyboard scrolling and existing action styling, and verify with more than six records, variable row heights, cancellation, reload persistence and non-admin access rejection. This request records planned work only.",
+        ("tenant-identity",),
+    ),
+    (
+        "primary-admin-data-settings",
+        "Primary administrator access to Data & Settings",
+        "Restrict the Data & Settings navigation group and its pages/actions to the business's designated primary administrator (is_primary), not every administrator or the platform owner by default. Hide the group for other accounts and enforce tenant-scoped server-side authorization on the corresponding data/configuration operations; hiding navigation or browser preferences alone is insufficient. Cover direct URLs/API requests, source imports/restores, backups/exports and configuration changes exposed by this group without accidentally blocking ordinary schedule generation or approved schedule sharing. Preserve existing data and reject unauthorized operations explicitly. The separate Settings page is not included automatically merely because of its name; any broader restriction requires an explicit scope decision. Verify primary versus additional administrators, manager/employee denial, tenant isolation, account reassignment and reload persistence. Planned work only.",
+        ("business-membership-controls",),
+    ),
+    (
+        "meta-data-settings",
+        "Move META operating days into Data & Settings",
+        "Move META operating days from Plan schedules into Data & Settings and apply that group's primary-administrator access restriction. Update sidebar ordering, navigation shortcuts, page visibility settings and manual guidance consistently. Preserve existing operating-day/intensity values, configuration locking rules, saved schedule snapshots and scheduling behavior; this is a navigation/access change, not a change to demand calculations. Verify that the primary administrator can view/edit META, other users cannot reach its configuration through direct navigation or mutation paths, and generation continues to consume the preserved configuration. Planned work only.",
+        ("primary-admin-data-settings",),
+    ),
+    (
+        "site-navigation-alerts",
+        "Consistent Access, Hub and Business navigation and alerts",
+        "Add a navigation menu to each Access, Hub and Business site, with similar layout and design to the admin hub and consistent app branding, light/dark themes and responsive behavior. Put a site-specific alerts icon at the top of each site, with authorized site-scoped alerts and unread indicators; do not expose other sites', users' or tenants' protected alerts. Place shift trades and their inbox under Access navigation, retaining employee/personal-manager/team-manager permissions and administrator review, approval and publishing access. Preserve each site's existing functions, content organization and workflows while aligning its navigation and visual shell with the admin hub; do not remove functionality or alter permissions as a styling side effect. Support accessible keyboard navigation and mobile menus. Reuse existing alert/read behavior where available and surface failures explicitly. Verify navigation, alert scope, unread/read behavior, role permissions and light/dark mobile layouts on all three sites. User approved recording this request only; implementation remains pending.",
+        ("business-hub", "manager-employee-access", "shift-trades"),
+    ),
+    (
+        "session-idle-expiry",
+        "Fifteen-minute idle session expiry",
+        "Expire authenticated business administrator, manager, employee, platform-owner and developer sessions after 15 minutes without genuine user activity. Enforce the deadline server-side across browser tabs and direct API requests; automatic attendance/notification polling, background refresh, worker jobs and passive open tabs must not extend the idle deadline. Retain the existing eight-hour session lifetime as an absolute maximum that user activity cannot extend. Provide a warning before expiry, preserve unsaved-work warnings where applicable, stop authenticated polling on expiry, clear protected displays, and require normal sign-in/MFA again. Define a bounded, validated user-activity reporting mechanism rather than treating every HTTP request as activity. Test the exact 900-second boundary, activity renewal before expiry, expiry despite continuous polling, cross-tab behavior, absolute maximum, all account types and rejection of stale sessions. Planned work only.",
+        ("tenant-identity", "manager-employee-access", "developer-change-log", "business-hub"),
     ),
 )
 MEMBERSHIP_TIERS = {
@@ -513,7 +554,8 @@ def membership_summary(
         "tierName": policy["name"],
         "status": status[0] if status else "active",
         "limits": policy["limits"],
-        "features": policy["features"],
+        "features": membership_billing.features(connection, tier, policy["features"]),
+        "billingSuspended": membership_billing.access_suspended(connection, selected_tenant),
         "usage": membership_usage(connection, selected_tenant),
         "userLicenses": policy["limits"]["admins"],
     }
@@ -573,6 +615,23 @@ def initialize_database() -> None:
                 raise RuntimeError(
                     "Use a dedicated PostgreSQL application role without SUPERUSER or BYPASSRLS."
                 )
+        connection.executescript(workforce_trades.SCHEMA)
+        if "override_reason" not in {row[1] for row in connection.execute("PRAGMA table_info(shift_trades)")}:
+            connection.execute("ALTER TABLE shift_trades ADD COLUMN override_reason TEXT NOT NULL DEFAULT ''")
+        trade_columns = {row[1] for row in connection.execute("PRAGMA table_info(shift_trades)")}
+        for column, definition in (
+            ("days", "TEXT NOT NULL DEFAULT '[]'"),
+            ("rest_warnings", "TEXT NOT NULL DEFAULT '{}'"),
+            ("rest_acknowledged", "TEXT NOT NULL DEFAULT '[]'"),
+            ("initiated_role", "TEXT NOT NULL DEFAULT 'employee'"),
+            ("target_confirmed", "INTEGER NOT NULL DEFAULT 0"),
+            ("constraint_policy", "TEXT NOT NULL DEFAULT 'legacy'"),
+        ):
+            if column not in trade_columns:
+                connection.execute(f"ALTER TABLE shift_trades ADD COLUMN {column} {definition}")
+        connection.executescript(membership_billing.SCHEMA)
+        if "plan_id" not in {row[1] for row in connection.execute("PRAGMA table_info(billing_accounts)")}:
+            connection.execute("ALTER TABLE billing_accounts ADD COLUMN plan_id TEXT NOT NULL DEFAULT ''")
         tenant_default = (
             "current_setting('app.tenant_id', true)"
             if DATABASE_URL
@@ -733,6 +792,16 @@ def initialize_database() -> None:
                 read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 archived INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (tenant_id, notification_id, reader_key)
+            );
+            CREATE TABLE IF NOT EXISTS schedule_portal_codes (
+                tenant_id TEXT NOT NULL,
+                location_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                code_hash TEXT NOT NULL UNIQUE,
+                encrypted_code TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                PRIMARY KEY (tenant_id, location_id, role, period_start)
             );
             CREATE TABLE IF NOT EXISTS tenant_audit_events (
                 id TEXT PRIMARY KEY,
@@ -1110,6 +1179,16 @@ def initialize_database() -> None:
                 """,
                 (request[1], request[2], request[0]),
             )
+        if connection.execute(
+            "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
+            ("manager-personal-view-implementation-v1",),
+        ).rowcount:
+            definition = next(row for row in DEVELOPER_REQUESTS if row[0] == "manager-employee-dual-access")
+            connection.execute(
+                "UPDATE developer_change_requests SET description=?,updated_at=CURRENT_TIMESTAMP "
+                "WHERE request_id=? AND status IN ('pending','in_progress','blocked')",
+                (definition[2], definition[0]),
+            )
         for request_id, _, _, dependencies in DEVELOPER_REQUESTS:
             connection.executemany(
                 """
@@ -1300,6 +1379,13 @@ def initialize_database() -> None:
                 "attendance_score_audit_events",
                 "attendance_notifications",
                 "attendance_notification_reads",
+                "schedule_portal_codes",
+                "shift_trades",
+                "shift_trade_events",
+                "shift_trade_publish",
+                "shift_trade_reads",
+                "billing_accounts",
+                "billing_events",
             ):
                 connection.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
                 connection.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
@@ -1596,9 +1682,10 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                 for row in source_connection.execute(f"SELECT * FROM {table_name}")
             ]
 
+        setting_rows = source_rows("application_settings")
         source_settings = {
             row["setting_key"]: row["setting_value"]
-            for row in source_rows("application_settings")
+            for row in setting_rows
         }
         settings = DEFAULT_APP_CONFIG | source_settings
         locations = source_rows("schedule_locations")
@@ -1618,6 +1705,23 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
         )
         attendance_score_overrides = source_rows("attendance_score_overrides")
         attendance_score_audit_events = source_rows("attendance_score_audit_events")
+        workflow_rows = {
+            name: source_rows(name) for name in (
+                "tenant_users", "shift_trades", "shift_trade_events", "shift_trade_reads",
+                "shift_trade_publish", "billing_accounts", "billing_events",
+                "billing_subscription_index", "billing_webhook_receipts",
+                "attendance_notifications", "attendance_notification_reads",
+            )
+        }
+        billing_configuration = source_rows("billing_configuration")
+        source_businesses = source_rows("tenants")
+        source_tenants = {
+            row["tenant_id"] for rows in [setting_rows, source_businesses, locations, employees, accepted, admins, audit_events,
+                                          *workflow_rows.values()]
+            for row in rows if row.get("tenant_id")
+        }
+        if len(source_tenants) > 1:
+            raise RuntimeError("The SQLite importer accepts one business only. Do not combine multiple businesses in one import.")
 
     def source_value(row: dict, column: str, default):
         value = row.get(column, default)
@@ -1645,6 +1749,10 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                 "Import before provisioning an administrator, creating PostgreSQL schedules, "
                 "or setting up target developer credentials."
             )
+        if connection.execute("SELECT 1 FROM tenant_users LIMIT 1").fetchone() or (
+            billing_configuration and connection.execute("SELECT 1 FROM billing_configuration LIMIT 1").fetchone()
+        ):
+            raise RuntimeError("Import before creating target access accounts or configuring platform billing.")
         connection.execute(
             "DELETE FROM employees WHERE tenant_id = ?", (DEFAULT_TENANT_ID,)
         )
@@ -1905,6 +2013,13 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             "UPDATE tenants SET business_name = ? WHERE tenant_id = ?",
             (settings["businessName"], DEFAULT_TENANT_ID),
         )
+        if source_businesses:
+            business = source_businesses[0]
+            connection.execute(
+                "UPDATE tenants SET membership_tier=?,membership_status=? WHERE tenant_id=?",
+                (business.get("membership_tier", "bronze"), business.get("membership_status", "active"),
+                 DEFAULT_TENANT_ID),
+            )
         if admins:
             connection.executemany(
                 """
@@ -2022,6 +2137,25 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                     for row in audit_events
                 ],
             )
+        for table_name, rows in workflow_rows.items():
+            target_columns = {column[1] for column in connection.execute(f"PRAGMA table_info({table_name})")}
+            for row in rows:
+                values = {key: value for key, value in row.items() if key in target_columns}
+                if "tenant_id" in target_columns:
+                    values["tenant_id"] = DEFAULT_TENANT_ID
+                if table_name == "tenant_users":
+                    values["auth_version"] = values.get("auth_version", 1) + 1
+                columns = ",".join('"' + key.replace('"', '""') + '"' for key in values)
+                placeholders = ",".join("?" for _ in values)
+                connection.execute(
+                    f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
+                    tuple(values.values()),
+                )
+        for row in billing_configuration:
+            configuration = json.loads(row["payload"])
+            configuration["enabled"] = False
+            connection.execute("INSERT INTO billing_configuration(id,payload) VALUES(?,?)",
+                               (row["id"], json.dumps(configuration)))
         connection.execute(
             "INSERT INTO app_migrations (migration_id) VALUES (?)",
             ("sqlite-business-import-v1",),
@@ -2401,6 +2535,9 @@ def tenant_authenticated() -> bool:
         return False
     g.tenant_status = account[3]
     g.tenant_membership_status = account[4]
+    with closing(database_connect()) as connection:
+        if membership_billing.access_suspended(connection, tenant_id):
+            g.tenant_membership_status = "billing_suspended"
     return True
 
 
@@ -2526,6 +2663,8 @@ def enforce_tenant_authentication():
             "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
             400,
         )
+    if request.path == "/api/payments/paypal/webhook":
+        return None
     if request.path.startswith("/api/hub/"):
         if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
             return jsonify(error="Cross-origin requests are not allowed."), 403
@@ -2563,7 +2702,9 @@ def audit_tenant_mutation(response):
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
     if request.path == "/" or request.path.startswith(
-        ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub", "/api/access", "/access")
+        ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub", "/api/access",
+         "/access", "/api/schedule-portal/", "/trades", "/billing",
+         "/api/shift-trades", "/api/shift-overrides")
     ):
         response.headers["Cache-Control"] = "no-store"
     actor_id = session.get("tenant_admin_id") or session.get("pending_tenant_admin_id")
@@ -2642,13 +2783,14 @@ def tenant_auth_state():
 def membership_features_for_request() -> dict[str, bool]:
     with closing(database_connect()) as connection:
         tier = tenant_membership_tier(connection)
-    return MEMBERSHIP_TIERS[tier]["features"]
+        return membership_billing.features(connection, tier, MEMBERSHIP_TIERS[tier]["features"])
 
 
 def membership_feature_denied(feature: str):
     with closing(database_connect()) as connection:
         tier = tenant_membership_tier(connection)
-    if MEMBERSHIP_TIERS[tier]["features"].get(feature):
+        enabled = membership_billing.features(connection, tier, MEMBERSHIP_TIERS[tier]["features"])
+    if enabled.get(feature):
         return None
     labels = {
         "scheduleHistory": "Schedule history is included with Silver and above.",
@@ -3372,6 +3514,14 @@ def hub_delete_business(tenant_id: str):
             "attendance_score_audit_events",
             "attendance_notifications",
             "attendance_notification_reads",
+            "schedule_portal_codes",
+            "shift_trades",
+            "shift_trade_events",
+            "shift_trade_publish",
+            "shift_trade_reads",
+            "billing_events",
+            "billing_accounts",
+            "billing_subscription_index",
         ):
             connection.execute(
                 f"DELETE FROM {table_name} WHERE tenant_id = ?", (tenant_id,)
@@ -3517,7 +3667,7 @@ def update_business_profile():
 
 
 def primary_admin_guard():
-    if not tenant_auth_csrf_valid():
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not tenant_auth_csrf_valid():
         return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     with closing(database_connect()) as connection:
         admin = connection.execute(
@@ -3566,9 +3716,15 @@ def update_business_membership():
             if current_tier == next_tier:
                 return jsonify(
                     membership=membership_summary(connection),
-                    accessEnabled=membership_status == "active",
+                    accessEnabled=membership_status == "active" and not membership_billing.access_suspended(connection, active_tenant_id()),
                     unchanged=True,
                 )
+            billing = connection.execute(
+                "SELECT provider_status FROM billing_accounts WHERE tenant_id=?",
+                (active_tenant_id(),),
+            ).fetchone()
+            if billing and billing[0] not in {"CANCELLED", "EXPIRED"}:
+                return jsonify(error="Cancel or reconcile the current sandbox subscription before changing its tier. Existing subscriptions retain their agreed price."), 409
             connection.execute(
                 "UPDATE tenants SET membership_tier = ? WHERE tenant_id = ?",
                 (next_tier, active_tenant_id()),
@@ -3585,6 +3741,10 @@ def update_business_membership():
                 return jsonify(
                     error=f"A {membership_status} membership cannot {action.replace('_', ' ')}."
                 ), 409
+            try:
+                membership_billing.membership_action(connection, active_tenant_id(), billing_provider, action)
+            except membership_billing.PaymentError as error:
+                return jsonify(error=str(error), outcome="unknown" if error.unknown else "failed"), 502
             connection.execute(
                 "UPDATE tenants SET membership_status = ? WHERE tenant_id = ?",
                 (next_status, active_tenant_id()),
@@ -3609,7 +3769,7 @@ def update_business_membership():
         membership = membership_summary(connection)
     return jsonify(
         membership=membership,
-        accessEnabled=membership["status"] == "active",
+        accessEnabled=membership["status"] == "active" and not membership["billingSuspended"],
     )
 
 
@@ -3888,6 +4048,9 @@ def access_user() -> dict[str, object] | None:
         g.tenant_id = DEFAULT_TENANT_ID
         return None
     g.tenant_status, g.tenant_membership_status = row[8], row[9]
+    with closing(database_connect()) as connection:
+        if membership_billing.access_suspended(connection, tenant_id):
+            g.tenant_membership_status = "billing_suspended"
     return {
         "id": user_id, "tenantId": tenant_id, "role": row[0], "email": row[1],
         "employeeId": row[2], "name": row[3], "businessName": row[10],
@@ -3912,6 +4075,23 @@ def access_guard(roles: set[str]):
         denied = membership_feature_denied("employeeScheduleAccess")
         if denied:
             return None, denied
+    return user, None
+
+
+def access_personal_guard():
+    user, failure = access_guard({"employee", "manager"})
+    if failure:
+        return user, failure
+    denied = membership_feature_denied("employeeScheduleAccess")
+    if denied:
+        return None, denied
+    with closing(database_connect()) as connection:
+        employee = connection.execute(
+            "SELECT 1 FROM employees WHERE tenant_id=? AND employee_id=? AND active=1",
+            (user["tenantId"], user["employeeId"]),
+        ).fetchone()
+    if not employee:
+        return None, (jsonify(error="Your account needs an active linked employee record."), 403)
     return user, None
 
 
@@ -4094,12 +4274,13 @@ def serialize_access_account(row) -> dict[str, object]:
         "id": row[0], "role": row[1], "email": row[2], "employeeId": row[3],
         "displayName": row[4], "active": bool(row[5]), "mfaEnabled": bool(row[6]),
         "mustChangePassword": bool(row[7]), "createdAt": row[8],
+        "authVersion": row[9],
     }
 
 
 ACCESS_ACCOUNT_COLUMNS = (
     "id, role, email, employee_id, display_name, active, mfa_enabled, "
-    "must_change_password, created_at"
+    "must_change_password, created_at, auth_version"
 )
 
 
@@ -4136,11 +4317,11 @@ def create_access_account():
     email = email.strip().casefold() if isinstance(email, str) and email.strip() else None
     if (role == "manager" or email) and not valid_admin_email(email):
         return jsonify(error="Enter a valid email address."), 400
-    employee_id = payload.get("employeeId") if role == "employee" else None
+    employee_id = payload.get("employeeId") or None
     display_name = payload.get("displayName")
     tenant_id = active_tenant_id()
     with closing(database_connect()) as connection, connection:
-        if role == "employee":
+        if role == "employee" or employee_id is not None:
             denied = membership_feature_denied("employeeScheduleAccess")
             if denied:
                 return denied
@@ -4215,6 +4396,111 @@ def reset_access_account_password(user_id: str):
         temporaryPassword=temporary_password,
         temporaryPasswordHours=ACCESS_TEMP_PASSWORD_SECONDS // 3600,
     )
+
+
+@app.put("/api/access-accounts/<user_id>/employee")
+def link_manager_employee(user_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    employee_id = payload.get("employeeId") if isinstance(payload, dict) else False
+    if employee_id is not None and (not isinstance(employee_id, str) or not employee_id):
+        return jsonify(error="Choose an active employee or explicitly unlink with null."), 400
+    with closing(database_connect()) as connection, connection:
+        account = connection.execute(
+            "SELECT role FROM tenant_users WHERE tenant_id=? AND id=?",
+            (active_tenant_id(), user_id),
+        ).fetchone()
+        if not account or account[0] != "manager":
+            return jsonify(error="Choose a manager account."), 404
+        if employee_id is not None:
+            denied = membership_feature_denied("employeeScheduleAccess")
+            if denied:
+                return denied
+            employee = connection.execute(
+                "SELECT 1 FROM employees WHERE tenant_id=? AND employee_id=? AND active=1",
+                (active_tenant_id(), employee_id),
+            ).fetchone()
+            if not employee:
+                return jsonify(error="Choose an active employee in this business."), 400
+            conflict = connection.execute(
+                "SELECT id FROM tenant_users WHERE tenant_id=? AND employee_id=? AND id!=?",
+                (active_tenant_id(), employee_id, user_id),
+            ).fetchone()
+            if conflict:
+                return jsonify(error="That employee already has an account. Resolve the "
+                               "existing account explicitly; accounts are not merged."), 409
+        connection.execute(
+            "UPDATE tenant_users SET employee_id=?, auth_version=auth_version+1, "
+            "updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND id=?",
+            (employee_id, active_tenant_id(), user_id),
+        )
+    return jsonify(updated=True)
+
+
+@app.put("/api/access-accounts/<user_id>/role")
+def change_access_account_role(user_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("role") not in {"manager", "employee"}:
+        return jsonify(error="Choose manager or employee."), 400
+    role = payload["role"]
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        account = connection.execute(
+            "SELECT role,email,employee_id,auth_version FROM tenant_users WHERE tenant_id=? AND id=?",
+            (tenant_id, user_id),
+        ).fetchone()
+        if not account:
+            return jsonify(error="Account not found."), 404
+        if payload.get("previousRole") != account[0] or payload.get("authVersion") != account[3]:
+            return jsonify(error="The account changed. Refresh and retry."), 409
+        if role == account[0]:
+            return jsonify(error="Choose a different role."), 400
+        email = payload.get("email", account[1])
+        email = email.strip().casefold() if isinstance(email, str) and email.strip() else None
+        if (role == "manager" or email) and not valid_admin_email(email):
+            return jsonify(error="Enter a valid email address; managers require an email."), 400
+        employee_id = payload.get("employeeId", account[2])
+        if employee_id is not None and (not isinstance(employee_id, str) or not employee_id):
+            return jsonify(error="Choose an active employee or no personal employee link."), 400
+        if role == "employee" or employee_id is not None:
+            denied = membership_feature_denied("employeeScheduleAccess")
+            if denied:
+                return denied
+            employee = connection.execute(
+                "SELECT 1 FROM employees WHERE tenant_id=? AND employee_id=? AND active=1",
+                (tenant_id, employee_id),
+            ).fetchone()
+            if not employee:
+                return jsonify(error="Choose an active employee in this business."), 400
+        conflict = connection.execute(
+            "SELECT id FROM tenant_users WHERE tenant_id=? AND id!=? AND "
+            "(email=? OR employee_id=? OR employee_id=? OR email=?)",
+            (tenant_id, user_id, email, email, employee_id, employee_id),
+        ).fetchone()
+        if conflict:
+            return jsonify(error="That email or employee already belongs to another account. "
+                           "Accounts are not merged."), 409
+        try:
+            updated = connection.execute(
+                "UPDATE tenant_users SET role=?,email=?,employee_id=?,auth_version=auth_version+1, "
+                "mfa_pending_secret=NULL,updated_at=CURRENT_TIMESTAMP "
+                "WHERE tenant_id=? AND id=? AND auth_version=?",
+                (role, email, employee_id, tenant_id, user_id, account[3]),
+            )
+        except (sqlite3.IntegrityError, psycopg.IntegrityError):
+            return jsonify(error="That email or employee already belongs to another account. "
+                           "Accounts are not merged."), 409
+        if updated.rowcount != 1:
+            return jsonify(error="The account changed. Refresh and retry."), 409
+        hub_audit(
+            connection, "access-account-role-change", tenant_id,
+            json.dumps({"accountId": user_id, "previousRole": account[0], "role": role}),
+            actor_email=session.get("tenant_admin_email"),
+        )
+    return jsonify(updated=True, role=role)
 
 
 @app.post("/api/access-accounts/<user_id>/active")
@@ -4356,7 +4642,7 @@ def access_login():
         g.tenant_id = tenant_id
         if role == "employee":
             tier = tenant_membership_tier(connection, tenant_id)
-            if not MEMBERSHIP_TIERS[tier]["features"].get("employeeScheduleAccess"):
+            if not membership_billing.features(connection, tier, MEMBERSHIP_TIERS[tier]["features"]).get("employeeScheduleAccess"):
                 return jsonify(error="Employee access is not included in this business's membership."), 403
         if account[5]:
             if not isinstance(new_password, str):
@@ -4548,6 +4834,8 @@ def manager_mark_absent():
         or not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500
     ):
         return jsonify(error="Provide the shift and a reason of 1 to 500 characters."), 400
+    if employee_id == user["employeeId"]:
+        return jsonify(error="An administrator must correct your own attendance."), 403
     try:
         valid_date = date.fromisoformat(shift_text).isoformat() == shift_text
     except ValueError:
@@ -4586,7 +4874,7 @@ def manager_mark_absent():
 
 @app.get("/api/access/me/attendance")
 def employee_attendance():
-    user, failure = access_guard({"employee"})
+    user, failure = access_personal_guard()
     if failure:
         return failure
     window = attendance_window()
@@ -4605,6 +4893,356 @@ def employee_attendance():
 @app.get("/access")
 def access_page():
     return send_from_directory(APP_DIRECTORY, "access.html")
+
+
+@app.get("/trades")
+def trade_page():
+    return send_from_directory(APP_DIRECTORY, "trades.html")
+
+
+@app.get("/billing")
+def billing_page():
+    return send_from_directory(APP_DIRECTORY, "billing.html")
+
+
+def portal_visibility_weeks(connection: DatabaseConnection) -> int:
+    row = connection.execute(
+        "SELECT setting_value FROM application_settings "
+        "WHERE tenant_id = ? AND setting_key = 'schedule_visibility_weeks'",
+        (active_tenant_id(),),
+    ).fetchone()
+    try:
+        weeks = int(row[0]) if row else 4
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("Stored schedule visibility is invalid.") from error
+    if not 1 <= weeks <= 52:
+        raise RuntimeError("Stored schedule visibility must be 1 to 52 weeks.")
+    return weeks
+
+
+@app.route("/api/schedule-portal/settings", methods=["GET", "PUT"])
+def schedule_portal_settings():
+    if request.method == "PUT" and not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    with closing(database_connect()) as connection, connection:
+        if request.method == "PUT":
+            payload = request.get_json(silent=True)
+            weeks = payload.get("visibilityWeeks") if isinstance(payload, dict) else None
+            if type(weeks) is not int or not 1 <= weeks <= 52:
+                return jsonify(error="Choose a schedule visibility of 1 to 52 weeks."), 400
+            connection.execute(
+                """
+                INSERT INTO application_settings (tenant_id, setting_key, setting_value)
+                VALUES (?, 'schedule_visibility_weeks', ?)
+                ON CONFLICT (tenant_id, setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value
+                """,
+                (active_tenant_id(), str(weeks)),
+            )
+        return jsonify(visibilityWeeks=portal_visibility_weeks(connection))
+
+
+def portal_schedule_groups(connection: DatabaseConnection) -> list[dict]:
+    """Project accepted assignments only; never expose source-workbook metadata."""
+    tenant = active_tenant_id()
+    today = datetime.now(ATTENDANCE_TIMEZONE).date()
+    first = today - timedelta(days=today.weekday())
+    last = first + timedelta(weeks=portal_visibility_weeks(connection)) - timedelta(days=1)
+    employees = {
+        str(row[0]): row for row in connection.execute(
+            """
+            SELECT e.employee_id, e.name, e.role, e.schedule_location_id, sl.name,
+                   sl.location, sl.manager_email, sl.role_group
+            FROM employees e JOIN schedule_locations sl
+                ON sl.tenant_id = e.tenant_id AND sl.id = e.schedule_location_id
+            WHERE e.tenant_id = ? AND e.active = 1
+            """,
+            (tenant,),
+        )
+    }
+    groups = []
+    for run_id, encoded in connection.execute(
+        "SELECT run_id, payload FROM accepted_schedules "
+        "WHERE tenant_id = ? AND week_start >= ? AND week_start <= ? "
+        "ORDER BY week_start, location, role, run_id",
+        (tenant, (first - timedelta(days=6)).isoformat(), last.isoformat()),
+    ):
+        try:
+            schedule = json.loads(encoded)
+            start = date.fromisoformat(schedule["start"])
+            end = start + timedelta(days=6)
+            if end < today:
+                continue
+            span = schedule.get("controls", {}).get("span")
+            if (
+                not isinstance(span, (int, float)) or isinstance(span, bool)
+                or not math.isfinite(span) or not 0 < span <= 24
+                or not isinstance(schedule["employees"], list)
+            ):
+                raise ValueError("Invalid duration or assignments.")
+            by_location = {}
+            for assigned in schedule["employees"]:
+                employee = employees.get(str(assigned.get("id", "")))
+                if not employee:
+                    continue
+                if (
+                    employee[5] != schedule["location"]
+                    or not role_matches_schedule_group(employee[2], schedule["role"])
+                    or not role_matches_schedule_group(employee[2], employee[7])
+                ):
+                    continue
+                slots = assigned.get("slots")
+                if not isinstance(slots, list) or len(slots) != 7 or any(
+                    slot is not None and (
+                        not isinstance(slot, (int, float)) or isinstance(slot, bool)
+                        or not math.isfinite(slot) or not 0 <= slot < 24
+                    ) for slot in slots
+                ):
+                    raise ValueError("Invalid assignment slots.")
+                group = by_location.setdefault(employee[3], {
+                    "runId": run_id, "locationId": employee[3],
+                    "locationName": employee[4], "location": employee[5],
+                    "role": schedule["role"], "start": start.isoformat(),
+                    "end": end.isoformat(), "shiftDuration": span,
+                    "tradeCount": len(schedule.get("tradeHistory", [])),
+                    "managerEmail": employee[6], "employees": [],
+                })
+                group["employees"].append({
+                    "id": employee[0], "name": employee[1], "role": employee[2],
+                    "slots": [slot if first <= start + timedelta(days=day) <= last else None
+                              for day, slot in enumerate(slots)],
+                })
+            groups.extend(by_location.values())
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            raise RuntimeError(f"Accepted schedule {run_id} has invalid portal data.") from error
+    return groups
+
+
+def portal_group_key(group: dict) -> tuple[str, str, str]:
+    return group["locationId"], group["role"], group["start"]
+
+
+def portal_code_hash(code: str) -> str:
+    return hmac.new(
+        MFA_ENCRYPTION_KEY.encode("utf-8"), b"schedule-portal\0" + code.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def portal_code(connection: DatabaseConnection, group: dict) -> dict:
+    tenant = active_tenant_id()
+    key = portal_group_key(group)
+    expires = int(datetime.combine(
+        date.fromisoformat(group["end"]) + timedelta(days=1),
+        time.min, tzinfo=ATTENDANCE_TIMEZONE,
+    ).timestamp())
+    if expires <= int(time_module.time()):
+        raise ValueError("This schedule period has ended; its access code has expired.")
+    row = connection.execute(
+        "SELECT encrypted_code, expires_at FROM schedule_portal_codes "
+        "WHERE tenant_id = ? AND location_id = ? AND role = ? AND period_start = ?",
+        (tenant, *key),
+    ).fetchone()
+    if row:
+        try:
+            code = mfa_cipher().decrypt(row[0].encode("ascii")).decode("ascii")
+        except (InvalidToken, UnicodeError) as error:
+            raise RuntimeError("The stored schedule code cannot be decrypted.") from error
+    else:
+        for _ in range(20):
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            created = connection.execute(
+                """
+                INSERT INTO schedule_portal_codes
+                    (tenant_id, location_id, role, period_start, code_hash,
+                     encrypted_code, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                (tenant, *key, portal_code_hash(code),
+                 mfa_cipher().encrypt(code.encode("ascii")).decode("ascii"), expires),
+            )
+            if created.rowcount:
+                break
+            row = connection.execute(
+                "SELECT encrypted_code, expires_at FROM schedule_portal_codes "
+                "WHERE tenant_id = ? AND location_id = ? AND role = ? AND period_start = ?",
+                (tenant, *key),
+            ).fetchone()
+            if row:
+                code = mfa_cipher().decrypt(row[0].encode("ascii")).decode("ascii")
+                break
+        else:
+            raise RuntimeError("A unique schedule access code could not be generated.")
+    return {
+        "runId": group["runId"], "locationId": group["locationId"],
+        "role": group["role"], "start": group["start"], "end": group["end"],
+        "code": code, "expiresAt": datetime.fromtimestamp(
+            row[1] if row else expires, ATTENDANCE_TIMEZONE
+        ).isoformat(),
+    }
+
+
+@app.post("/api/schedule-portal/codes")
+def generate_portal_codes():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    ids = payload.get("runIds") if isinstance(payload, dict) else None
+    if (
+        not isinstance(ids, list) or not 1 <= len(ids) <= 100
+        or any(not isinstance(value, str) or not value for value in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        return jsonify(error="Select 1 to 100 distinct accepted schedules."), 400
+    with closing(database_connect()) as connection, connection:
+        groups = [g for g in portal_schedule_groups(connection) if g["runId"] in ids]
+        if {g["runId"] for g in groups} != set(ids):
+            return jsonify(error="Accept the selected schedules first and ensure their "
+                           "employees have matching active location/role assignments "
+                           "within the portal visibility window."), 400
+        codes = [portal_code(connection, group) for group in groups]
+    return jsonify(codes=codes)
+
+
+def employee_portal_team(connection: DatabaseConnection, user: dict) -> tuple | None:
+    return connection.execute(
+        "SELECT schedule_location_id, role FROM employees "
+        "WHERE tenant_id = ? AND employee_id = ? AND active = 1",
+        (user["tenantId"], user["employeeId"]),
+    ).fetchone()
+
+
+def scoped_portal_groups(connection: DatabaseConnection, user: dict) -> list[dict]:
+    groups = portal_schedule_groups(connection)
+    if user["role"] == "manager" and request.args.get("view") != "employee":
+        return [g for g in groups if
+                g["managerEmail"].strip().casefold() == (user["email"] or "").casefold()]
+    team = employee_portal_team(connection, user)
+    if not team or not team[0]:
+        return []
+    scoped = []
+    for group in groups:
+        if group["locationId"] != team[0]:
+            continue
+        members = [e for e in group["employees"] if e["role"].casefold() == team[1].casefold()]
+        if not any(e["id"] == user["employeeId"] and
+                   any(slot is not None for slot in e["slots"]) for e in members):
+            continue
+        scoped.append(group | {"employees": members})
+    return scoped
+
+
+def public_portal_group(group: dict, include_roster: bool) -> dict:
+    return {key: value for key, value in group.items()
+            if key != "managerEmail" and (include_roster or key != "employees")}
+
+
+@app.get("/api/access/schedules")
+def access_schedules():
+    user, failure = access_guard({"manager", "employee"})
+    if failure:
+        return failure
+    personal = user["role"] == "employee" or request.args.get("view") == "employee"
+    if personal:
+        user, failure = access_personal_guard()
+        if failure:
+            return failure
+    with closing(database_connect()) as connection:
+        groups = scoped_portal_groups(connection, user)
+        weeks = portal_visibility_weeks(connection)
+    return jsonify(
+        visibilityWeeks=weeks,
+        schedules=[public_portal_group(g, not personal) for g in groups],
+    )
+
+
+@app.get("/api/access/me/shifts")
+def access_personal_shifts():
+    user, failure = access_personal_guard()
+    if failure:
+        return failure
+    with closing(database_connect()) as connection:
+        groups = scoped_portal_groups(connection, user | {"role": "employee"})
+    return jsonify(schedules=[
+        public_portal_group(group | {"employees": [
+            employee for employee in group["employees"] if employee["id"] == user["employeeId"]
+        ]}, True) for group in groups
+    ])
+
+
+@app.post("/api/access/schedules/unlock")
+def unlock_access_schedule():
+    user, failure = access_personal_guard()
+    if failure:
+        return failure
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("code"), str) or not re.fullmatch(
+        r"[0-9]{6}", payload["code"]
+    ) or (
+        any(key in payload for key in ("runId", "locationId")) and
+        not all(isinstance(payload.get(key), str) and payload[key] for key in ("runId", "locationId"))
+    ):
+        return jsonify(error="Enter a six-digit code, optionally with a selected schedule."), 400
+    now = int(time_module.time())
+    with closing(database_connect()) as connection, connection:
+        login_key = tenant_auth_attempt_key(
+            "portal:" + user["id"], user["tenantId"]
+        )
+        attempt = tenant_auth_attempt_state(connection, login_key, now)
+        if attempt is None:
+            return jsonify(error="Too many incorrect codes. Try again in 15 minutes."), 429
+        matches = []
+        for group in scoped_portal_groups(connection, user | {"role": "employee"}):
+            if "runId" in payload and (
+                group["runId"] != payload["runId"] or group["locationId"] != payload["locationId"]
+            ):
+                continue
+            row = connection.execute(
+                "SELECT code_hash, expires_at FROM schedule_portal_codes "
+                "WHERE tenant_id = ? AND location_id = ? AND role = ? AND period_start = ?",
+                (user["tenantId"], *portal_group_key(group)),
+            ).fetchone()
+            if row and row[1] > now and hmac.compare_digest(row[0], portal_code_hash(payload["code"])):
+                matches.append(public_portal_group(group, True))
+        if not matches:
+            record_tenant_auth_failure(connection, login_key, *attempt, now)
+            return jsonify(error="The code is invalid, expired, or not for your assigned schedule."), 403
+        connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
+        return jsonify(schedule=matches[0], schedules=matches)
+
+
+@app.get("/api/access/me/team-attendance")
+def employee_team_attendance():
+    user, failure = access_personal_guard()
+    if failure:
+        return failure
+    now = datetime.now(ATTENDANCE_TIMEZONE)
+    counts = {}
+    with closing(database_connect()) as connection:
+        team = employee_portal_team(connection, user)
+        scope = set()
+        if team and team[0]:
+            scope = {row[0] for row in connection.execute(
+                "SELECT employee_id FROM employees WHERE tenant_id = ? "
+                "AND schedule_location_id = ? AND LOWER(role) = ? AND active = 1",
+                (user["tenantId"], team[0], team[1].casefold()),
+            )}
+        records = scoped_attendance_records(
+            connection, user["tenantId"], now.date().isoformat(), now.date().isoformat(), scope
+        )
+        for item in records:
+            if schedule_shift_datetime(now.date(), item["shiftStart"]) > now:
+                continue
+            counts[item["status"]] = counts.get(item["status"], 0) + 1
+    expected = sum(count for status, count in counts.items()
+                   if status not in {"approved_leave", "sick", "vacation"})
+    present = counts.get("attended", 0) + counts.get("late", 0)
+    return jsonify(
+        date=now.date().isoformat(), reportedAt=now.isoformat(), timezone="America/Jamaica",
+        counts=counts, expected=expected, present=present,
+        attendancePercent=round(100 * present / expected, 1) if expected else None,
+    )
 
 
 @app.get("/")
@@ -6316,11 +6954,14 @@ def bamboo_payloads(
         SELECT employee_id, bamboohr_id, active, schedule_location_id, location, role,
                source_type
         FROM employees
-        """
+        WHERE tenant_id = ?
+        """,
+        (active_tenant_id(),),
     ).fetchall()
     employees = {row[0]: row for row in employee_rows}
     schedule_rows = connection.execute(
-        "SELECT id, bamboo_schedule_id, location, name, role_group FROM schedule_locations"
+        "SELECT id, bamboo_schedule_id, location, name, role_group FROM schedule_locations WHERE tenant_id=?",
+        (active_tenant_id(),),
     ).fetchall()
     locations = {row[0]: row for row in schedule_rows}
 
@@ -8811,6 +9452,10 @@ def publish_bamboohr_schedules():
             result.update(status=None, success=False, error=str(error.reason))
         results.append(result)
     return jsonify(results=results), (200 if all(result["success"] for result in results) else 502)
+
+
+trade_workflow = workforce_trades.register(app, sys.modules[__name__])
+billing_provider = membership_billing.register(app, sys.modules[__name__])
 
 
 def main() -> None:

@@ -24,7 +24,7 @@ function migrateScheduleWeeks(m){
         let p=m.pools.find(x=>x.id===key(e.location,e.role));
         for(let s of p?.shiftStarts||STARTS){
             let k=String(s),oldIndex=STARTS.indexOf(s);
-            if(e.shiftAvailability[k]!==0&&e.shiftAvailability[k]!==1)e.shiftAvailability[k]=oldIndex>=0?e.allow?.[oldIndex]??0:0
+            if(e.shiftAvailability[k]===undefined)e.shiftAvailability[k]=oldIndex>=0?e.allow?.[oldIndex]??null:0
         }
     }
     for(let r of m.results||[]){
@@ -34,7 +34,7 @@ function migrateScheduleWeeks(m){
             if(!e.shiftAvailability||typeof e.shiftAvailability!=='object')e.shiftAvailability={};
             for(let s of r.shiftStarts){
                 let k=String(s),oldIndex=STARTS.indexOf(s);
-                if(e.shiftAvailability[k]!==0&&e.shiftAvailability[k]!==1)e.shiftAvailability[k]=oldIndex>=0?e.allow?.[oldIndex]??0:0
+                if(e.shiftAvailability[k]===undefined)e.shiftAvailability[k]=oldIndex>=0?e.allow?.[oldIndex]??null:0
             }
         }
     }
@@ -47,10 +47,13 @@ function poolStarts(pool){
     return Array.isArray(pool?.shiftStarts)?pool.shiftStarts:STARTS
 }
 function employeeCanStart(employee,start){
+    return employeeStartPermission(employee,start)===1
+}
+function employeeStartPermission(employee,start){
     let value=employee.shiftAvailability?.[String(start)];
-    if(value===0||value===1)return value===1;
+    if(value!==undefined)return value;
     let legacyIndex=STARTS.indexOf(start);
-    return legacyIndex>=0&&employee.allow?.[legacyIndex]===1
+    return legacyIndex>=0?employee.allow?.[legacyIndex]??null:undefined
 }
 function parseStartTime(value){
     let match=String(value||'').match(/^([01]\d|2[0-3]):([0-5]\d)$/);
@@ -108,11 +111,11 @@ function fromWorkbook(db,name){
     ;
     for(let p of pools){
         let rs=roster.filter(e=>key(e.location,e.role)===p.id);
-        p.enabled=rs.length>0&&p.shares.every(isNum)&&Math.abs(p.shares.reduce((a,x)=>a+x,0)-1)<.0001&&rs.every(e=>!rosterErrors(e).length)
+        p.enabled=rs.length>0&&p.shares.every(isNum)&&Math.abs(p.shares.reduce((a,x)=>a+x,0)-1)<.0001&&rs.every(e=>!rosterErrors(e,p).length)
     }
     return model
 }
-function rosterErrors(e){
+function rosterErrors(e,pool=model.pools.find(p=>p.id===key(e.location,e.role))){
     let errs=[];
     if(!e.id||!e.name||!e.location||!e.role)errs.push('Identity / pool missing');
     if(!['Yes','No'].includes(e.flex))errs.push('Flexible must be Yes or No');
@@ -121,7 +124,7 @@ function rosterErrors(e){
     if(![1,2,3].includes(e.proximity))errs.push('Proximity must be 1–3');
     if(![1,2,3].includes(e.random))errs.push('Random factor must be 1–3');
     if(e.attendance!==null&&(!isNum(e.attendance)||e.attendance<0||e.attendance>100))errs.push('Attendance must be 0–100 or blank');
-    if(e.allow.length!==4||e.allow.some(v=>v!==0&&v!==1))errs.push('Shift permissions must be 0 or 1');
+    for(let start of poolStarts(pool))if(![0,1].includes(employeeStartPermission(e,start)))errs.push('Availability for '+timeLabel(start)+' must be 0 or 1');
     if(e.days.length!==7||e.days.some(v=>v!==0&&v!==1))errs.push('Availability must be 0 or 1');
     if(e.flex==='No'&&!employeeCanStart(e,e.preferred))errs.push('Fixed preference is disallowed');
     return errs
@@ -164,9 +167,8 @@ function modelIssues(m){
 
         }
         for(let e of rs){
-            let es=rosterErrors(e);
+            let es=rosterErrors(e,p);
             if(es.length)errors.push(prefix+e.name+' — '+es.join('; '));
-            for(let s of starts)if(![0,1].includes(e.shiftAvailability?.[String(s)]))errors.push(prefix+e.name+' — availability for '+timeLabel(s)+' must be set to 0 or 1');
             if(!rs.some(x=>x.attendance!==null)&&c.attendanceEnabled)warnings.push(prefix+'attendance priority has no scored employees')
         }
 
@@ -603,15 +605,24 @@ function downloadSchedules(){
     downloadFile('CBL-All-Location-Role-Schedules.xlsx',workbookBlob(exportTables()))
 }
 function inputTables(){
-    let roster=[['ID','Employee',...ROSTER_FIELDS.map(x=>x[1]),'Previous start','Attendance rank','Input check','Location','Role']],meta=[['Location',...DAYS.map(d=>d+' I'),'Total I',...DAYS,'Shift Total']],pools=[['Location','Role','Headcount','6 AM share','8:30 AM share','2 PM share','10 PM share','Enabled']],controls=[['Setting','Value'],...Object.entries(model.controls)],names=model.roster.map(e=>[e.id,e.name,e.flex,e.reason,e.preferred,e.proximity,e.random,e.attendance,...e.allow,...e.days,e.previous,'',rosterErrors(e).length?'CHECK':'OK',e.location,e.role]);
+    let roster=[['ID','Employee',...ROSTER_FIELDS.slice(0,6).map(x=>x[1]),...STARTS.map(start=>'Allow '+timeLabel(start)),...ROSTER_FIELDS.slice(6).map(x=>x[1]),'Previous start','Attendance rank','Input check','Location','Role']],meta=[['Location',...DAYS.map(d=>d+' I'),'Total I',...DAYS,'Shift Total']],pools=[['Location','Role','Headcount','6 AM share','8:30 AM share','2 PM share','10 PM share','Enabled']],controls=[['Setting','Value'],...Object.entries(model.controls)],names=model.roster.map(e=>[e.id,e.name,e.flex,e.reason,e.preferred,e.proximity,e.random,e.attendance,...STARTS.map(start=>employeeStartPermission(e,start)??null),...e.days,e.previous,'',rosterErrors(e).length?'CHECK':'OK',e.location,e.role]);
+    let availability=[['ID','Employee','Location','Role','Shift start','Allowed']];
+    let configuredStarts=[['Location','Role','Shift start','Share']];
+    for(let pool of model.pools){
+        poolStarts(pool).forEach((start,index)=>configuredStarts.push([pool.location,pool.role,start,pool.shares[index]]));
+        for(let employee of model.roster.filter(e=>key(e.location,e.role)===pool.id))for(let start of poolStarts(pool))availability.push([employee.id,employee.name,employee.location,employee.role,start,employeeStartPermission(employee,start)??null]);
+    }
     roster.push(...names);
     for(let l of model.locations)meta.push([l.name,...l.intensity,sum(l.intensity.map(x=>x||0)),...l.open,sum(l.open)]);
-    for(let p of model.pools)pools.push([p.location,p.role,poolRoster(model,p).length,...p.shares,p.enabled?1:0]);
+    for(let p of model.pools)pools.push([p.location,p.role,poolRoster(model,p).length,...STARTS.map(start=>{
+        let index=poolStarts(p).indexOf(start);
+        return index<0?0:p.shares[index]
+    }),p.enabled?1:0]);
     return {
         ...(membershipFeatureEnabled('overtimeForecasting')&&typeof overtimeInputTables==='function'?overtimeInputTables():{
 
         }
-        ),Roster:roster,'Location Roles':pools,META:meta,Controls:controls,'Read me':[['Description','Value'],['Export type','Input values snapshot. Original Excel engine formulas are not included.'],['Reimport','Use workspace JSON backup for exact reimport. Upload original-layout source workbooks through Upload source.'],['Source',model.sourceName]]
+        ),Roster:roster,'Location Roles':pools,'Shift availability':availability,'Configured shift starts':configuredStarts,META:meta,Controls:controls,'Read me':[['Description','Value'],['Export type','Input values snapshot. Original Excel engine formulas are not included.'],['Reimport','Use workspace JSON backup for exact reimport. Upload original-layout source workbooks through Upload source.'],['Source',model.sourceName]]
     }
 
 }
@@ -854,20 +865,61 @@ function openEmail(){
     }
     let dlg=$('emailDialog');
     dlg.innerHTML=`<div id="emailForm"><div class="dialoghead"><div><div class="eyebrow">SCHEDULE REVIEW</div><h2>Prepare manager confirmation email</h2></div><button type="button" data-email-command="close" aria-label="Close">✕</button></div><p>Select schedules to include. The app groups them by schedule location and sends each manager only schedules for their site.</p><fieldset><legend>1 · Select generated schedules</legend><div class="actions"><button type="button" data-email-command="selectAll">Select all</button><button type="button" data-email-command="selectNone">Clear</button></div><div class="schedulechoices">${model.results.map(r=>`<label><input type="checkbox" data-email-run value="${esc(r.id)}" ${r.id===model.selectedRun?'checked':''}> <span><b>${esc(r.location)} · ${esc(r.role)}</b><small>${r.start} to ${r.end} · revision ${r.revision}</small></span></label>`).join('')}</div></fieldset><fieldset><legend>2 · Manager email</legend><label>Schedule location ${select([],'','id="emailManagerGroup"')}</label><p id="emailManagerDetails">Preview the selection to identify the schedule-location managers.</p><p>Cc: <strong>${appSettings().workforceCc?'workforce@cbljm.co · fixed in Settings':'Disabled in Settings'}</strong></p></fieldset><div class="callout">The default mail client receives one manager-specific draft at a time. Download that location’s workbook and attach it before sending. The app prepares drafts; it does not send messages automatically.</div><div class="actions"><button type="button" data-email-command="preview" class="primary">Preview manager email & workbook</button></div><p id="emailError" class="badtext" role="alert"></p><section id="emailPreview" hidden><h3>Email preview</h3><p id="emailDeadline"></p><label>Subject<input id="emailSubject" readonly></label><label>Message<textarea id="emailBody" rows="12" readonly></textarea></label><div class="actions"><button type="button" data-email-command="workbook">1 · Download this manager’s schedules · XLSX</button><button type="button" data-email-command="client">2 · Open manager email draft</button><button type="button" data-email-command="copy">Copy full email template</button><button type="button" data-email-command="template">Download email template · TXT</button></div><p class="note">Repeat for each schedule location in the selector. Attach the downloaded XLSX before sending.</p></section></div>`;
+    const portalLabel=document.createElement('label'),portalCheck=document.createElement('input');
+    portalCheck.type='checkbox';portalCheck.id='emailPortalCodes';
+    portalCheck.checked=acceptedSchedules.some(item=>item.id===model.selectedRun);
+    portalLabel.append(portalCheck,document.createTextNode(' Include employee portal codes (accept schedules first; current visibility window only).'));
+    dlg.querySelector('#emailForm fieldset:last-of-type').append(portalLabel);
+    refreshEmailManagerGroups();
     dlg.showModal();
 
 }
 let preparedEmail=null;
 let preparedManagerGroups=[];
-function prepareEmail(){
+let preparedEmailGeneration=0;
+function refreshEmailManagerGroups(){
+    preparedEmailGeneration++;
+    preparedEmail=null;
+    $('emailPreview').hidden=true;
+    let selector=$('emailManagerGroup'),selected=selector.value;
     try{
-        let ids=[...$('emailDialog').querySelectorAll('[data-email-run]:checked')].map(e=>e.value),selectedGroup=$('emailManagerGroup').value;
+        let ids=[...$('emailDialog').querySelectorAll('[data-email-run]:checked')].map(e=>e.value);
         preparedManagerGroups=emailManagerGroups(ids);
-        $('emailManagerGroup').innerHTML=preparedManagerGroups.map((group,index)=>`<option value="${esc(group.location.id)}">${esc(group.location.name)} · ${esc(group.manager.name)} · ${esc(group.manager.email)} · ${group.runs.length} schedules</option>`).join('');
-        $('emailManagerGroup').value=preparedManagerGroups.some(group=>group.location.id===selectedGroup)?selectedGroup:preparedManagerGroups[0].location.id;
-        let group=preparedManagerGroups.find(item=>item.location.id===$('emailManagerGroup').value);
+        selector.innerHTML=preparedManagerGroups.map(group=>`<option value="${esc(group.location.id)}">${esc(group.location.name)} · ${esc(group.manager.name)} · ${esc(group.manager.email)} · ${group.runs.length} schedules</option>`).join('');
+        selector.disabled=false;
+        selector.value=preparedManagerGroups.some(group=>group.location.id===selected)?selected:preparedManagerGroups[0].location.id;
+        let group=preparedManagerGroups.find(item=>item.location.id===selector.value);
         $('emailManagerDetails').textContent='To: '+group.manager.name+' <'+group.manager.email+'> · '+group.runs.length+' selected schedule(s) for '+group.location.name+'.';
-        preparedEmail=managerEmailPackage(group);
+        $('emailError').textContent='';
+        return group
+    }
+    catch(error){
+        preparedManagerGroups=[];
+        selector.replaceChildren();
+        selector.disabled=true;
+        $('emailManagerDetails').textContent='Select valid schedules with configured location managers.';
+        $('emailError').textContent=error.message;
+        return null
+    }
+}
+async function prepareEmail(){
+    let group=refreshEmailManagerGroups();
+    if(!group)return null;
+    const generation=++preparedEmailGeneration;
+    try{
+        let draft=managerEmailPackage(group);
+        if($('emailPortalCodes').checked){
+            let codes=(await directoryRequest('/schedule-portal/codes',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({runIds:group.runs.map(run=>run.id)})
+            })).codes.filter(item=>item.locationId===group.location.id);
+            if(new Set(codes.map(item=>item.runId)).size!==group.runs.length)throw Error('The accepted schedules no longer match this manager location. Refresh the schedules and employee assignments.');
+            draft.body+='\n\nEmployee schedule portal: '+new URL('/access',window.location.href).href+
+                '\nEmployees must sign in individually and have an assignment in the period. Share the appropriate code securely with the team:\n'+
+                codes.map(item=>item.role+' | '+item.start+' to '+item.end+' | Code: '+item.code+' | Expires: '+item.expiresAt+' (Jamaica)').join('\n');
+        }
+        if(generation!==preparedEmailGeneration)return null;
+        preparedEmail=draft;
         $('emailSubject').value=preparedEmail.subject;
         $('emailBody').value=preparedEmail.body;
         $('emailDeadline').textContent='Prepared: '+prettyDate(preparedEmail.sent)+' · Confirmation due: '+prettyDate(preparedEmail.deadline);
@@ -876,6 +928,7 @@ function prepareEmail(){
         return preparedEmail
     }
     catch(e){
+        if(generation!==preparedEmailGeneration)return null;
         preparedEmail=null;
         $('emailPreview').hidden=true;
         $('emailError').textContent=e.message;
@@ -916,7 +969,7 @@ document.addEventListener('change',e=>{
     if(t.id==='workforceCcSetting'){
         appSettings().workforceCc=t.checked;queueSave()
     }
-    if(t.id==='emailManagerGroup'&&$('emailPreview')&&!$('emailPreview').hidden)prepareEmail();
+    if(t.matches('[data-email-run]')||t.id==='emailManagerGroup')refreshEmailManagerGroups();
     if(t.id==='holidaySetting'){
         let dates=t.value.trim().split(/\s+/).filter(Boolean);if(dates.some(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d)||Number.isNaN(Date.parse(d+'T12:00:00Z'))||new Date(d+'T12:00:00Z').toISOString().slice(0,10)!==d)){
             message('Enter valid non-working dates, one YYYY-MM-DD per line.',true);t.value=appSettings().holidays;return
@@ -928,6 +981,7 @@ document.addEventListener('change',e=>{
 );
 document.addEventListener('input',e=>{
     if(e.target.closest?.('#emailForm')&&$('emailPreview')){
+        preparedEmailGeneration++;
         preparedEmail=null;$('emailPreview').hidden=true
     }
 
@@ -935,12 +989,13 @@ document.addEventListener('input',e=>{
 );
 document.addEventListener('click',async e=>{
     let b=e.target.closest('[data-email-command]');if(!b)return;let cmd=b.dataset.emailCommand;if(cmd==='close'){
-        $('emailDialog').close();preparedEmail=null;return
+        $('emailDialog').close();preparedEmailGeneration++;preparedEmail=null;return
     }
     if(cmd==='selectAll'||cmd==='selectNone'){
-        $('emailDialog').querySelectorAll('[data-email-run]').forEach(x=>x.checked=cmd==='selectAll');$('emailPreview').hidden=true;return
+        preparedEmailGeneration++;
+        $('emailDialog').querySelectorAll('[data-email-run]').forEach(x=>x.checked=cmd==='selectAll');refreshEmailManagerGroups();return
     }
-    let p=prepareEmail();if(!p)return;try{
+    let p=await prepareEmail();if(!p)return;try{
         if(cmd==='workbook')downloadFile(p.filename,workbookBlob(exportTables(p.runs)));if(cmd==='client'){
             let url=mailtoUrl(p);if(url.length>7000)throw Error('This message is too long for a reliable email link. Use Copy full email template instead.');window.location.href=url;$('emailError').textContent='Mail client requested. Download and attach '+p.filename+' before sending.'
         }
@@ -1409,50 +1464,17 @@ function tradePoolChanged(){
 }
 function openTrades(){
     if(!membershipFeatureEnabled('shiftTrades'))throw Error('Shift trades are included with Silver and above.');
-    if(!model.results.length)throw Error('Generate or upload schedules first.');
-    let pairs=[...new Set(model.results.map(r=>key(r.location,r.role)))],selected=model.results.find(r=>r.id===model.selectedRun)||visibleScheduleRuns()[0]||model.results[0];
-    $('tradeDialog').innerHTML=`<div class="dialoghead"><div><div class="eyebrow">WEEKLY SCHEDULES</div><h2>Trade shifts</h2></div><button type="button" data-trade-command="close" aria-label="Close trade dialog">✕</button></div><p>Trades stay within one location and role. Shifts swap within each selected day. Work/OFF trades need a balancing day so both employees retain exactly five working days.</p><div class="formgrid"><label>Location × team ${select(pairs.map(k=>[k,k.replace('|',' · ')]),key(selected.location,selected.role),'id="tradePool"')}</label><label id="tradeWeekWrap"></label><label id="tradeFirstWrap"></label><label id="tradeSecondWrap"></label></div><div id="tradeDays"></div><div id="tradeStatus" role="status"></div><p class="note">Known availability, shift permissions, fixed preferences and minimum rest are checked. For uploaded employees without a matching roster profile, only the supplied schedule, five-day balance and configured rest can be checked.</p><button type="button" id="confirmTrade" class="primary" data-trade-command="confirm" hidden>Confirm shift trade</button>`;
-    tradePoolChanged();
-    $('tradeDialog').showModal()
+    return TradePicker.open({
+        base:'/api/shift-trades',
+        api:(path,method='GET',body)=>directoryRequest(path.slice(4),{
+            method,headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+            ...(body===undefined?{}:{body:JSON.stringify(body)})
+        }),
+        onCreated:()=>message('Trade submitted. Open the shift trade inbox to review approvals.')
+    })
 }
 async function confirmShiftTrade(){
-    if(!membershipFeatureEnabled('shiftTrades'))throw Error('Shift trades are included with Silver and above.');
-    let s=tradeSelection(),p=tradePlan(s.runId,s.firstId,s.secondId,s.days);
-    if(p.errors.length){
-        updateTradePreview();
-        return
-    }
-    busy=true;
-    let t={
-        at:new Date().toISOString(),location:p.original.location,role:p.original.role,week:p.original.start,firstId:p.first.id,firstName:p.first.name,secondId:p.second.id,secondName:p.second.name,days:p.days,before:[p.first.slots,p.second.slots],after:[p.next.employees.find(e=>e.id===p.first.id).slots,p.next.employees.find(e=>e.id===p.second.id).slots]
-    }
-    ;
-    p.next.tradeHistory=[...(p.original.tradeHistory||[]),t];
-    p.next.updatedAt=t.at;
-    let old=model;
-    model={
-        ...model,results:model.results.map(r=>r.id===p.next.id?p.next:r),previousScheduleSet:null,selectedRun:p.next.id
-    }
-    ;
-    try{
-        await saveState();
-        $('tradeDialog').close();
-        scheduleLocation=p.next.location;
-        scheduleRole=p.next.role;
-        scheduleWeek=p.next.start;
-        scheduleOrigin='All';
-        page='schedules';
-        render();
-        message('Shift trade confirmed for '+p.first.name+' and '+p.second.name+'. Adjusted schedules are ready to email or download.'+(storageMode==='session'?' Session only: save a backup; hosted apps can also download the portable ZIP bundle.':''))
-    }
-    catch(e){
-        model=old;
-        throw e
-    }
-    finally{
-        busy=false
-    }
-
+    throw Error('Use the authenticated shift trade inbox to request, approve and apply trades.')
 }
 function tradeLogRows(runs){
     let a=[['Confirmed at','Week commencing','Location','Role','Revision','Employee 1 ID','Employee 1','Employee 2 ID','Employee 2','Traded days']];
@@ -1541,7 +1563,7 @@ function scheduleImportRows(db,defaults){
         catch(e){
             throw Error('Row '+(i+1)+': '+e.message)
         }
-        let configuredStarts=poolStarts(model.pools.find(p=>p.location===location&&p.role===role)),fullProfile=profile&&profile.allow.every(v=>v===0||v===1)&&profile.days.every(v=>v===0||v===1)&&['Yes','No'].includes(profile.flex)&&configuredStarts.includes(profile.preferred)&&configuredStarts.every(s=>[0,1].includes(profile.shiftAvailability?.[String(s)]));
+        let configuredStarts=poolStarts(model.pools.find(p=>p.location===location&&p.role===role)),fullProfile=profile&&profile.days.every(v=>v===0||v===1)&&['Yes','No'].includes(profile.flex)&&configuredStarts.includes(profile.preferred)&&configuredStarts.every(s=>[0,1].includes(employeeStartPermission(profile,s)));
         if(!fullProfile)warnings.push(name+' ('+location+' / '+role+'): roster availability or shift constraints are incomplete or unavailable.');
         let e={
             ...clone(profile||{
@@ -1550,7 +1572,7 @@ function scheduleImportRows(db,defaults){
             ),id,name,location,role,index:i,flex:profile?.flex==='No'&&STARTS.includes(profile.preferred)?'No':'Yes',reason:profile?.reason||'',preferred:STARTS.includes(profile?.preferred)?profile.preferred:slots.find(s=>s!==null)??6,proximity:profile?.proximity||1,random:profile?.random||1,attendance:profile?.attendance??null,allow:Array.from({
                 length:4
             }
-            ,(_,j)=>[0,1].includes(profile?.allow[j])?profile.allow[j]:1),days:Array.from({
+            ,(_,j)=>profile?(employeeStartPermission(profile,STARTS[j])??0):1),days:Array.from({
                 length:7
             }
             ,(_,j)=>[0,1].includes(profile?.days[j])?profile.days[j]:1),previous:week===model.controls.week?profile?.previous??-1:-1,timeOff:dayCols.map(j=>/^time[ -]off$/i.test(String(row[j]??'').trim())),manualTimeOff:dayCols.map(j=>/^time[ -]off$/i.test(String(row[j]??'').trim())),slots,types:slots.map(s=>s===null?null:'Demand'),rank:0,constraintsKnown:!!fullProfile
@@ -2200,10 +2222,14 @@ async function directoryRequest(path,options={}){
     if(!response.ok)throw Error(body.error||'Request to '+path+' failed with HTTP '+response.status+'.');
     return body
 }
-let accessAccounts=[],accessAccountsError='',accessTemporaryPassword=null,attendanceNotificationTimer=null;
+let accessAccounts=[],accessAccountsError='',accessTemporaryPassword=null,attendanceNotificationTimer=null,portalVisibilityWeeks=4;
 async function loadAccessAccounts(){
     try{
-        accessAccounts=(await directoryRequest('/access-accounts')).accounts;
+        let [accounts,portal]=await Promise.all([
+            directoryRequest('/access-accounts'),directoryRequest('/schedule-portal/settings')
+        ]);
+        accessAccounts=accounts.accounts;
+        portalVisibilityWeeks=portal.visibilityWeeks;
         accessAccountsError=''
     }
     catch(error){
@@ -2211,10 +2237,41 @@ async function loadAccessAccounts(){
     }
     if(page==='settings')render(true)
 }
+function portalSettingsPanel(){
+    let managers=accessAccounts.filter(account=>account.role==='manager');
+    return panel('Schedule portal',`<label>Schedule visibility · weeks including the current week<input id="portalVisibilityWeeks" type="number" min="1" max="52" value="${portalVisibilityWeeks}"></label><div class="actions"><button type="button" data-action="savePortalSettings">Save portal settings</button><a class="button" href="/access">Open manager / employee portal</a></div><p class="note">Accepted schedules only. Employees need their individual login, a scheduled assignment and the six-digit location/role/period code. Codes expire at the end of the period in Jamaica time and are included in manager confirmation drafts. Managers see all their assigned locations without a code.</p><h3>Manager personal employee link</h3><label>Manager<select id="managerLinkAccount">${managers.map(account=>`<option value="${esc(account.id)}">${esc(account.displayName)} · linked employee: ${esc(account.employeeId||'none')}</option>`).join('')}</select></label><label>Employee<select id="managerLinkEmployee"><option value="">Unlink</option>${employeeDirectory.filter(employee=>employee.active).map(employee=>`<option value="${esc(employee.id)}">${esc(employee.name)} (${esc(employee.id)})</option>`).join('')}</select></label><button type="button" data-action="linkManagerEmployee" ${managers.length?'':'disabled'}>Save manager employee link</button><p class="note">Link changes revoke existing manager sessions. Existing accounts are not merged; conflicts must be resolved explicitly.</p>`)
+}
 function accessAccountsPanel(){
     let employeeOptions=(employeeDirectory||[]).filter(employee=>employee.active).map(employee=>`<option value="${esc(employee.id)}">${esc(employee.name)} (${esc(employee.id)})</option>`).join('');
-    let rows=accessAccounts.map(account=>`<tr><td>${esc(account.displayName)}</td><td>${esc(account.role)}</td><td>${esc(account.email||account.employeeId||'')}</td><td>${account.active?'Active':'Disabled'}${account.mustChangePassword?' · temporary password':''}${account.role==='manager'?(account.mfaEnabled?' · MFA on':' · MFA pending'):''}${account.role==='manager'&&!account.scopeEmployees?' · no matching schedule location':''}</td><td><div class="actions employee-actions"><button type="button" data-action="resetAccessPassword" data-id="${esc(account.id)}">Reset password</button>${account.role==='manager'?`<button type="button" data-action="resetAccessPassword" data-reset-mfa="true" data-id="${esc(account.id)}">Reset password &amp; MFA</button>`:''}<button type="button" data-action="toggleAccessAccount" data-id="${esc(account.id)}" data-active="${account.active?'false':'true'}">${account.active?'Disable':'Enable'}</button></div></td></tr>`).join('');
-    return panel('Manager &amp; employee access',`${accessAccountsError?`<p class="badtext">${esc(accessAccountsError)}</p>`:''}${accessTemporaryPassword?`<div class="callout" role="status"><b>Temporary password for ${esc(accessTemporaryPassword.name)}:</b> <code>${esc(accessTemporaryPassword.password)}</code><br>Share it securely. It is shown once and expires in ${accessTemporaryPassword.hours} hours. The user must replace it at first sign-in at <code>/access</code>.</div>`:''}<div class="grid"><label>Role<select id="accessRole"><option value="manager">Manager (MFA required)</option><option value="employee">Employee (Silver and above)</option></select></label><label>Name<input id="accessName" maxlength="120"></label><label>Email (required for managers)<input id="accessEmail" type="email" maxlength="254"></label><label>Employee (employee accounts)<select id="accessEmployee"><option value="">—</option>${employeeOptions}</select></label></div><div class="actions"><button type="button" class="primary" data-action="createAccessAccount">Create account</button><button type="button" data-action="reloadAccessAccounts">Refresh</button></div><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Sign-in</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No manager or employee accounts yet.</td></tr>'}</tbody></table></div>`,'Managers see attendance only for employees at schedule locations whose manager email matches their email. Employees see only their own attendance.')
+    let rows=accessAccounts.map(account=>`<tr><td>${esc(account.displayName)}</td><td>${esc(account.role)}</td><td>${esc(account.email||account.employeeId||'')}</td><td>${account.active?'Active':'Disabled'}${account.mustChangePassword?' · temporary password':''}${account.role==='manager'?(account.mfaEnabled?' · MFA on':' · MFA pending'):''}${account.role==='manager'&&!account.scopeEmployees?' · no matching schedule location':''}</td><td><div class="actions employee-actions"><button type="button" data-action="changeAccessRole" data-id="${esc(account.id)}">Change role</button><button type="button" data-action="resetAccessPassword" data-id="${esc(account.id)}">Reset password</button>${account.role==='manager'?`<button type="button" data-action="resetAccessPassword" data-reset-mfa="true" data-id="${esc(account.id)}">Reset password &amp; MFA</button>`:''}<button type="button" data-action="toggleAccessAccount" data-id="${esc(account.id)}" data-active="${account.active?'false':'true'}">${account.active?'Disable':'Enable'}</button></div></td></tr>`).join('');
+    return panel('Manager &amp; employee access',`${accessAccountsError?`<p class="badtext">${esc(accessAccountsError)}</p>`:''}${accessTemporaryPassword?`<div class="callout" role="status"><b>Temporary password for ${esc(accessTemporaryPassword.name)}:</b> <code>${esc(accessTemporaryPassword.password)}</code><br>Share it securely. It is shown once and expires in ${accessTemporaryPassword.hours} hours. The user must replace it at first sign-in at <code>/access</code>.</div>`:''}<div class="grid"><label>Role<select id="accessRole"><option value="manager">Manager (MFA required)</option><option value="employee">Employee (Silver and above)</option></select></label><label>Name<input id="accessName" maxlength="120"></label><label>Email (required for managers)<input id="accessEmail" type="email" maxlength="254"></label><label>Employee (employee accounts)<select id="accessEmployee"><option value="">—</option>${employeeOptions}</select></label></div><div class="actions"><button type="button" class="primary" data-action="createAccessAccount">Create account</button><button type="button" data-action="reloadAccessAccounts">Refresh</button></div><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Sign-in</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No manager or employee accounts yet.</td></tr>'}</tbody></table></div>`,'Managers see attendance only for employees at schedule locations whose manager email matches their email. Employees see only their own attendance.')+portalSettingsPanel()
+}
+function openAccessRoleDialog(id){
+    const account=accessAccounts.find(item=>item.id===id);
+    if(!account)throw Error('Account not found. Refresh and retry.');
+    let dialog=$('accessRoleDialog');
+    if(!dialog){dialog=document.createElement('dialog');dialog.id='accessRoleDialog';dialog.className='wide-dialog';document.body.append(dialog);}
+    dialog.dataset.accountId=id;dialog.dataset.previousRole=account.role;
+    dialog.innerHTML=`<div class="dialoghead"><h2>Change role: ${esc(account.displayName)}</h2><button type="button" data-dialog-close="accessRoleDialog" aria-label="Close">Close</button></div><form id="accessRoleForm"><label>New role<select id="accessNewRole"><option value="manager" ${account.role==='employee'?'selected':''}>Manager (MFA required)</option><option value="employee" ${account.role==='manager'?'selected':''}>Employee</option></select></label><label>Email (required for managers)<input id="accessRoleEmail" type="email" maxlength="254" value="${esc(account.email||'')}"></label><label>Employee (required for employees; optional personal link for managers)<select id="accessRoleEmployee"><option value="">No personal employee link</option>${employeeDirectory.filter(employee=>employee.active).map(employee=>`<option value="${esc(employee.id)}" ${employee.id===account.employeeId?'selected':''}>${esc(employee.name)} (${esc(employee.id)})</option>`).join('')}</select></label><p class="note">The account, password, enabled/disabled state and history are retained. Existing sessions will be revoked. Managers must use MFA and only manage schedule locations matching their email. Employee access and manager personal links require an eligible membership.</p><p id="accessRoleError" class="badtext" role="alert"></p><div class="actions"><button type="submit" class="primary">Save role change</button><button type="button" data-dialog-close="accessRoleDialog">Cancel</button></div></form>`;
+    const sync=()=>{$('accessRoleEmail').required=$('accessNewRole').value==='manager';$('accessRoleEmployee').required=$('accessNewRole').value==='employee';};
+    $('accessNewRole').onchange=sync;sync();
+    dialog.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();dialog.close();}};
+    $('accessRoleForm').onsubmit=async event=>{
+        event.preventDefault();
+        if(!confirm('Change this account role and revoke existing sessions?'))return;
+        const submit=event.currentTarget.querySelector('[type=submit]');submit.disabled=true;$('accessRoleError').textContent='';
+        try{
+            await directoryRequest('/access-accounts/'+encodeURIComponent(id)+'/role',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({role:$('accessNewRole').value,previousRole:dialog.dataset.previousRole,authVersion:account.authVersion,email:$('accessRoleEmail').value.trim(),employeeId:$('accessRoleEmployee').value||null})
+            });
+            dialog.close();accessTemporaryPassword=null;
+            await loadAccessAccounts();
+            message('Account role changed. The user must sign in again; managers require MFA.');
+        }catch(error){$('accessRoleError').textContent=error.message;}
+        finally{submit.disabled=false;}
+    };
+    dialog.showModal()
 }
 let attendanceNotifications=[],archivedNotifications=[],notificationView='active',expandedNotifications=new Set();
 function renderNotificationBadge(){
@@ -3060,6 +3117,18 @@ async function loadAcceptedSchedules(){
     try{
         let result=await acceptedScheduleRequest();
         acceptedSchedules=result.schedules;
+        let updated=false;
+        for(let record of acceptedSchedules){
+            let index=model?.results?.findIndex(run=>run.id===record.id);
+            if(index===undefined||index<0)continue;
+            let existing=model.results[index],known=new Set((existing.tradeHistory||[]).map(trade=>trade.tradeId));
+            if((record.schedule.tradeHistory||[]).some(trade=>trade.tradeId&&!known.has(trade.tradeId))){
+                model.results[index]=clone(record.schedule);
+                rebuildScheduleAudit(model.results[index]);
+                updated=true
+            }
+        }
+        if(updated)await saveState();
         acceptedScheduleError=''
     }
     catch(error){
@@ -3349,7 +3418,15 @@ function editChange(event){
     if(e.dataset.employee!==undefined){
         let r=model.roster[+e.dataset.employee],k=e.dataset.field,v=e.value;
         if(k==='flex'||k==='reason')r[k]=v;
-        else if(k.startsWith('start:'))r.shiftAvailability[String(Number(k.slice(6)))]=Number(v);
+        else if(k.startsWith('start:')){
+            let start=Number(k.slice(6)),permission=v===''?null:Number(v);
+            r.shiftAvailability[String(start)]=permission;
+            let legacyIndex=STARTS.indexOf(start);
+            if(legacyIndex>=0){
+                if(!Array.isArray(r.allow))r.allow=Array(4).fill(null);
+                r.allow[legacyIndex]=permission
+            }
+        }
         else if(k.startsWith('day'))r.days[+k.slice(3)]=v===''?null:Number(v);
         else r[k]=v===''?null:Number(v);
         changed=true
@@ -3539,6 +3616,15 @@ async function action(a,element=null){
             message('Tested BambooHR API key saved (encrypted) for this business.');
             return
         }
+        if(a==='savePortalSettings'){
+            let result=await directoryRequest('/schedule-portal/settings',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({visibilityWeeks:Number($('portalVisibilityWeeks').value)})
+            });
+            portalVisibilityWeeks=result.visibilityWeeks;
+            message('Schedule portal visibility saved.');
+            return
+        }
         if(a==='reloadAccessAccounts'){
             await loadAccessAccounts();
             return
@@ -3547,7 +3633,7 @@ async function action(a,element=null){
             let role=$('accessRole').value,employeeId=$('accessEmployee').value,name=$('accessName').value.trim();
             let result=await directoryRequest('/access-accounts',{
                 method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
-                body:JSON.stringify({role,displayName:name,email:$('accessEmail').value.trim(),employeeId:role==='employee'?employeeId:undefined})
+                body:JSON.stringify({role,displayName:name,email:$('accessEmail').value.trim(),employeeId:employeeId||undefined})
             });
             accessTemporaryPassword={name:result.account.displayName,password:result.temporaryPassword,hours:result.temporaryPasswordHours};
             await loadAccessAccounts();
@@ -3561,6 +3647,20 @@ async function action(a,element=null){
             let account=accessAccounts.find(item=>item.id===element.dataset.id);
             accessTemporaryPassword={name:account?.displayName||'user',password:result.temporaryPassword,hours:result.temporaryPasswordHours};
             await loadAccessAccounts();
+            return
+        }
+        if(a==='changeAccessRole'){
+            openAccessRoleDialog(element.dataset.id);
+            return
+        }
+        if(a==='linkManagerEmployee'){
+            if(!confirm('Change this manager employee link and revoke their sessions?'))return;
+            await directoryRequest('/access-accounts/'+encodeURIComponent($('managerLinkAccount').value)+'/employee',{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({employeeId:$('managerLinkEmployee').value||null})
+            });
+            await loadAccessAccounts();
+            message('Manager employee link saved; sign in again.');
             return
         }
         if(a==='toggleAccessAccount'){

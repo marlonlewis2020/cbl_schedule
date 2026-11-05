@@ -283,6 +283,170 @@ remain for production use:
 - [x] The SQLite→PostgreSQL import does not copy the three new tables (they
   have no legacy data).
 
+## Schedule portal (`schedule-portal`) — complete
+
+- [x] Add tenant-scoped encrypted six-digit codes, unique across stored codes,
+  per schedule location/role/period; expire at the period end in Jamaica time.
+- [x] Add admin visibility settings (1–52 weeks, default current week plus three
+  upcoming weeks) and accepted-schedule projection without workbook metadata.
+- [x] Require individual employee sign-in, current location/role, actual period
+  assignment and a valid code; throttle incorrect codes. Managers see all their
+  assigned locations without codes.
+- [x] Add `/access` schedule tables and a read-only, role/location-scoped
+  employee team attendance summary; preserve the own-attendance view.
+- [x] Add portal codes and expiry to opted-in manager confirmation drafts.
+  Generated-only review emails remain supported without portal codes.
+- [x] Full SQLite regression suite passed (94 tests); final focused access and
+  manual checks passed (17 tests), including an additional shared-role isolation
+  test. Editor diagnostics and Python/JavaScript syntax validation passed.
+- [x] Applied `schedule_portal_codes` in PostgreSQL and SQLite. Verified
+  PostgreSQL columns, indexes, unique code hashes and forced tenant RLS with
+  own-tenant visibility, cross-tenant/no-context isolation and write rejection;
+  all synthetic verification writes were rolled back.
+- [x] Browser fixture checks verified employee code-entry flow, overnight
+  next-day shift labels, refresh clearing, team counts and accepted-schedule
+  codes/CSRF in manager email drafts. These are not live account acceptance tests.
+- [x] User verified real-browser schedule access, codes in email drafts, expiry,
+  role reassignment, visibility changes and next-day shift end times on 2026-11-04.
+- [x] Marked `schedule-portal` done in SQLite and PostgreSQL after user acceptance
+  on 2026-11-04; persisted statuses verified.
+
+## Manager personal shifts (`manager-employee-dual-access`)
+
+Implemented on 2026-11-05; live acceptance remains outstanding. Depends on
+`manager-employee-access` and `schedule-portal`.
+
+- Link a scheduled manager's account to their verified, same-business employee
+  record; use one identity with **My shifts** and **Manage teams** views.
+- Retain manager MFA in both views. Show own shifts and attendance by employee
+  ID, including shifts at locations the manager does not manage.
+- Preserve employee tier, team-code, assignment and visibility requirements.
+  Personal assignments must not expand management permissions.
+- Require an administrator for corrections to the manager's own attendance.
+  Audit changes; explicitly resolve existing-account conflicts and revoke stale
+  access after link/account changes.
+- Test both views, out-of-scope personal shifts, self-correction rejection,
+  MFA, tiers, reassignment and disabling.
+
+## Current four-request batch: trades, publishing and sandbox billing
+
+Implemented on 2026-11-05. Do not mark the requests accepted until live checks
+below pass. All BambooHR/payment write validation uses mocks; no production
+shifts or live payment endpoints were used.
+
+- [x] Add authenticated trade records, participant confirmation, scoped manager
+  acceptance, admin approval/rejection, withdrawal, per-reader unread inbox
+  updates, and timestamped audit history.
+- [x] Replace workspace-only trade confirmation with the server inbox; add
+  accepted-schedule indicators and synchronize applied trades into workspace
+  schedules when accepted copies load.
+- [x] Add stale/version/assignment guards, non-admin past-shift blocking,
+  scheduling-constraint checks and reasoned admin shift/day-off overrides.
+- [x] Restore Shift trade as a shared modal with scoped location/team, period
+  and employee dropdowns; lock employee 1 in personal mode and validate all
+  selected checkbox days together, including balanced multi-day swaps.
+- [x] Persist per-employee rest warnings and acknowledgements; enforce both
+  affected employees' consent, including manager/admin proposals. Reject
+  overlaps, other hard constraints and stale warnings. Publish/reconcile all
+  selected dates, preserving legacy single-day/manual records.
+- [x] Add explicit personal schedule selection and code-driven team selection,
+  retaining identity scope, expiry and guessing lockout.
+- [x] Align access and hub palette, headers, cards and responsive controls with
+  the administrator application.
+- [x] Restore the pre-redesign access/hub/inbox appearance at user request;
+  scope shared styles to the trade popup so administrator light/dark colours
+  remain unchanged. Retain the redesigned trade and schedule-selection flows.
+  Verified 10 light/dark isolation checks, 16 trade modal checks, and original
+  computed appearance on access, hub and inbox. Manual regeneration/test passed.
+- [x] Subsequent trade redesign: themed cards and before/after shift previews;
+  enforce at least five shifts per employee in the selected week. Treat other
+  scheduling violations as warnings and require both employees, manager and
+  admin to acknowledge exception trades. Preserve manual-override behaviour,
+  tenant/team authorization, stale/version and pending-intersection safeguards.
+  Validation: 125 Python regressions and 28 focused tests passed; the final
+  warning-detail changes passed all 19 trade tests. Browser fixtures passed
+  10 theme, 17 modal, 2 admin-entry and 13 inbox/consent checks. At 390px,
+  both themes had no horizontal overflow and retained readable card colours.
+  Rebuilt manuals, verified Python syntax and diff whitespace, and persisted
+  the trade-policy migration with repeated local database initialization.
+- [ ] Verify the five-shift trade minimum and all exception acknowledgements
+  with real employee/manager/admin sessions before marking trade requests done.
+- [x] Collapse inbox requests by default, showing week, actual initiator,
+  status and unread indicator. Expanded requests retain role-appropriate
+  accept/reject/withdraw controls, warnings and history; opening is not consent
+  or a read acknowledgement. Rename the read action to Mark as read.
+  Verified 21 Python tests (including manager/admin inbox progression), 25
+  browser inbox checks and 8 mobile keyboard/overflow checks across both themes.
+  Rebuilt the HTML/DOCX manuals.
+- [x] Redesign validation: 121 Python regressions passed; 16 modal, 2 admin
+  entry, 2 recipient consent, 7 access selection/mobile and 3 hub style/tab
+  browser checks passed, along with 18 roster and 10 email checks. Five affected
+  scripts parsed; Python syntax and tracked diff whitespace checks passed.
+  Rebuilt HTML/DOCX manuals and verified repeated local schema initialization.
+- [ ] Verify the redesigned modal and both rest acknowledgement flows with real
+  employee/linked-manager sessions; accept the UI and schedule/code selection.
+- [x] Add app-only / BambooHR preview and explicit application, durable
+  operation journals, single-employee remote changes, partial-failure states,
+  safe retries and read-only unknown-outcome reconciliation.
+- [x] Add disabled-by-default sandbox hosted subscriptions, owner USD prices
+  and feature settings, verified/deduplicated webhooks, manual credits, in-app
+  reminders, daily seven-attempt ceiling, suspension/restoration, and a separate
+  worker with heartbeat and retry claims.
+- [x] Improve billing navigation and setup guidance; replace JSON feature entry
+  with default/enabled/disabled dropdowns, group tier prices, add business and
+  Jamaica date/time selectors, and show readable subscription details/history.
+  Backend regressions passed (23 workforce/billing tests plus new feature
+  metadata/override coverage); 14 billing browser form/status checks passed.
+- [x] Preserve access identities, notification reader state, trade journals and
+  billing records through the single-business SQLite importer. Revoke imported
+  user sessions and disable destination billing; never run both source and
+  destination workers. Import SQL is tested on a SQLite-backed harness, not a
+  live PostgreSQL connection.
+- [x] Full SQLite regression run: 113 tests passed. Browser regression fixtures:
+  18 roster and 10 email checks passed; all six affected JavaScript/HTML scripts
+  parsed successfully. Linked-manager switching/revoked sessions, trade preview
+  and owner billing controls passed browser fixture checks.
+- [x] Final targeted workflow run: 17 tests passed, including unknown remote
+  results, safe reconciliation, partial-failure retries and import persistence.
+  Repeated initialization preserved request statuses and disabled sandbox billing.
+- Tracker: dual access, trades and billing remain `in_progress` for live
+  acceptance; trade publishing is `blocked` only by the unaccepted shift-trade
+  prerequisite, not by missing application code.
+- [ ] Verify linked managers and both trade roles in real authenticated browser
+  sessions; verify team restrictions, link disable/reassignment and own
+  attendance correction rejection with MFA enabled.
+- [ ] Verify employee -> employee -> manager -> admin workflow, unread updates,
+  cancellation/rejection, applied schedule/export/email data and manual overrides.
+- [ ] In a test BambooHR environment, verify read permissions, single-employee
+  writes, partial failures, unknown results, duplicates and reconciliation.
+  Production writes require separate authorization.
+- [ ] Configure PayPal sandbox credentials/webhook and prices privately. Verify
+  real hosted monthly/annual checkout, one-cycle versus auto-renew plans,
+  webhook signatures/replays, cancellation, failure retries and manual credits.
+- [ ] Install the worker under an always-on supervisor; verify restart/crash
+  handling, heartbeat, single-instance claims, missed webhook polling, seven
+  attempts and suspended membership access across all user roles.
+- [ ] Apply/verify PostgreSQL startup or reference-schema migrations and forced
+  tenant RLS for trade/billing tables in a disposable schema. The VS Code
+  database connection was unavailable during this batch; no live migration
+  success is claimed. The opaque subscription index is deliberately global
+  for pre-tenant webhook routing.
+
+## Planned change request: saved schedule register (`saved-schedule-register-management`)
+
+Recorded on 2026-11-04; not implemented. Depends on `tenant-identity`.
+
+- Allow administrators to delete schedules directly from the Saved schedule
+  register, with confirmation, persistent deletion and consistent selection,
+  filter, count and export/email updates.
+- Explicitly distinguish workspace deletion from accepted database schedules
+  and BambooHR-published shifts; do not silently delete accepted or remote data.
+  Preserve unrelated schedules and audit history; report failures clearly.
+- Limit the scrollable table viewport to at most six record rows plus its
+  visible header, without excess empty space for shorter lists.
+- Verify keyboard scrolling, variable row heights, deletion cancellation,
+  persistence after reload and administrator-only access.
+
 ## Planned change request: attendance snapshots (`snapshot-email-reports`)
 
 Recorded on 2026-11-04; not implemented. This extends the existing request and
@@ -299,6 +463,53 @@ retains its `workforce-dashboards` prerequisite.
 - Run independently of browser visibility; preserve attendance cutoff, leave,
   overnight and worked-time rules, show data freshness/failures, prevent duplicate
   generation/delivery, and enforce recipient scope and report-tier entitlements.
+
+## Planned requests accepted on 2026-11-05
+
+### Account role correction implemented on 2026-11-05
+
+- [x] Add Settings account Change role between Employee and Manager, retaining
+  the existing disable option rather than adding account deletion. Preserve
+  account identity, password, name, history and active state. Require valid
+  manager email/active employee links, reject duplicate or stale edits, revoke
+  sessions, retain MFA enrollment and enforce manager MFA/location scope and
+  employee-access membership checks. Audit the old/new role and administrator.
+  Verified 43 access/trade/manual Python tests, 10 browser dialog checks and
+  390px light/dark layout without horizontal overflow; editor checks passed.
+  Rebuilt manuals. Live PostgreSQL validation remains outstanding.
+
+### Pending navigation and session requests
+
+These requests are recorded as pending; no feature behavior has changed.
+
+- **Consistent Access, Hub and Business navigation and alerts**
+  (`site-navigation-alerts`): give each site its own menu and top alerts icon.
+  Align all three sites' layout/design with the admin hub and retain app
+  branding, light/dark themes, existing functionality and responsive layouts.
+  Place shift trades under Access, preserving administrator approval/publishing
+  and employee/manager scopes. Alerts and navigation must remain authorized,
+  site-specific and tenant-scoped, with accessible unread/read controls.
+  Verify all sites, roles, keyboard/mobile navigation and both themes.
+  Approved for recording only; implementation pending.
+  Depends on `business-hub`, `manager-employee-access` and `shift-trades`.
+- **Primary administrator access to Data & Settings**
+  (`primary-admin-data-settings`): restrict the group to the designated primary
+  business administrator. Enforce corresponding server permissions as well as
+  navigation visibility, including direct requests and tenant isolation.
+  Preserve ordinary scheduling/sharing. The separate Settings page is not
+  automatically included; broader restrictions require an explicit scope decision.
+- **Move META operating days into Data & Settings** (`meta-data-settings`):
+  move it from Plan schedules, apply the primary-admin restriction, update
+  shortcuts/visibility settings, and preserve operating days, intensity values,
+  locks, saved snapshots and schedule-generation behavior.
+  Depends on `primary-admin-data-settings`.
+- **Fifteen-minute idle session expiry** (`session-idle-expiry`):
+  cover business admins, managers, employees, platform owners and developers.
+  Enforce expiry server-side at 900 idle seconds, across tabs; automatic polling
+  and background refresh must not renew activity. Keep an absolute eight-hour
+  maximum, warn before expiry, stop polling/clear protected views, and require
+  normal sign-in/MFA again. Verify real activity renewal, polling-only expiry,
+  cross-tab behavior, exact thresholds and all account types.
 
 ## Test evidence and handoff
 

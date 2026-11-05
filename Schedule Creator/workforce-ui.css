@@ -1,0 +1,81 @@
+.workforce-trade,.trade-page{
+    --trade-ink:var(--ink,#153746);
+    --trade-line:var(--line,#dce6eb);
+    --trade-surface:#fff;
+    --trade-control:#fff;
+    --trade-button:#153746;
+    --trade-button-ink:#fff;
+    --trade-warning:#fff3c4;
+    --trade-warning-ink:#4a3300;
+}
+.workforce-trade{
+    box-sizing:border-box;
+    color:var(--trade-ink);
+    background:var(--trade-surface);
+    font:14px "Segoe UI",Arial,sans-serif;
+    width:min(760px,94vw);
+    max-height:90vh;
+    overflow:auto;
+    border:1px solid var(--trade-line);
+    border-radius:13px;
+    padding:24px
+}
+[data-theme="dark"] .workforce-trade,[data-theme="dark"] .trade-page{
+    --trade-ink:#e7f0f4;
+    --trade-surface:#142e39;
+    --trade-control:#193945;
+    --trade-button:#138abd;
+    --trade-warning:#4a3300;
+    --trade-warning-ink:#fff3c4;
+    color-scheme:dark
+}
+.workforce-trade::backdrop{background:#15374688}
+.workforce-trade a{color:var(--blue,#159bd5)}
+.workforce-trade header,.workforce-trade footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.workforce-trade h2{margin:0;font-size:20px}
+.workforce-trade .trade-fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.workforce-trade label{display:block;margin:12px 0;font-weight:600}
+.workforce-trade select,.workforce-trade textarea{font:inherit;box-sizing:border-box;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--trade-line);border-radius:8px;background:var(--trade-control);color:var(--trade-ink)}
+.workforce-trade input[type=checkbox]{width:auto;accent-color:var(--blue,#159bd5)}
+.workforce-trade button{font:600 14px "Segoe UI",Arial,sans-serif;border:1px solid var(--trade-button);border-radius:8px;padding:9px 14px;background:var(--trade-button);color:var(--trade-button-ink);cursor:pointer}
+.workforce-trade [data-close]{background:var(--trade-control);border-color:var(--trade-line);color:var(--trade-ink)}
+.workforce-trade fieldset{border:1px solid var(--trade-line);border-radius:8px;margin:18px 0;padding:12px}
+.workforce-trade [data-options] label{font-weight:400}
+.workforce-trade .trade-warning{background:var(--trade-warning);color:var(--trade-warning-ink);border:1px solid var(--gold,#f2bd18);border-radius:8px;padding:12px}
+.workforce-trade .error{color:var(--red,#cf6353)}
+.workforce-trade button:disabled{opacity:.5;cursor:not-allowed}
+.workforce-trade [hidden]{display:none!important}
+.workforce-trade :focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:2px}
+.workforce-trade .trade-intro{line-height:1.6}
+.workforce-trade .trade-rule,.trade-page .trade-rule{padding:14px;border-left:4px solid var(--blue,#159bd5);background:var(--trade-control);border-radius:8px;line-height:1.6}
+.workforce-trade .trade-day{display:flex;gap:14px;align-items:start;padding:14px;border:1px solid var(--trade-line);border-radius:10px;background:var(--trade-control);cursor:pointer}
+.workforce-trade .trade-day:has(input:checked){border-color:var(--blue,#159bd5);box-shadow:inset 3px 0 var(--blue,#159bd5)}
+.workforce-trade .trade-day span span{display:block;margin-top:8px;line-height:1.5}
+.workforce-trade .trade-warning h3,.trade-page .trade-warning h3{margin:8px 0;font-size:15px}
+.workforce-trade .trade-warning li,.trade-page .trade-warning li{margin:8px 0;line-height:1.6}
+.trade-page{color:var(--trade-ink);background:var(--bg,#f2f6f8);font:14px "Segoe UI",Arial,sans-serif}
+[data-theme="dark"] .trade-page{--bg:#0e1c28;--line:#314858}
+.trade-page main{background:var(--trade-surface);border:1px solid var(--trade-line);padding:28px;border-radius:13px}
+.trade-page a{color:var(--blue,#159bd5)}
+.trade-page-header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--trade-line);margin-bottom:18px}
+.trade-page-header h1{font-size:24px}
+.trade-page .trade-card{border:1px solid var(--trade-line);padding:22px;border-radius:13px;margin:20px 0;background:var(--trade-surface)}
+.trade-page .trade-card h2{font-size:20px;margin:0 0 12px}
+.trade-page .trade-card>.trade-summary{margin:0;line-height:1.6;overflow-wrap:anywhere}
+.trade-page .trade-summary>span{display:inline-block;margin:4px 12px 4px 0;vertical-align:middle}
+.trade-page .trade-week{font-size:16px}
+.trade-page .trade-content{border-top:1px solid var(--trade-line);margin-top:16px;padding-top:18px}
+.trade-page .trade-unread{color:var(--trade-warning-ink);background:var(--trade-warning);border-radius:6px;padding:4px 8px}
+.trade-page summary:focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:4px}
+.trade-page .trade-status{display:inline-block;background:var(--trade-control);border:1px solid var(--trade-line);border-radius:20px;padding:8px 12px;text-transform:capitalize;font-weight:600}
+.trade-page .trade-timeline{line-height:1.8}
+.trade-page .trade-swap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.trade-page .trade-swap-grid section{background:var(--trade-control);padding:14px;border-radius:8px;border:1px solid var(--trade-line)}
+.trade-page .trade-swap-grid h3{margin:0;font-size:15px}
+.trade-page .trade-swap-grid p{line-height:1.6;margin:10px 0}
+.trade-page .trade-warning{padding:16px;margin:18px 0;border:1px solid var(--gold,#f2bd18);border-radius:10px;background:var(--trade-warning);color:var(--trade-warning-ink)}
+.trade-page button{background:var(--trade-button);color:var(--trade-button-ink);border-color:var(--trade-button);border-radius:8px;padding:10px 14px}
+.trade-page input,.trade-page select,.trade-page textarea{background:var(--trade-control);color:var(--trade-ink);border-color:var(--trade-line)}
+.trade-page details{margin-top:16px}.trade-page summary{cursor:pointer;font-weight:600}
+@media(max-width:600px){.trade-page{margin:12px}.trade-page main,.trade-page .trade-card{padding:16px}.trade-page-header{flex-wrap:wrap}.trade-page .trade-swap-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.workforce-trade{padding:16px}.workforce-trade .trade-fields{grid-template-columns:1fr}.workforce-trade footer{flex-wrap:wrap}}

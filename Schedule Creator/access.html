@@ -42,10 +42,13 @@
     .nitem .remove:hover { color: #a33a12; }
     #panel .foot { margin-top: 8px; text-align: center; }
     table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .scroll, #scheduleTables { overflow-x: auto; }
     th, td { padding: 8px; border-bottom: 1px solid #e0e7ec; text-align: left; vertical-align: top; }
     .status { text-transform: capitalize; font-weight: 600; }
     .status.late { color: #b26a00; } .status.absent { color: #a12121; } .status.attended { color: #2e7d32; }
   </style>
+  <link rel="stylesheet" href="workforce-ui.css">
+  <script src="trade-picker.js"></script>
 </head>
 <body>
   <main id="loginView" class="narrow">
@@ -92,6 +95,25 @@
       <ul id="notificationList"></ul>
       <div class="foot"><button id="archiveToggle" class="secondary" type="button">View archives</button></div>
     </section>
+    <section aria-labelledby="scheduleTitle">
+      <h2 id="scheduleTitle">Accepted schedules</h2>
+      <p id="scheduleNotice"></p>
+      <button id="refreshSchedules" class="secondary" type="button">Refresh schedules</button>
+      <form id="scheduleUnlock" class="filter" hidden>
+        <label>Schedule <select id="scheduleChoice"></select></label>
+        <label>Six-digit team code <input id="scheduleCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off"></label>
+        <button type="submit">View team schedule</button>
+        <button id="viewOwnSchedule" type="button" class="secondary">View my shifts</button>
+      </form>
+      <p id="scheduleMessage" class="error" role="alert"></p>
+      <div id="scheduleTables"></div>
+    </section>
+    <section id="teamDashboard" hidden>
+      <h2>My team's attendance today</h2>
+      <p id="teamSummary"></p>
+      <p class="notice">Read-only counts for your current location and role, from recorded attendance. Future shifts are excluded; approved leave is excluded from the attendance percentage.</p>
+    </section>
+    <h2>Attendance</h2>
     <p id="summary"></p>
     <form id="dateFilter" class="filter" hidden>
       <label for="filterStart">From <input id="filterStart" type="date" required></label>
@@ -99,11 +121,14 @@
       <button type="submit">Apply</button>
       <button id="filterToday" class="secondary" type="button">Today</button>
     </form>
-    <table>
+    <div class="scroll"><table>
       <thead><tr><th>Date</th><th>Shift time</th><th>Clock in – out</th><th>Employee</th><th>Location</th><th>Role</th><th>Status</th><th>Reason</th><th id="actionHead">Action</th></tr></thead>
       <tbody id="rows"></tbody>
-    </table>
+    </table></div>
     <p id="appMessage" class="error" role="alert" aria-live="polite"></p>
+    <button id="personalView" type="button" class="secondary" hidden>My shifts / employee view</button>
+    <button id="openTrade" type="button">Shift trade</button>
+    <p><a id="tradeInboxLink" href="/trades">Open shift trade inbox</a></p>
   </main>
 
   <script>
@@ -111,6 +136,74 @@
     let csrfToken = "";
     let role = "";
     let timer = null;
+    let portalSchedules = [];
+    let accountRole = "";
+    let personalMode = false;
+    let ownEmployeeId = null;
+    let ownSchedules = [], unlockedSchedules = [];
+
+    function renderSchedules(schedules) {
+      const container = $("#scheduleTables");
+      container.replaceChildren();
+      for (const schedule of schedules) {
+        const heading = document.createElement("h3");
+        heading.textContent = `${schedule.locationName} · ${schedule.role} · ${schedule.start} to ${schedule.end} · ID: ${schedule.runId}${schedule.tradeCount ? " · Applied trades: "+schedule.tradeCount : ""}`;
+        const table = document.createElement("table"), head = table.createTHead().insertRow();
+        for (const label of ["Employee", "Mon / day 1", "Tue / day 2", "Wed / day 3", "Thu / day 4", "Fri / day 5", "Sat / day 6", "Sun / day 7"]) {
+          const th = document.createElement("th"); th.textContent = label; head.append(th);
+        }
+        for (let day = 0; day < 7; day++) {
+          const date = new Date(`${schedule.start}T12:00:00-05:00`);
+          date.setUTCDate(date.getUTCDate() + day);
+          head.cells[day + 1].textContent = new Intl.DateTimeFormat("en-US", {
+            timeZone: "America/Jamaica", weekday: "short", month: "short", day: "numeric"
+          }).format(date);
+        }
+        const body = table.createTBody();
+        for (const employee of schedule.employees) {
+          const row = body.insertRow(); cell(row, `${employee.name} (${employee.id})`);
+          employee.slots.forEach(start => {
+            const end = start === null ? null : start + schedule.shiftDuration;
+            cell(row, start === null ? "Off / outside visibility" :
+              `${hourLabel(start)} – ${hourLabel(end % 24)}${end >= 24 ? " (+1 day)" : ""}`);
+          });
+        }
+        const scroll = document.createElement("div"); scroll.style.overflowX = "auto"; scroll.append(table);
+        container.append(heading, scroll);
+      }
+    }
+
+    async function loadSchedules() {
+      $("#scheduleMessage").textContent = "";
+      renderSchedules([]);
+      ownSchedules = []; unlockedSchedules = [];
+      const result = await api("/api/access/schedules" + (personalMode ? "?view=employee" : ""));
+      portalSchedules = result.schedules;
+      $("#scheduleNotice").textContent = `${result.visibilityWeeks}-week visibility window including this week. ` +
+        (portalSchedules.length ? (role === "manager" ? "All your assigned locations." : "Choose a schedule to view your shifts, or enter a shared code to choose a team schedule. Codes expire at period end (Jamaica time).") : "No eligible accepted schedules.");
+      $("#scheduleUnlock").hidden = role !== "employee";
+      $("#scheduleCode").value = "";
+      $("#scheduleChoice").replaceChildren();
+      $("#scheduleChoice").append(new Option("Choose a schedule, or enter a code", ""));
+      portalSchedules.forEach((schedule, index) => {
+        const option = document.createElement("option");
+        option.value = index;
+        option.textContent = `${schedule.locationName} · ${schedule.role} · ${schedule.start} to ${schedule.end}`;
+        $("#scheduleChoice").append(option);
+      });
+      if (role === "manager") renderSchedules(portalSchedules);
+      if (role === "employee") {
+        const own = await api("/api/access/me/shifts");
+        ownSchedules = own.schedules;
+      }
+    }
+
+    async function loadTeamAttendance() {
+      const result = await api("/api/access/me/team-attendance");
+      $("#teamSummary").textContent = `${result.date}: ${result.present} present of ${result.expected} expected; attendance ${result.attendancePercent === null ? "not available" : result.attendancePercent + "%"}. ` +
+        Object.entries(result.counts).map(([status, count]) => `${count} ${status.replaceAll("_", " ")}`).join(", ") +
+        ` · Recorded as of ${clockLabel(result.reportedAt)} Jamaica time.`;
+    }
 
     async function api(path, method = "GET", payload) {
       const response = await fetch(path, {
@@ -162,7 +255,7 @@
         cell(row, record.status.replace("_", " "), "status " + record.status);
         cell(row, record.reason);
         const action = cell(row, "");
-        if (role === "manager" && record.status === "late") {
+        if (role === "manager" && record.status === "late" && record.employeeId !== ownEmployeeId) {
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = "Mark absent";
@@ -211,6 +304,7 @@
         ? `Showing ${result.start === result.end ? result.start : result.start + " to " + result.end} for ${result.scopeEmployees} employee(s) at your locations.`
         : `Your attendance from ${result.start} to ${result.end}: ` +
           (Object.entries(result.counts).map(([status, count]) => `${count} ${status.replace("_", " ")}`).join(", ") || "no shifts");
+      if (role === "employee") await loadTeamAttendance();
     }
 
     let notifications = [];
@@ -346,20 +440,28 @@
     }
 
     async function showApp(user) {
-      role = user.role;
       $("#loginView").hidden = true;
       $("#appView").hidden = false;
-      $("#title").textContent = user.role === "manager" ? "Manager attendance" : "My attendance";
+      accountRole = user.role;
+      ownEmployeeId = user.employeeId;
+      role = personalMode ? "employee" : user.role;
+      $("#tradeInboxLink").href = personalMode ? "/trades?view=employee" : "/trades";
+      $("#personalView").hidden = accountRole !== "manager" || !ownEmployeeId;
+      $("#personalView").textContent = personalMode ? "Manage teams" : "My shifts / employee view";
+      $("#title").textContent = role === "manager" ? "Manager schedules & attendance" : "My schedules & attendance";
       $("#subtitle").textContent = `${user.name} · ${user.businessName}`;
-      $("#actionHead").hidden = user.role !== "manager";
-      $("#bell").hidden = user.role !== "manager";
-      $("#dateFilter").hidden = user.role !== "manager";
-      if (user.role === "manager") {
+      $("#actionHead").hidden = role !== "manager";
+      $("#bell").hidden = role !== "manager";
+      $("#dateFilter").hidden = role !== "manager";
+      $("#teamDashboard").hidden = role !== "employee";
+      clearInterval(timer);
+      if (role === "manager") {
         $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
       }
       try {
         await loadData();
-        if (user.role === "manager") {
+        await loadSchedules();
+        if (role === "manager") {
           await pollNotifications();
           timer = setInterval(pollNotifications, 30000);
         }
@@ -372,6 +474,48 @@
       event.preventDefault();
       $("#appMessage").textContent = "";
       try { await loadData(); } catch (error) { $("#appMessage").textContent = error.message; }
+    });
+    $("#personalView").addEventListener("click", async () => {
+      personalMode = !personalMode;
+      $("#appMessage").textContent = "";
+      renderSchedules([]);
+      renderRecords([]);
+      try { await start(); } catch (error) { $("#appMessage").textContent = error.message; }
+    });
+    $("#refreshSchedules").addEventListener("click", async () => {
+      try {
+        await loadSchedules();
+        if (role === "employee") await loadData();
+      } catch (error) { $("#scheduleMessage").textContent = error.message; }
+    });
+    $("#scheduleUnlock").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#scheduleMessage").textContent = "";
+      renderSchedules([]);
+      const schedule = $("#scheduleChoice").value === "" ? null : portalSchedules[Number($("#scheduleChoice").value)];
+      try {
+        const result = await api("/api/access/schedules/unlock", "POST", {
+          ...(schedule ? {runId: schedule.runId, locationId: schedule.locationId} : {}), code: $("#scheduleCode").value
+        });
+        unlockedSchedules = result.schedules;
+        $("#scheduleCode").value = "";
+        $("#scheduleChoice").value = String(portalSchedules.findIndex(item => item.runId === result.schedule.runId && item.locationId === result.schedule.locationId));
+        renderSchedules([result.schedule]);
+        $("#scheduleMessage").textContent = result.schedules.length > 1 ? "This code matches multiple accepted versions. Choose a schedule from the list to view it." : "";
+      } catch (error) { $("#scheduleMessage").textContent = error.message; }
+    });
+    function selectSchedule(ownOnly = false) {
+      const schedule = $("#scheduleChoice").value === "" ? null : portalSchedules[Number($("#scheduleChoice").value)];
+      const selected = schedule && (ownOnly ? ownSchedules : [...unlockedSchedules, ...ownSchedules]).find(item => item.runId === schedule.runId && item.locationId === schedule.locationId);
+      renderSchedules(selected ? [selected] : []);
+      $("#scheduleMessage").textContent = selected ? "" : "Choose a schedule to view your shifts, or enter a code.";
+    }
+    $("#scheduleChoice").addEventListener("change", () => { $("#scheduleCode").value = ""; selectSchedule(); });
+    $("#viewOwnSchedule").addEventListener("click", () => selectSchedule(true));
+    $("#openTrade").addEventListener("click", () => {
+      TradePicker.open({base: "/api/access/trades", api: (path, method, body) => api(path + (personalMode ? "?view=employee" : ""), method, body),
+        onCreated: () => { $("#appMessage").textContent = "Trade submitted. Open the trade inbox to review its approvals."; }
+      }).catch(error => { $("#appMessage").textContent = error.message; });
     });
     $("#filterToday").addEventListener("click", () => {
       $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
@@ -442,6 +586,14 @@
       const state = await (await fetch("/api/access/state")).json();
       csrfToken = state.csrfToken;
       if (state.authenticated) await showApp(state.user);
+      else {
+        clearInterval(timer);
+        role = accountRole = "";
+        ownEmployeeId = null;
+        personalMode = false;
+        $("#appView").hidden = true;
+        $("#loginView").hidden = false;
+      }
     }
 
     start().catch(() => { $("#message").textContent = "The service is unavailable. Try again shortly."; });

@@ -285,6 +285,101 @@ CREATE POLICY tenant_isolation ON attendance_notification_reads
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
+CREATE TABLE IF NOT EXISTS schedule_portal_codes (
+    tenant_id TEXT NOT NULL,
+    location_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    code_hash TEXT NOT NULL UNIQUE,
+    encrypted_code TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, location_id, role, period_start)
+);
+ALTER TABLE schedule_portal_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schedule_portal_codes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON schedule_portal_codes;
+CREATE POLICY tenant_isolation ON schedule_portal_codes
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+-- Authenticated trades and sandbox billing.
+CREATE TABLE IF NOT EXISTS shift_trades (
+    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, run_id TEXT NOT NULL,
+    day INTEGER NOT NULL, employee_a TEXT NOT NULL, employee_b TEXT NOT NULL,
+    slot_a TEXT NOT NULL, slot_b TEXT NOT NULL, location_id TEXT NOT NULL,
+    state TEXT NOT NULL, reason TEXT NOT NULL, created_by TEXT NOT NULL,
+    override_reason TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS override_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS days TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS rest_warnings TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS rest_acknowledged TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS initiated_role TEXT NOT NULL DEFAULT 'employee';
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS target_confirmed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shift_trades ADD COLUMN IF NOT EXISTS constraint_policy TEXT NOT NULL DEFAULT 'legacy';
+CREATE TABLE IF NOT EXISTS shift_trade_events (
+    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, trade_id TEXT NOT NULL,
+    state TEXT NOT NULL, actor_id TEXT NOT NULL, reason TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS shift_trade_reads (
+    tenant_id TEXT NOT NULL, reader_id TEXT NOT NULL, trade_id TEXT NOT NULL,
+    version INTEGER NOT NULL, PRIMARY KEY (tenant_id,reader_id,trade_id)
+);
+CREATE TABLE IF NOT EXISTS shift_trade_publish (
+    trade_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    before_payload TEXT NOT NULL, after_payload TEXT NOT NULL,
+    operations TEXT NOT NULL, remote_mode TEXT NOT NULL, state TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS billing_configuration (
+    id INTEGER PRIMARY KEY, payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS billing_accounts (
+    tenant_id TEXT PRIMARY KEY, subscription_id TEXT UNIQUE, checkout_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL DEFAULT '', tier TEXT NOT NULL, period TEXT NOT NULL,
+    auto_renew INTEGER NOT NULL, provider_status TEXT NOT NULL,
+    access_state TEXT NOT NULL DEFAULT 'active', paid_until TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0, next_retry INTEGER,
+    retry_state TEXT NOT NULL DEFAULT 'idle', last_error TEXT, last_payment TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE billing_accounts ADD COLUMN IF NOT EXISTS plan_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS billing_events (
+    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, kind TEXT NOT NULL,
+    detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS billing_webhook_receipts (
+    id TEXT PRIMARY KEY, applied INTEGER NOT NULL DEFAULT 0
+);
+-- Opaque subscription-to-tenant routing, consulted before webhook tenant context.
+-- Contains no prices, payment details, credentials, employee or business names.
+CREATE TABLE IF NOT EXISTS billing_subscription_index (
+    subscription_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS billing_worker_status (
+    id INTEGER PRIMARY KEY, heartbeat INTEGER NOT NULL
+);
+DO $$
+DECLARE table_name TEXT;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY[
+        'shift_trades','shift_trade_events','shift_trade_reads','shift_trade_publish',
+        'billing_accounts','billing_events'
+    ] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', table_name);
+        EXECUTE format(
+            'CREATE POLICY tenant_isolation ON %I USING (tenant_id = current_setting(''app.tenant_id'', true)) WITH CHECK (tenant_id = current_setting(''app.tenant_id'', true))',
+            table_name
+        );
+    END LOOP;
+END $$;
+
 -- Initial tenant (must match SCHEDULE_CREATOR_TENANT_ID, default 'cbljm').
 -- Change the values here if you use a different tenant ID or business name.
 INSERT INTO tenants (tenant_id, business_name)

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sandbox membership billing</title>
+<style>
+body{font:16px "Segoe UI",Arial,sans-serif;color:#183044;background:#f3f6f8;margin:24px}
+main{max-width:1000px;margin:auto;background:white;padding:24px;border-radius:12px}
+h1{margin-top:0}h2{font-size:1.25rem}h3{font-size:1rem}
+label{display:block;margin:12px 0}input,select,textarea,button{box-sizing:border-box;font:inherit;padding:8px;border:1px solid #aebcc6;border-radius:6px}
+input:not([type=checkbox]),select,textarea{width:100%}
+button{cursor:pointer;background:#167da8;color:white;margin:4px 0;padding:10px 14px}
+button.secondary{background:white;color:#183044}button.danger{background:#a12121}button:disabled{opacity:.55;cursor:not-allowed}
+nav{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0}a{color:#167da8}
+.card{border:1px solid #d3dee5;border-radius:10px;padding:18px;margin:18px 0;scroll-margin-top:16px}
+.notice{background:#eef5f8;border-radius:8px;padding:14px;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.scroll{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #d3dee5;vertical-align:top}thead th{background:#eef5f8}
+.error{color:#a12121}.success{color:#27652b}#message{overflow-wrap:anywhere}#account dd{overflow-wrap:anywhere}
+dl{display:grid;grid-template-columns:minmax(130px,1fr) 2fr;gap:12px}dt{font-weight:600}dd{margin:0}
+small,.muted{color:#51667a}fieldset{border:1px solid #d3dee5;border-radius:8px;padding:12px}summary{cursor:pointer;font-weight:600}
+[hidden]{display:none!important}
+@media(max-width:600px){body{margin:12px}main{padding:16px}.grid{grid-template-columns:1fr}dl{grid-template-columns:1fr;gap:6px}dd{margin-bottom:12px}}
+</style></head><body><main>
+<h1>Membership billing <small>· PayPal sandbox</small></h1>
+<p><a href="/business">Business status</a> · <a href="/hub">Platform owner hub</a></p>
+<p class="notice">Test payments only. No live charges are supported. Payment passwords, cards and bank details are never entered or stored here.</p>
+<p id="status" role="status"></p><p id="message" role="alert" aria-live="polite"></p>
+<section id="owner" hidden>
+<nav aria-label="Billing configuration sections"><a href="#setup">Setup checklist</a><a href="#configuration">Prices & features</a><a href="#manual">Manual credit</a><a href="#recover">Checkout recovery</a></nav>
+<section id="setup" class="card"><h2>1. Sandbox setup checklist</h2><ol id="checklist"></ol>
+<button id="prepare" type="button">Prepare sandbox product and plans</button>
+<details><summary>Server setup instructions</summary>
+<p>Privately set PAYPAL_SANDBOX_CLIENT_ID, PAYPAL_SANDBOX_CLIENT_SECRET and PAYPAL_SANDBOX_WEBHOOK_ID on the server. Never enter credentials in these forms.</p>
+<p>Configure the sandbox webhook at /api/payments/paypal/webhook on your public HTTPS deployment. Run billing_worker.py as a separate supervised, always-on service. Browser tabs do not run payment retries.</p>
+</details></section>
+<form id="configuration" class="card"><h2>2. Prices & tier features</h2>
+<p>Set monthly and annual prices in USD for all four tiers. Existing subscriptions retain their original price. Changing prices requires preparing new plans before billing can be enabled.</p>
+<div class="scroll"><table><thead><tr><th>Tier</th><th>Monthly USD</th><th>Annual USD</th></tr></thead><tbody id="prices"></tbody></table></div>
+<h3>Features included with each tier</h3><p>Use the standard tier default, or explicitly enable/disable a feature. “Default” removes the override.</p>
+<button id="resetFeatures" class="secondary" type="button">Use defaults for all features</button>
+<div class="scroll"><table><thead id="featureHead"></thead><tbody id="features"></tbody></table></div>
+<label><input type="checkbox" id="enabled"> Enable sandbox billing</label>
+<p id="enableHelp" class="muted"></p><button type="submit">Save prices and features</button></form>
+<form id="manual" class="card"><h2>3. Record a manual payment / credit</h2>
+<p>This extends app access but does not settle or cancel any PayPal balance.</p>
+<label>Business<select id="tenant" required><option value="">Loading businesses…</option></select></label>
+<label>Access paid through <input id="until" type="datetime-local" required></label>
+<small>Jamaica time (UTC−05:00). Choose the date and time when paid access ends.</small>
+<label>Audit reason<textarea id="reason" maxlength="500" required rows="3"></textarea></label>
+<button type="submit">Record manual credit</button></form>
+<form id="recover" class="card"><h2>4. Recover an unknown checkout</h2>
+<p>Use only when checkout was created but its result is unknown. Copy the sandbox subscription ID from PayPal; the server verifies it belongs to the selected business and configured plan.</p>
+<label>Business<select id="recoverTenant" required><option value="">Loading businesses…</option></select></label>
+<label>PayPal sandbox subscription ID<input id="recoverId" required placeholder="I-…" autocomplete="off"></label>
+<button type="submit">Verify and recover checkout</button></form>
+</section>
+<section id="business" hidden>
+<nav aria-label="Business billing sections"><a href="#checkout">Choose a plan</a><a href="#subscription">Current subscription</a><a href="#billingHistory">Billing history</a></nav>
+<form id="checkout" class="card"><h2>Choose a sandbox plan</h2><div class="grid">
+<label>Membership tier<select id="tier"><option value="bronze">Bronze</option><option value="silver">Silver</option><option value="gold">Gold</option><option value="platinum">Platinum</option></select></label>
+<label>Billing period<select id="period"><option value="monthly">Monthly</option><option value="annual">Annual</option></select></label></div>
+<label><input id="renew" type="checkbox"> Automatically renew at the end of each billing period</label>
+<p id="price" class="notice"></p><p id="checkoutHelp"></p><button id="subscribe" type="submit">Continue to PayPal sandbox</button></form>
+<section id="subscription" class="card"><h2>Current subscription</h2><div id="account"></div>
+<button id="reconcile" class="secondary" type="button">Refresh subscription from PayPal</button>
+<button id="cancel" class="danger" type="button">Cancel sandbox subscription</button></section>
+<section id="billingHistory" class="card"><h2>Billing reminders & history</h2><div id="history"></div>
+<p class="muted">Unattended email delivery is not enabled. Failed outstanding payments are retried daily up to seven times. Unknown results require verification instead of blind retries.</p></section>
+</section><button id="refresh" class="secondary" type="button">Refresh billing status</button></main>
+<script>
+const $=s=>document.querySelector(s),owner=new URLSearchParams(location.search).get("view")==="owner";
+let csrf="",settings={};
+const featureLabels={scheduleGeneration:"Schedule generation",scheduleSharing:"Schedule sharing",bamboohrPublishing:"BambooHR publishing",emailConfiguration:"Email configuration",employeeManagement:"Employee management",settings:"Settings",employeeScheduleAccess:"Employee schedule access",shiftTrades:"Shift trades",scheduleHistory:"Schedule history",overtimeForecasting:"Overtime forecasting"};
+const title=value=>String(value).replace(/([a-z])([A-Z])/g,"$1 $2").replaceAll("_"," ").toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+function message(text,error=false){$("#message").textContent=text;$("#message").className=error?"error":"success";}
+async function api(path,method="GET",body){
+  const response=await fetch(path,{method,headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:body===undefined?undefined:JSON.stringify(body)});
+  const value=await response.json();if(!response.ok)throw Error(value.error||"Request failed");return value;
+}
+function price(){
+  const value=settings.prices?.[$("#tier").value+":"+$("#period").value];
+  $("#price").textContent=value?`USD ${value} per ${$("#period").value==="monthly"?"month":"year"} · ${$("#renew").checked?"renews automatically":"one billing period, no auto-renewal"}`:"Prices have not been configured.";
+}
+function renderFeatures(definitions,overrides){
+  const tiers=Object.keys(definitions),row=document.createElement("tr");
+  $("#featureHead").replaceChildren();$("#features").replaceChildren();
+  for(const name of ["Feature",...tiers.map(t=>definitions[t].name)]){const th=document.createElement("th");th.textContent=name;row.append(th);}
+  $("#featureHead").append(row);
+  for(const key of new Set(tiers.flatMap(t=>Object.keys(definitions[t].features)))){
+    const tr=document.createElement("tr"),label=document.createElement("th");label.textContent=featureLabels[key]||title(key);tr.append(label);
+    for(const tier of tiers){
+      const td=document.createElement("td"),select=document.createElement("select");
+      select.dataset.tier=tier;select.dataset.feature=key;select.setAttribute("aria-label",`${definitions[tier].name}: ${label.textContent}`);
+      select.add(new Option(`Default (${definitions[tier].features[key]?"enabled":"disabled"})`,"default"));
+      select.add(new Option("Enabled","true"));select.add(new Option("Disabled","false"));
+      select.value=Object.hasOwn(overrides[tier]||{},key)?String(overrides[tier][key]):"default";
+      td.append(select);tr.append(td);
+    }
+    $("#features").append(tr);
+  }
+}
+function readFeatures(){
+  const features={};
+  document.querySelectorAll("[data-feature]").forEach(select=>{
+    if(select.value!=="default")(features[select.dataset.tier]??={})[select.dataset.feature]=select.value==="true";
+  });
+  return features;
+}
+function renderAccount(account){
+  $("#account").replaceChildren();
+  if(!account){$("#account").textContent="No sandbox subscription yet. Choose a plan above to get started.";return;}
+  const dl=document.createElement("dl");
+  const date=value=>value?new Intl.DateTimeFormat("en-US",{dateStyle:"medium",timeStyle:"short",timeZone:"America/Jamaica"}).format(new Date(value))+" (Jamaica)":"Not recorded";
+  for(const [label,value] of [
+    ["Membership tier",title(account.tier)],["Billing period",title(account.period)],["Auto-renew",account.autoRenew?"On":"Off"],
+    ["PayPal status",title(account.providerStatus)],["App access",title(account.accessState)],["Paid through",date(account.paidUntil)],
+    ["Payment retries",`${account.retryCount} of 7`],["Retry status",title(account.retryState)],["Subscription ID",account.subscriptionId||"Not recorded"]
+  ]){const dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=label;dd.textContent=value;dl.append(dt,dd);}
+  $("#account").append(dl);
+  if(account.lastError){const p=document.createElement("p");p.className="error";p.textContent="Last payment issue: "+account.lastError;$("#account").append(p);}
+}
+async function load(){
+  if(owner){
+    const [result,businesses]=await Promise.all([api("/api/hub/billing"),api("/api/hub/businesses")]);settings=result.configuration;
+    $("#status").textContent=`Sandbox billing is ${settings.enabled?"enabled":"disabled"}.`;
+    $("#checklist").replaceChildren();
+    const pricesSaved=Object.keys(settings.prices).length===8,plansReady=Object.keys(settings.plans||{}).length===16;
+    for(const [ready,text] of [[pricesSaved,"Save all eight tier prices with billing disabled."],[result.credentialsConfigured,"Configure the sandbox credentials on the server."],[plansReady,"Prepare all sandbox product plans."],[result.workerHealthy,"Start the dedicated billing worker and check its heartbeat."],[settings.enabled,"Enable sandbox billing and save."]]){
+      const li=document.createElement("li");li.textContent=`${ready?"Ready":"Needed"} · ${text}`;$("#checklist").append(li);
+    }
+    $("#prepare").disabled=!pricesSaved||!result.credentialsConfigured||settings.enabled;
+    $("#enableHelp").textContent="Enable only after prices, credentials, all plans and the worker are ready. If changing prices, uncheck Enable and save first.";
+    $("#prices").replaceChildren();
+    for(const [tier,definition] of Object.entries(result.tierDefinitions)){
+      const tr=document.createElement("tr"),th=document.createElement("th");th.textContent=definition.name;tr.append(th);
+      for(const period of ["monthly","annual"]){const td=document.createElement("td"),input=document.createElement("input");input.type="number";input.min="0.01";input.max="99999.99";input.step="0.01";input.required=true;input.dataset.price=tier+":"+period;input.value=settings.prices[tier+":"+period]||"";input.setAttribute("aria-label",`${definition.name} ${period} price in USD`);td.append(input);tr.append(td);}
+      $("#prices").append(tr);
+    }
+    renderFeatures(result.tierDefinitions,settings.features||{});$("#enabled").checked=settings.enabled;
+    for(const id of ["tenant","recoverTenant"]){const select=$("#"+id),previous=select.value;select.replaceChildren(new Option("Choose a business",""));businesses.businesses.forEach(b=>select.add(new Option(`${b.name} · ${b.id} (${title(b.status)})`,b.id)));select.value=previous;}
+    $("#owner").hidden=false;
+  }else{
+    const result=await api("/api/business/billing");settings=result;$("#business").hidden=false;
+    $("#status").textContent=result.enabled?"PayPal sandbox billing is enabled.":"Sandbox billing is not yet enabled by the platform owner.";
+    const current=result.account&&!["CANCELLED","EXPIRED"].includes(result.account.providerStatus);
+    $("#subscribe").disabled=!result.enabled||!!current;$("#reconcile").disabled=!result.account?.subscriptionId;
+    $("#cancel").disabled=!result.account||result.account.providerStatus==="CANCELLED";
+    $("#checkoutHelp").textContent=current?"You already have a subscription. Review or cancel it below before starting another.":!result.enabled?"Ask the platform owner to complete sandbox setup.":"You will review and approve this test subscription on PayPal.";
+    renderAccount(result.account);$("#history").replaceChildren();
+    if(!result.reminders.length)$("#history").textContent="No billing events yet.";
+    else{const table=document.createElement("table"),head=table.createTHead().insertRow();for(const label of ["Recorded at","Event","Details"]){const th=document.createElement("th");th.textContent=label;head.append(th);}const body=table.createTBody();for(const event of result.reminders){const row=body.insertRow();for(const value of [event.createdAt,title(event.kind),event.detail]){const cell=row.insertCell();cell.textContent=value;}}const scroll=document.createElement("div");scroll.className="scroll";scroll.append(table);$("#history").append(scroll);}
+    price();
+  }
+}
+function handler(element,action){element.onclick=async()=>{const disabled=element.disabled;element.disabled=true;try{message("");const result=await action();if(result===null){element.disabled=disabled;return;}element.disabled=disabled;await load();message(result?.warning||"Billing status updated.");}catch(error){element.disabled=disabled;message(error.message,true);}};}
+$("#configuration").onsubmit=async e=>{e.preventDefault();try{
+  const prices={};document.querySelectorAll("[data-price]").forEach(input=>prices[input.dataset.price]=input.value);
+  if(!confirm("Save these sandbox prices and tier features? Existing subscriptions keep their original price."))return;
+  await api("/api/hub/billing","PUT",{confirmed:true,enabled:$("#enabled").checked,prices,features:readFeatures()});await load();message("Prices and features saved.");
+}catch(error){message(error.message,true);}};
+$("#resetFeatures").onclick=()=>{document.querySelectorAll("[data-feature]").forEach(select=>select.value="default");message("Feature defaults selected. Save prices and features to apply.");};
+handler($("#prepare"),async()=>{if(!confirm("Create PayPal sandbox plans? No live plans or charges will be created."))return null;return api("/api/hub/billing/prepare","POST",{confirmed:true});});
+$("#manual").onsubmit=async e=>{e.preventDefault();try{if(!confirm("Record manual credit? This does not settle or cancel PayPal charges."))return;const result=await api("/api/hub/billing/manual-payment","POST",{confirmed:true,tenantId:$("#tenant").value,paidUntil:$("#until").value+"-05:00",reason:$("#reason").value});message(result.warning||"Manual credit recorded.");}catch(error){message(error.message,true);}};
+$("#recover").onsubmit=async e=>{e.preventDefault();try{const result=await api("/api/hub/billing/recover-checkout","POST",{confirmed:true,tenantId:$("#recoverTenant").value,subscriptionId:$("#recoverId").value.trim()});message(result.warning||"Checkout recovered and verified.");}catch(error){message(error.message,true);}};
+$("#checkout").onsubmit=async e=>{e.preventDefault();if(!confirm("Continue to sandbox checkout for this price and auto-renew choice?"))return;$("#subscribe").disabled=true;try{const result=await api("/api/business/billing","POST",{confirmed:true,tier:$("#tier").value,period:$("#period").value,autoRenew:$("#renew").checked});location.assign(result.approvalUrl);}catch(error){message(error.message,true);try{await load();}catch(refreshError){message(error.message+" Billing refresh also failed: "+refreshError.message,true);}}};
+handler($("#reconcile"),()=>api("/api/business/billing/reconcile","POST",{}));handler($("#refresh"),async()=>({}));
+handler($("#cancel"),async()=>{if(!confirm("Cancel the sandbox subscription? No refund is issued. App membership and outstanding PayPal balances are separate."))return null;return api("/api/business/billing/cancel","POST",{confirmed:true});});
+$("#tier").onchange=price;$("#period").onchange=price;$("#renew").onchange=price;
+async function start(){const state=await api(owner?"/api/hub/state":"/api/tenant-auth/state");csrf=state.csrfToken;if(!(owner?state.ownerAuthenticated:state.authenticated))throw Error("Sign in with the appropriate administrator account first.");await load();}
+start().catch(error=>message(error.message,true));
+</script></body></html>

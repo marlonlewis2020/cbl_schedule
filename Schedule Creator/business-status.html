@@ -46,6 +46,7 @@
 
     <section id="membershipSection">
       <h2>Membership</h2>
+      <p><a href="/billing">Sandbox checkout, billing status and reminders</a></p>
       <p>Plan: <strong id="membershipTier">…</strong></p>
       <p>Membership status: <span id="membershipStatus" class="badge">…</span></p>
       <p id="membershipText" class="note"></p>
@@ -97,9 +98,9 @@
       suspended: "Your business is suspended. Scheduling is unavailable. Contact the platform owner to restore access."
     };
     const membershipDescriptions = {
-      active: "Membership changes apply immediately. This app does not currently collect membership payments. Lower tiers keep existing records but may block new additions when usage exceeds a plan limit.",
-      paused: "Membership is paused. Scheduler access is disabled, but your business data is retained. The main administrator can resume the membership at any time. No billing changes are processed by this app.",
-      cancelled: "Membership is cancelled and scheduler access is disabled. Your business data is retained, not deleted. Contact the platform owner if you need access restored. No billing changes are processed by this app."
+      active: "Membership changes apply immediately. Optional PayPal sandbox billing is configured separately; no live payments are supported. Lower tiers retain records but can block additions above plan limits.",
+      paused: "Membership is paused and scheduler access is disabled; data is retained. An enrolled sandbox subscription is suspended too. The main administrator can resume membership.",
+      cancelled: "Membership is cancelled and scheduler access is disabled; data is retained. An enrolled sandbox subscription is cancelled too. Contact the platform owner for membership restoration."
     };
 
     async function request(path, options = {}) {
@@ -240,7 +241,9 @@
       $("#membershipTier").textContent = membership.tierName;
       $("#membershipStatus").textContent = membership.status;
       $("#membershipStatus").className = `badge ${membership.status}`;
-      $("#membershipText").textContent = membershipDescriptions[membership.status] || "";
+      $("#membershipText").textContent = membership.billingSuspended
+        ? "Billing access is suspended. Verify a successful sandbox payment or ask the platform owner to record a manual payment. Business data is retained."
+        : membershipDescriptions[membership.status] || "";
       $("#membershipTierChoice").value = membership.tier;
       const canManageMembership = isPrimary && status.status === "active" && membership.status !== "cancelled";
       $("#membershipControls").hidden = !canManageMembership;
@@ -249,7 +252,7 @@
       $("#resumeMembership").hidden = !canManageMembership || membership.status !== "paused";
       $("#cancelMembership").hidden = !canManageMembership;
       $("#membershipTierChoice").disabled = !canManageMembership;
-      $("#openApp").hidden = status.status !== "active" || membership.status !== "active";
+      $("#openApp").hidden = status.status !== "active" || membership.status !== "active" || membership.billingSuspended;
       $("#adminSection").hidden = false;
       $("#adminForm").hidden = !isPrimary;
       const adminResult = await (await fetch("/api/business/admins")).json();
@@ -258,10 +261,10 @@
 
     async function changeMembership(action, tier) {
       const messages = {
-        change_tier: `Change the membership tier to ${tier}? The change takes effect immediately. Existing data remains, but new additions can be blocked if usage is above the selected plan limits. This app does not currently process membership payments.`,
-        pause: "Pause membership now? Scheduler access will stop immediately. Your data will be retained, and the main administrator can resume later. This app does not process billing.",
+        change_tier: `Change the membership tier to ${tier}? Existing records remain; plan limits apply immediately. Cancel/reconcile any enrolled sandbox subscription before changing its tier.`,
+        pause: "Pause membership now? Scheduler access stops immediately and any enrolled sandbox subscription is suspended. Data is retained and the main administrator can resume later.",
         resume: "Resume membership and restore scheduler access now?",
-        cancel: "Cancel membership now? Scheduler access will stop immediately. Your business data will be retained, not deleted. Cancellation cannot be undone here; contact the platform owner to restore access. This app does not process billing."
+        cancel: "Cancel membership now? Scheduler access stops and any enrolled sandbox subscription is cancelled. Data is retained; no refund is issued. Contact the platform owner to restore membership."
       };
       if (!window.confirm(messages[action])) return;
       message.textContent = "";

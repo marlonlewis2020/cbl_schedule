@@ -134,7 +134,9 @@ status at `/business`, change tiers, pause, resume, or cancel membership. These
 actions take effect immediately and require confirmation. Pausing disables
 scheduler access but can be resumed by the main administrator. Cancellation
 also disables access, retains all business data, and requires the platform
-owner to restore access. This deployment does not process membership billing.
+owner to restore access. Optional PayPal sandbox billing is disabled by default;
+live payments are not supported. Enrolled sandbox subscriptions follow
+membership pause/resume/cancel actions after provider verification.
 Membership actions are recorded in the tenant audit log with the acting
 administrator and the prior/new tier or status.
 
@@ -261,6 +263,15 @@ Copilot automation remain separate implementation phases.
 
 ## Manager and employee access
 
+Settings → Manager & employee access → **Change role** corrects an existing
+account between Employee and Manager. Supply a valid manager email or an active
+employee link as required. Confirmation preserves the account ID, password,
+name, history and enabled/disabled state, audits the role change and revokes
+existing sessions. Manager MFA, email-based location scope and personal-access
+membership checks still apply. Existing enrolled MFA is retained; conflicting
+accounts and stale edits are rejected rather than merged or overwritten.
+This changes the sign-in role, not the employee's scheduling/job role.
+
 Admins create manager and employee accounts in Settings → Manager & employee
 access and share the one-time temporary password (72-hour expiry). Users sign
 in at `/access` with the BambooHR subdomain, email or employee ID and password,
@@ -275,6 +286,115 @@ own attendance. Late/absent transitions create in-app notifications (bell,
 sessions are rejected by all administrator APIs. Accounts live in
 `tenant_users`; notifications in `attendance_notifications` and
 `attendance_notification_reads`.
+
+Scheduled managers can link one active same-business employee record to their
+existing manager account. My shifts uses that employee ID independently of
+managed locations; Manage teams retains the original manager scope and MFA.
+Link changes revoke sessions, and self-attendance corrections require an admin.
+
+## Authenticated trades
+
+`/trades` is the shared trade inbox for accepted schedules. Employee requests
+need affected-employee confirmation, manager acceptance and admin approval.
+Manager-initiated requests skip employee confirmation, not admin approval.
+The administrator and access-page Shift trade buttons open a shared modal:
+location/team, accepted period and employees are scoped dropdowns; employee 1
+is locked for employee/personal views. Checkbox days are validated together,
+including combinations that balance weekly caps. Pending intersections are
+blocked across every selected day. Legacy single-day trades/overrides remain
+readable and publishing journals cover all selected dates.
+
+Both employees must finish the selected accepted schedule week with at least
+five assigned shifts (not exactly five); this is enforced at every progression
+and application and cannot be overridden for trades. Other scheduling
+violations, including overlaps, availability, approved leave, weekly maximum
+and rest, are warnings requiring both employees' consent plus explicit manager
+acceptance and admin approval. Exception proposals never skip these stages,
+even when initiated by management. Changed warnings require a new request.
+Authorization, data validity, stale/version checks, pending intersections and
+non-admin past-shift guards remain enforced. Manual assignments are separate
+and retain their existing override workflow.
+Linked managers use `/trades?view=employee` for personal actions. Status history
+and unread updates are persisted per tenant/reader.
+
+Admins preview and explicitly apply approved trades or manual shift/day-off
+overrides. App-only mode leaves BambooHR unchanged. Remote mode reads and
+validates mappings first, journals single-employee replacement/deletion
+operations, and exposes partial failures. Successful operations are not repeated.
+Unknown writes require read-only reconciliation and separate retry confirmation;
+shared shifts and duplicate matches require manual correction. Validation used
+mocked BambooHR only, not production writes.
+
+Employees explicitly choose an accepted period for their own shifts without a
+code. Team codes may identify a visible assigned period without selecting it
+first; shared codes return eligible versions only. Existing expiry, throttling,
+CSRF and team/tenant checks are retained. Access, hub and the trade inbox retain
+their previous appearance, except the redesigned trade inbox cards.
+`workforce-ui.css` scopes theme styling to the trade popup and inbox, preserving
+the surrounding administrator palette. Trade cards show names, dated
+before/after shifts, weekly counts and grouped warnings with approval status.
+
+## PayPal sandbox billing and dedicated worker
+
+The billing page provides section navigation, a setup checklist, tier price
+tables and per-feature Default/Enabled/Disabled dropdowns (no JSON input).
+Manual credits and recovery use business selectors; paid-through date/time
+entry is explicitly Jamaica time. Subscription details and history are readable
+fields, while all existing server validation and sandbox-only safeguards remain.
+
+The provider is hard-coded to PayPal's **sandbox**, never the live API. Billing
+starts disabled and is optional for existing memberships. Privately configure
+`PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_CLIENT_SECRET`, and
+`PAYPAL_SANDBOX_WEBHOOK_ID` in the server environment. Do not enter credentials
+in chat, screenshots, source code or owner price forms.
+
+The owner opens `/billing?view=owner`, saves eight USD monthly/annual prices and
+optional boolean tier feature overrides, prepares sandbox plans, starts the
+worker, then enables billing. The main business administrator uses `/billing`
+for hosted checkout, optional auto-renew, reconciliation and cancellation.
+Non-renewing plans have one cycle; existing subscriptions retain agreed prices.
+Checkout/payment credentials stay with PayPal.
+
+Configure subscription lifecycle/payment sale webhooks in the PayPal sandbox
+dashboard with the public HTTPS URL `/api/payments/paypal/webhook`. Signature
+verification uses PayPal's verification endpoint, followed by an authoritative
+subscription read; event IDs are deduplicated transactionally. The opaque
+`billing_subscription_index` resolves tenant context before applying forced RLS
+to billing accounts/events. It contains no payment details or business names.
+
+Run the worker **separately** from Flask, using the same database/environment:
+
+```powershell
+Set-Location 'Schedule Creator'
+python billing_worker.py
+```
+
+`Run Billing Worker.bat` is a foreground convenience launcher, not a service
+installer. For unattended operation, use Windows Task Scheduler or a service
+supervisor: start at system boot, run whether or not a user is logged in, prevent
+duplicate instances, restart on failure, and retain process error output. Do not
+tie its lifetime to Chrome or the Flask development reloader. The owner page
+reports heartbeat health, and enabling billing requires a current heartbeat.
+
+The worker checks payment state and retries a failed outstanding balance daily,
+up to seven payment attempts; definitive failures suspend billing access after
+the seventh attempt. Unknown outcomes stop retries for reconciliation. Verified
+payments/manual owner credits restore billing access without reversing an
+administrator's membership/business suspension. Manual credits stop app retries
+but do not settle/cancel provider charges. Reminders are in-app, not email.
+
+Startup/reference-schema migrations include trade/billing tables. Live
+PostgreSQL migration/RLS checks and PayPal sandbox checkout/webhook/supervised
+worker acceptance remain outstanding; billing stays disabled until configured.
+The SQLite importer preserves access identities, attendance notification
+read/archive state, trade approvals/journals, billing history and subscription
+routing, revokes imported user sessions, and disables billing at the destination.
+It accepts a single business and a fresh destination only. Stop the source app
+and worker before exporting/importing; preserve encryption keys, verify sandbox
+credentials and payment state, then start only the destination worker before
+reenabling billing. Do not run billing workers against both databases.
+API contracts: [PayPal Subscriptions](https://developer.paypal.com/docs/api/subscriptions/v1/)
+and [official OpenAPI specification](https://github.com/paypal/paypal-rest-api-specifications/blob/main/openapi/billing_subscriptions_v1.json).
 
 ## User manual
 
