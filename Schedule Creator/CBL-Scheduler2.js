@@ -2273,9 +2273,9 @@ function openAccessRoleDialog(id){
     };
     dialog.showModal()
 }
-let attendanceNotifications=[],archivedNotifications=[],notificationView='active',expandedNotifications=new Set();
+let attendanceNotifications=[],archivedNotifications=[],pendingTradeNotifications=[],notificationView='active',expandedNotifications=new Set();
 function renderNotificationBadge(){
-    let badge=$('notificationBadge'),unread=attendanceNotifications.filter(item=>!item.read).length;
+    let badge=$('notificationBadge'),unread=attendanceNotifications.filter(item=>!item.read).length+pendingTradeNotifications.filter(item=>item.unread).length;
     if(!badge)return;
     badge.textContent=unread;
     badge.hidden=unread===0
@@ -2292,7 +2292,8 @@ function renderNotificationPanel(){
         let open=expandedNotifications.has(item.id);
         return `<li class="notification-item ${item.read||archive?'':'unread'}"><div class="notification-row"><button type="button" class="notification-summary" data-action="openNotification" data-id="${esc(item.id)}" aria-expanded="${open}">${esc(item.date)}: ${esc(item.message)}</button>${archive?'':`<button type="button" class="notification-remove" data-action="archiveNotification" data-id="${esc(item.id)}" aria-label="Remove notification" title="Remove (moves to archives)">✕</button>`}</div>${open?notificationDetailHtml(item):''}</li>`
     }).join('')||`<li class="notification-item"><span class="notification-summary">${archive?'No archived notifications.':'No notifications.'}</span></li>`;
-    box.innerHTML=`<div class="notification-head"><b>${archive?'Archived notifications':'Attendance notifications'}</b><div class="actions">${archive?'':'<button type="button" data-action="readNotifications">Mark all read</button>'}<button type="button" data-action="toggleNotifications" aria-label="Close notifications">Close</button></div></div><ul>${list}</ul><div class="notification-foot"><button type="button" data-action="${archive?'showActiveNotifications':'showNotificationArchive'}">${archive?'← Back to notifications':'View archives'}</button></div>`
+    const trades=archive?'':pendingTradeNotifications.map(trade=>`<li class="notification-item ${trade.unread?'unread':''}"><button type="button" class="notification-summary" data-action="openTradeApproval" data-id="${esc(trade.id)}">Shift trade pending administrator approval · week ${esc(trade.start||'unavailable')} · ${esc(trade.employeeNameA)} ↔ ${esc(trade.employeeNameB)}</button></li>`).join('');
+    box.innerHTML=`<div class="notification-head"><b>${archive?'Archived notifications':'Notifications'}</b><div class="actions">${archive?'':'<button type="button" data-action="readNotifications">Mark all read</button>'}<button type="button" data-action="toggleNotifications" aria-label="Close notifications">Close</button></div></div>${trades?`<h3>Shift trade approvals</h3><ul>${trades}</ul>`:''}<h3>Attendance</h3><ul>${list}</ul><div class="notification-foot"><button type="button" data-action="${archive?'showActiveNotifications':'showNotificationArchive'}">${archive?'← Back to notifications':'View archives'}</button></div>`
 }
 async function showNotificationArchive(){
     let result=await directoryRequest('/attendance/notifications?archived=1');
@@ -2314,12 +2315,37 @@ async function archiveNotification(id){
 async function pollAttendanceNotifications(){
     if(!$('notificationBadge'))return;
     try{
-        let result=await directoryRequest('/attendance/notifications');
+        let [result,trades]=await Promise.all([
+            directoryRequest('/attendance/notifications'),
+            membershipFeatureEnabled('shiftTrades')?directoryRequest('/shift-trades'):Promise.resolve({trades:[]})
+        ]);
         attendanceNotifications=result.notifications;
+        pendingTradeNotifications=trades.trades.filter(trade=>trade.state==='manager_accepted'&&trade.actions.includes('approve'));
         renderNotificationBadge();
         renderNotificationPanel()
     }
-    catch{}
+    catch(error){message('Unable to refresh notifications: '+error.message,true);}
+}
+async function openTradeApproval(id){
+    const trade=pendingTradeNotifications.find(item=>item.id===id);
+    if(!trade)throw Error('This trade is no longer pending. Refresh notifications.');
+    let dialog=$('tradeApprovalDialog');
+    if(!dialog){
+        dialog=document.createElement('dialog');dialog.id='tradeApprovalDialog';dialog.className='wide-dialog trade-approval-dialog';
+        dialog.innerHTML='<div class="dialoghead"><h2>Shift trade approval</h2><button type="button" data-dialog-close="tradeApprovalDialog">Close</button></div><iframe title="Administrator shift trade inbox"></iframe>';
+        dialog.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();dialog.close();}};
+        dialog.onclose=()=>{dialog.querySelector('iframe').src='about:blank';pollAttendanceNotifications();};
+        document.body.append(dialog);
+    }
+    $('notificationPanel')?.remove();
+    dialog.querySelector('iframe').src='/trades?adminView=1&trade='+encodeURIComponent(id)+'&theme='+encodeURIComponent(document.documentElement.dataset.theme||'light');
+    if(!dialog.open)dialog.showModal();
+    if(trade.unread){
+        await directoryRequest('/shift-trades/'+encodeURIComponent(id)+'/read',{
+            method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({version:trade.version})
+        });
+        await pollAttendanceNotifications();
+    }
 }
 async function openNotification(id){
     let item=attendanceNotifications.find(entry=>entry.id===id)||archivedNotifications.find(entry=>entry.id===id);
@@ -2351,7 +2377,7 @@ function toggleNotificationPanel(){
     box.id='notificationPanel';
     box.className='notification-panel';
     box.setAttribute('role','dialog');
-    box.setAttribute('aria-label','Attendance notifications');
+    box.setAttribute('aria-label','Notifications');
     box.style.top=Math.round(bell.bottom+6)+'px';
     box.style.right=Math.max(8,Math.round(window.innerWidth-bell.right))+'px';
     document.body.append(box);
@@ -3679,6 +3705,10 @@ async function action(a,element=null){
             await openNotification(element.dataset.id);
             return
         }
+        if(a==='openTradeApproval'){
+            await openTradeApproval(element.dataset.id);
+            return
+        }
         if(a==='archiveNotification'){
             await archiveNotification(element.dataset.id);
             return
@@ -3692,9 +3722,14 @@ async function action(a,element=null){
             return
         }
         if(a==='readNotifications'){
-            await directoryRequest('/attendance/notifications/read',{
-                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({})
-            });
+            await Promise.all([
+                directoryRequest('/attendance/notifications/read',{
+                    method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({})
+                }),
+                ...pendingTradeNotifications.filter(trade=>trade.unread).map(trade=>directoryRequest('/shift-trades/'+encodeURIComponent(trade.id)+'/read',{
+                    method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({version:trade.version})
+                }))
+            ]);
             await pollAttendanceNotifications();
             return
         }

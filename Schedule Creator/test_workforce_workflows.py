@@ -240,14 +240,31 @@ class TradeWorkflowTests(unittest.TestCase):
         admin_record = self.admin.get("/api/shift-trades").get_json()["trades"][0]
         self.assertEqual(admin_record["state"], "manager_accepted")
         self.assertIn("approve", admin_record["actions"])
+        self.assertTrue(admin_record["unread"])
+        self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/read", headers=self.headers,
+                                        json={"version": admin_record["version"]}).status_code, 200)
+        seen = self.admin.get("/api/shift-trades").get_json()["trades"][0]
+        self.assertFalse(seen["unread"])
+        self.assertEqual(seen["state"], "manager_accepted")
         action.update(action="approve", version=3, acknowledgeWarnings=False)
         self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/action", headers=self.headers,json=action).status_code, 400)
         action["acknowledgeWarnings"] = True
         self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/action", headers=self.headers,json=action).status_code, 200)
+        self.assertNotEqual(self.admin.get("/api/shift-trades").get_json()["trades"][0]["state"], "manager_accepted")
         self.assertEqual(self.apply(trade).status_code, 200)
         record = self.admin.get("/api/shift-trades").get_json()["trades"][0]
         self.assertEqual(record["employeeNameA"], "Ann")
         self.assertTrue(any("Scheduling warnings acknowledged" in e["reason"] for e in record["history"]))
+
+    def test_trade_window_is_same_origin_only_and_still_requires_admin_api_auth(self):
+        response = self.admin.get("/trades?adminView=1&trade=missing")
+        self.assertEqual(response.headers["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(response.headers["Content-Security-Policy"], "frame-ancestors 'self'")
+        response.close()
+        anonymous = scheduler.app.test_client()
+        self.assertEqual(anonymous.get("/api/shift-trades").status_code, 401)
+        with anonymous.get("/") as home:
+            self.assertEqual(home.headers["X-Frame-Options"], "DENY")
 
     def test_unaffected_employee_still_consents_to_exception_and_legacy_minimum_applies(self):
         doc = self.seed()

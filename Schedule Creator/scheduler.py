@@ -4897,7 +4897,10 @@ def access_page():
 
 @app.get("/trades")
 def trade_page():
-    return send_from_directory(APP_DIRECTORY, "trades.html")
+    response = send_from_directory(APP_DIRECTORY, "trades.html")
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+    return response
 
 
 @app.get("/billing")

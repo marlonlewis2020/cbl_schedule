@@ -42,7 +42,7 @@
 const $=s=>document.querySelector(s);
 let token="",base="",role="",employeeId=null,currentPreview=null;
 function theme(value){document.documentElement.dataset.theme=value;$("#theme").textContent=value==="dark"?"Light mode":"Dark mode";TradePicker.rememberTheme(value);}
-theme(TradePicker.restoreTheme());
+theme(["light","dark"].includes(new URLSearchParams(location.search).get("theme"))?new URLSearchParams(location.search).get("theme"):TradePicker.restoreTheme());
 $("#theme").onclick=()=>theme(document.documentElement.dataset.theme==="dark"?"light":"dark");
 async function api(path,method="GET",body){
   if(path.startsWith("/api/access/")&&new URLSearchParams(location.search).get("view")==="employee")path+="?view=employee";
@@ -125,6 +125,9 @@ async function load(){
     }
     historySummary.textContent="History";text.textContent=trade.history.map(e=>`${e.createdAt} · ${e.state} · ${e.actorId} · ${e.reason}`).join("\n");history.append(historySummary,text);actions.append(history);
     $("#rows").append(card);
+    if(new URLSearchParams(location.search).get("trade")===trade.id){
+      card.open=true;card.scrollIntoView({block:"start"});
+    }
   }
 }
 $("#create").onclick=()=>TradePicker.open({api,base,onCreated:load}).catch(error=>$("#message").textContent=error.message);
@@ -145,7 +148,7 @@ $("#apply").onclick=async()=>{
 };
 async function start(){
   const access=await (await fetch("/api/access/state")).json();
-  if(access.authenticated){role=access.user.role;employeeId=access.user.employeeId;$("#views").hidden=role!=="manager"||!access.user.employeeId;if(role==="manager"&&new URLSearchParams(location.search).get("view")==="employee")role="employee";token=access.csrfToken;base="/api/access/trades";$("#identity").textContent=access.user.name;}
+  if(access.authenticated&&new URLSearchParams(location.search).get("adminView")!=="1"){role=access.user.role;employeeId=access.user.employeeId;$("#views").hidden=role!=="manager"||!access.user.employeeId;if(role==="manager"&&new URLSearchParams(location.search).get("view")==="employee")role="employee";token=access.csrfToken;base="/api/access/trades";$("#identity").textContent=access.user.name;}
   else{const admin=await (await fetch("/api/tenant-auth/state")).json();if(!admin.authenticated)throw Error("Sign in before opening the trade inbox.");role="admin";token=admin.csrfToken;base="/api/shift-trades";$("#identity").textContent="Business administrator";$("#override").hidden=false;}
   await load();
 }

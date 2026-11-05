@@ -263,6 +263,14 @@ Copilot automation remain separate implementation phases.
 
 ## Manager and employee access
 
+The administrator notification bell includes **Shift trade approvals** for
+manager-accepted requests awaiting administrator approval. Clicking an alert
+opens an embedded administrator inbox with the selected trade expanded, in the
+admin site's theme. Viewing marks that update read, not approved or acknowledged.
+Pending requests remain listed until resolved; unread counts are per reader and
+version. Notifications refresh every 30 seconds while visible and on window
+close. Approval and application still require their existing explicit steps.
+
 Settings → Manager & employee access → **Change role** corrects an existing
 account between Employee and Manager. Supply a valid manager email or an active
 employee link as required. Confirmation preserves the account ID, password,

@@ -478,6 +478,16 @@ retains its `workforce-dashboards` prerequisite.
   390px light/dark layout without horizontal overflow; editor checks passed.
   Rebuilt manuals. Live PostgreSQL validation remains outstanding.
 
+- [x] Show manager-accepted trades pending administrator approval in the admin
+  notification bell, alongside attendance alerts. Click opens a same-origin
+  trade window within the admin site with the selected request expanded and
+  the admin theme, even if an employee session also exists. Viewing/Mark all
+  read uses existing per-reader/version read tracking, never approval or warning
+  consent. Pending requests remain visible until resolved. Refresh every 30
+  visible seconds and on window close; surface notification polling failures.
+  Verified 44 Python tests, 12 notification and 25 inbox browser checks, and
+  embedded admin selection/theme/mobile width with fixtures. Rebuilt manuals.
+
 ### Pending navigation and session requests
 
 These requests are recorded as pending; no feature behavior has changed.
