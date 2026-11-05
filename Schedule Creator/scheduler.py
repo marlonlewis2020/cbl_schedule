@@ -8071,8 +8071,9 @@ def bamboo_shift_request(
             response.read(2048)
             return {"success": 200 <= response.status < 300, "status": response.status}
     except HTTPError as error:
-        error.read(2048)
-        return {"success": False, "status": error.code}
+        detail = error.read(2048).decode("utf-8", errors="replace").strip()
+        return {"success": False, "status": error.code,
+                "error": f"BambooHR HTTP {error.code}: {detail or error.reason}"}
     except (URLError, TimeoutError, OSError):
         return {"success": False, "status": None, "outcome": "unknown"}
 

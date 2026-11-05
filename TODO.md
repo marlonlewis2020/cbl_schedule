@@ -369,8 +369,16 @@ shifts or live payment endpoints were used.
   both themes had no horizontal overflow and retained readable card colours.
   Rebuilt manuals, verified Python syntax and diff whitespace, and persisted
   the trade-policy migration with repeated local database initialization.
-- [ ] Verify the five-shift trade minimum and all exception acknowledgements
+- [x] Verify the five-shift trade minimum and all exception acknowledgements
   with real employee/manager/admin sessions before marking trade requests done.
+  User verified on 2026-11-05: below-five submission blocked; Employee 1
+  required warning acknowledgement to submit; Employee 2 and manager cancelling
+  warning consent preserved pending status, then acknowledged acceptance
+  advanced to manager/admin review respectively. Admin notification opened
+  the selected request within the admin site; cancelling preserved status,
+  acknowledged approval made it ready to apply, and accepted shifts remained
+  unchanged. Application/publishing and other trade acceptance items remain
+  separate and unverified by this walkthrough.
 - [x] Collapse inbox requests by default, showing week, actual initiator,
   status and unread indicator. Expanded requests retain role-appropriate
   accept/reject/withdraw controls, warnings and history; opening is not consent
@@ -383,8 +391,15 @@ shifts or live payment endpoints were used.
   browser checks passed, along with 18 roster and 10 email checks. Five affected
   scripts parsed; Python syntax and tracked diff whitespace checks passed.
   Rebuilt HTML/DOCX manuals and verified repeated local schema initialization.
-- [ ] Verify the redesigned modal and both rest acknowledgement flows with real
+- [x] Verify the redesigned modal and both rest acknowledgement flows with real
   employee/linked-manager sessions; accept the UI and schedule/code selection.
+  User verified on 2026-11-05: linked-manager personal mode fixed Employee 1
+  to the linked employee and scoped trade choices to their personal assignment.
+  Personal schedule selection and a valid team code worked; an incorrect code
+  was rejected and management locations remained correctly scoped. A
+  rest-warning trade required acknowledgement by the linked-manager initiator
+  and the other employee before acceptance. No application/publishing was
+  included in this check.
 - [x] Add app-only / BambooHR preview and explicit application, durable
   operation journals, single-employee remote changes, partial-failure states,
   safe retries and read-only unknown-outcome reconciliation.
@@ -417,9 +432,40 @@ shifts or live payment endpoints were used.
   attendance correction rejection with MFA enabled.
 - [ ] Verify employee -> employee -> manager -> admin workflow, unread updates,
   cancellation/rejection, applied schedule/export/email data and manual overrides.
+  User verified on 2026-11-05: full consent/approval progression (above);
+  trade update stayed read without changing pending approval or clearing other
+  attendance alerts; recipient rejection persisted for both users with a reason,
+  no warning acceptance and no schedule change. App-only application changed
+  only selected shifts, preserved at least five shifts each and prevented
+  repeat application. Export and email schedule/preview reflected the applied
+  swap. Initiator withdrawal persisted for both users with its reason,
+  prevented recipient acceptance and left the schedule unchanged.
+  Manual override verification deferred by the user; this combined TODO
+  remains unchecked until that verification is completed.
 - [ ] In a test BambooHR environment, verify read permissions, single-employee
   writes, partial failures, unknown results, duplicates and reconciliation.
   Production writes require separate authorization.
+  User confirmed dedicated test-account/employee/schedule mappings and a
+  successful read-only preview with correct dates/times and no remote changes.
+  Subsequent preview reported an integer-conversion error for a UUID schedule
+  ID. Fixed trade payload construction to preserve nonnumeric BambooHR IDs;
+  numeric IDs retain their existing representation. All 22 trade tests passed,
+  including UUID preview (no writes) and mocked application. Live publishing
+  remains unverified; restart and repeat the test-account preview first.
+  Subsequent user application journal recorded the first POST failed with
+  BambooHR HTTP 422; remaining DELETE/POST/DELETE operations stayed pending,
+  with no recorded successful remote operations. Provider response details
+  were discarded by the HTTP helper. Updated diagnostics to retain a bounded
+  error response and show failed operation errors in the trade card/API.
+  All 23 trade tests passed. The underlying provider validation cause remains
+  identified by the user's test-account retry as overlap with existing remote
+  shifts. Fixed replacement ordering: remove original shifts before creating
+  replacements, including older saved retry plans. Completed operations remain
+  skipped; unknown outcomes still require reconciliation; removal failures
+  stop creation. Preview/retry warnings explain nontransactional recovery.
+  Verified 26 trade/manual tests, including simulated overlap enforcement and
+  old-plan recovery, and rebuilt manuals. No automated remote writes occurred;
+  successful live recovery still needs user verification.
 - [ ] Configure PayPal sandbox credentials/webhook and prices privately. Verify
   real hosted monthly/annual checkout, one-cycle versus auto-renew plans,
   webhook signatures/replays, cancellation, failure retries and manual credits.

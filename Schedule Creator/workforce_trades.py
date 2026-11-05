@@ -652,11 +652,16 @@ def register(app, s):
                 del issues[first_issue:]
         return sorted(set(issues))
 
+    def order_remote_operations(ops):
+        return sorted(ops, key=lambda op: op["method"] != "DELETE")
+
     def remote_operations(c, trade, doc):
         days = trade.get("days", [trade["day"]])
         start = date.fromisoformat(doc["start"])
         remote = s.fetch_bamboohr_scheduled_shifts(c, start + timedelta(days=min(days)), start + timedelta(days=max(days)))
-        return [op for day in days for op in remote_operations_day(c, trade, doc, day, remote)]
+        return order_remote_operations(
+            [op for day in days for op in remote_operations_day(c, trade, doc, day, remote)]
+        )
 
     def remote_operations_day(c, trade, doc, day, remote):
         shift_date = date.fromisoformat(doc["start"]) + timedelta(days=day)
@@ -687,8 +692,10 @@ def register(app, s):
                     raise ValueError("A trade shift could not be mapped to BambooHR.")
                 payload = {key: payload[key] for key in
                            ("scheduleId", "status", "color", "timezone", "start", "end")}
-                payload["scheduleId"] = int(s.bamboo_identifier(payload["scheduleId"], "schedule ID"))
-                payload["employeeIds"] = [int(s.bamboo_identifier(bamboo_id, "employee ID"))]
+                schedule_id = s.bamboo_identifier(payload["scheduleId"], "schedule ID")
+                payload["scheduleId"] = int(schedule_id) if schedule_id.isdigit() else schedule_id
+                bamboo_id = s.bamboo_identifier(bamboo_id, "employee ID")
+                payload["employeeIds"] = [int(bamboo_id) if bamboo_id.isdigit() else bamboo_id]
                 ops.append({"method": "POST", "path": "scheduling/shifts",
                             "payload": payload, "employeeId": person, "state": "pending"})
             for shift in old:
@@ -740,7 +747,9 @@ def register(app, s):
         return jsonify(fingerprint=fingerprint, operations=ops, remoteMode=mode,
                        violations=issues, overrideReason=trade["overrideReason"],
                        restWarnings=warnings, restAcknowledged=trade["restAcknowledged"],
-                       warning="App-only does not modify BambooHR. Remote operations are not transactional.")
+                       warning="App-only does not modify BambooHR. Remote operations are not transactional: "
+                               "original shifts scheduled for replacement are removed before replacement creation. "
+                               "A failure after removal needs reconciliation/retry; do not reapply the app trade.")
 
     @app.post("/api/shift-trades/<trade_id>/apply")
     def apply(trade_id):
@@ -807,7 +816,7 @@ def register(app, s):
                 return fail(str(error), 409)
             if current != json.loads(row[2]):
                 return fail("The accepted schedule changed after application. Use attendance discrepancy reconciliation, not this stale publish plan.", 409)
-            ops = json.loads(row[0])
+            ops = order_remote_operations(json.loads(row[0]))
             changed = c.execute(
                 "UPDATE shift_trade_publish SET state='running',updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND trade_id=? AND state=?",
                 (user["tenantId"], trade_id, row[1]),
@@ -843,7 +852,8 @@ def register(app, s):
                     (json.dumps(ops), state, user["tenantId"], trade_id),
                 )
             if not result["success"]:
-                return jsonify(error="App trade applied; BambooHR publishing is incomplete.",
+                detail = result.get("error") or f"BambooHR operation status: {result.get('status') or 'unknown'}."
+                return jsonify(error=f"App trade applied; BambooHR publishing is incomplete. {detail}",
                                remoteState=state, operations=ops), 502
         with closing(s.database_connect()) as c, c:
             c.execute("UPDATE shift_trade_publish SET state='published' WHERE tenant_id=? AND trade_id=?",

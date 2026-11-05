@@ -83,6 +83,11 @@ async function load(){
     row.append(grid);
     if(Object.keys(trade.shiftCounts).length)td(row,"Resulting weekly shifts: "+Object.entries(trade.shiftCounts).map(([id,count])=>`${id===trade.employeeA?trade.employeeNameA:trade.employeeNameB}: ${count}`).join(" · "));
     td(row,"Reason: "+trade.reason);
+    const failedOperations=(trade.operations||[]).filter(op=>["failed","unknown"].includes(op.state));
+    for(const op of failedOperations){
+      const error=td(row,`${op.method} publishing ${op.state}: ${op.result?.error||("BambooHR HTTP "+(op.result?.status||"unknown")+"; no response details were retained. Do not reapply the trade.")}`);
+      error.className="error";
+    }
     const actions=document.createElement("div");actions.className="trade-actions";row.append(actions);
     for(const action of trade.actions){
       if(action==="apply"){
@@ -108,7 +113,7 @@ async function load(){
     }
     if(trade.unread)button(actions,"Mark as read",async()=>{await api(`${base}/${trade.id}/read`,"POST",{version:trade.version});await load();});
     if(role==="admin"&&["failed","pending"].includes(trade.remoteState))button(actions,"Retry missing/failed publishing",async()=>{
-      if(!confirm("Retry only failed remote operations?"))return;
+      if(!confirm("Retry missing/failed remote operations? Original shifts scheduled for replacement are removed before replacements are created. Completed operations are skipped. If publishing stops after removal, use reconciliation/retry to finish; do not reapply the app trade."))return;
       await api(`${base}/${trade.id}/retry`,"POST",{confirmed:true});await load();
     });
     if(role==="admin"&&["failed","unknown","running"].includes(trade.remoteState))button(actions,"Reconcile remote state",async()=>{

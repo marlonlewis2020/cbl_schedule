@@ -1,4 +1,5 @@
 import json
+import io
 import sqlite3
 import time
 import unittest
@@ -6,6 +7,7 @@ from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 import membership_billing as billing
 import scheduler
@@ -20,6 +22,15 @@ class TradeWorkflowTests(unittest.TestCase):
     sign_in_manager = test_scheduler.ManagerEmployeeAccessTests.sign_in_manager
     portal_employee_client = test_scheduler.ManagerEmployeeAccessTests.portal_employee_client
     headers = {"X-CSRF-Token": "test-csrf-token"}
+
+    def test_bamboo_validation_error_retains_provider_details(self):
+        error = HTTPError("https://example.test", 422, "Unprocessable Entity", {},
+                          io.BytesIO(b'{"errors":{"start":["Shift overlaps an existing shift"]}}'))
+        with patch.object(scheduler, "urlopen", side_effect=error):
+            result = scheduler.bamboo_shift_request("test-key", "POST", "scheduling/shifts", {})
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], 422)
+        self.assertIn("Shift overlaps an existing shift", result["error"])
 
     def seed(self):
         tenant = scheduler.DEFAULT_TENANT_ID
@@ -452,7 +463,7 @@ class TradeWorkflowTests(unittest.TestCase):
             result = self.admin.post(f"/api/shift-trades/{trade}/retry", headers=self.headers, json={"confirmed": True})
             self.assertEqual(result.status_code, 200)
             self.assertEqual(remote.call_count, 1)
-            self.assertEqual(remote.call_args.args[1], "DELETE")
+            self.assertEqual(remote.call_args.args[1], "POST")
 
     def test_multi_day_remote_plan_and_reconciliation_cover_entire_date_range(self):
         doc = self.seed()
@@ -499,6 +510,51 @@ class TradeWorkflowTests(unittest.TestCase):
             self.assertEqual(reconciled.status_code, 200, reconciled.get_json())
             self.assertEqual(reads.call_args.args[1:], (start, start + timedelta(days=2)))
 
+    def test_retry_old_overlap_failed_plan_removes_both_originals_before_creating(self):
+        doc = self.seed()
+        trade = self.create()
+        ops = [
+            {"method": "POST", "path": "scheduling/shifts", "payload": {"employeeIds": [101]},
+             "state": "failed", "result": {"success": False, "status": 422}},
+            {"method": "DELETE", "path": "scheduling/shifts/old-a", "payload": None, "state": "pending"},
+            {"method": "POST", "path": "scheduling/shifts", "payload": {"employeeIds": [102]}, "state": "pending"},
+            {"method": "DELETE", "path": "scheduling/shifts/old-b", "payload": None, "state": "pending"},
+        ]
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("INSERT INTO shift_trade_publish VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                      (trade, scheduler.DEFAULT_TENANT_ID, "unused", "{}", json.dumps(doc),
+                       json.dumps(ops), "bamboohr", "failed"))
+        remaining = {"scheduling/shifts/old-a", "scheduling/shifts/old-b"}
+        def remote_result(key, method, path, payload):
+            if method == "DELETE":
+                remaining.remove(path)
+                return {"success": True, "status": 204}
+            return {"success": not remaining, "status": 422 if remaining else 201}
+        with patch.object(scheduler, "bamboo_shift_request", side_effect=remote_result) as writes:
+            response = self.admin.post(f"/api/shift-trades/{trade}/retry", headers=self.headers,
+                                       json={"confirmed": True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([call.args[1] for call in writes.call_args_list],
+                         ["DELETE", "DELETE", "POST", "POST"])
+
+    def test_failed_original_removal_does_not_attempt_replacement_creation(self):
+        doc = self.seed()
+        trade = self.create()
+        ops = [{"method": "POST", "path": "scheduling/shifts", "payload": {}, "state": "pending"},
+               {"method": "DELETE", "path": "scheduling/shifts/old", "payload": None, "state": "pending"}]
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("INSERT INTO shift_trade_publish VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                      (trade, scheduler.DEFAULT_TENANT_ID, "unused", "{}", json.dumps(doc),
+                       json.dumps(ops), "bamboohr", "pending"))
+        with patch.object(scheduler, "bamboo_shift_request",
+                          return_value={"success": False, "status": 403, "error": "Deletion denied"}) as writes:
+            response = self.admin.post(f"/api/shift-trades/{trade}/retry", headers=self.headers,
+                                       json={"confirmed": True})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("Deletion denied", response.get_json()["error"])
+        writes.assert_called_once()
+        self.assertEqual(writes.call_args.args[1], "DELETE")
+
     def test_remote_preview_uses_single_employee_payloads_and_rejects_shared_shifts(self):
         doc = self.seed()
         trade = self.create()
@@ -519,6 +575,8 @@ class TradeWorkflowTests(unittest.TestCase):
             response = self.apply(trade, "bamboohr")
             self.assertEqual(response.status_code, 200, response.get_json())
             self.assertEqual(writes.call_count, 4)
+            self.assertEqual([call.args[1] for call in writes.call_args_list],
+                             ["DELETE", "DELETE", "POST", "POST"])
             creates = [call.args[3] for call in writes.call_args_list if call.args[1] == "POST"]
             self.assertEqual([payload["employeeIds"] for payload in creates], [[101], [102]])
             self.assertEqual(creates[0]["scheduleId"], 501)
@@ -531,6 +589,33 @@ class TradeWorkflowTests(unittest.TestCase):
                                      json={"remoteMode": "bamboohr"})
             self.assertEqual(result.status_code, 409)
             writes.assert_not_called()
+
+    def test_remote_preview_and_application_preserve_uuid_schedule_id(self):
+        self.seed()
+        trade = self.create()
+        schedule_id = "01a0fea5-d380-7271-90cc-98e6a4a24321"
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE schedule_locations SET bamboo_schedule_id='unused-test-mapping' WHERE bamboo_schedule_id=?",
+                      (schedule_id,))
+            c.execute("UPDATE employees SET source_type='bamboohr',bamboohr_id='101' WHERE employee_id='emp-a'")
+            c.execute("UPDATE employees SET source_type='bamboohr',bamboohr_id='102' WHERE employee_id='emp-b'")
+            c.execute("UPDATE schedule_locations SET bamboo_schedule_id=?,role_group='Cashier' WHERE id='loc1'",
+                      (schedule_id,))
+        with patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[]), \
+             patch.object(scheduler, "bamboo_shift_request", return_value={"success": True, "status": 201}) as writes:
+            preview = self.admin.post(f"/api/shift-trades/{trade}/preview", headers=self.headers,
+                                      json={"remoteMode": "bamboohr"})
+            self.assertEqual(preview.status_code, 200, preview.get_json())
+            writes.assert_not_called()
+            operations = preview.get_json()["operations"]
+            self.assertEqual([op["payload"]["scheduleId"] for op in operations], [schedule_id, schedule_id])
+            self.assertEqual([op["payload"]["employeeIds"] for op in operations], [[101], [102]])
+            applied = self.admin.post(f"/api/shift-trades/{trade}/apply", headers=self.headers,
+                                      json={"confirmed": True, "reason": "Test UUID mapping",
+                                            "fingerprint": preview.get_json()["fingerprint"]})
+            self.assertEqual(applied.status_code, 200, applied.get_json())
+            self.assertEqual(writes.call_count, 2)
+            self.assertTrue(all(call.args[3]["scheduleId"] == schedule_id for call in writes.call_args_list))
 
     def test_manual_day_off_and_constraint_override_are_audited(self):
         self.seed()

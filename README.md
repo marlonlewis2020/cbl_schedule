@@ -263,6 +263,14 @@ Copilot automation remain separate implementation phases.
 
 ## Manager and employee access
 
+Trade publishing removes original single-employee shifts before creating
+replacements, including on retries of older saved plans. Remote operations are
+not transactional; missing replacements after a failure require reconciliation
+and retry, not reapplication of the accepted app trade. Completed operations
+are skipped, unknown outcomes require read-only reconciliation, and provider
+validation errors are shown on failed trade operations. App acknowledgements
+cannot override BambooHR's own overlap validation.
+
 The administrator notification bell includes **Shift trade approvals** for
 manager-accepted requests awaiting administrator approval. Clicking an alert
 opens an embedded administrator inbox with the selected trade expanded, in the
