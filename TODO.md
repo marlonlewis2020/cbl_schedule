@@ -243,7 +243,7 @@ remain for production use:
   pagination, both resolution directions, and mocked partial BambooHR writes.
   No production schedule writes were made during implementation.
 
-## Manager and employee access (`manager-employee-access`) — implemented, status not yet updated in the database
+## Manager and employee access (`manager-employee-access`) — complete
 
 - [x] Admins create manager and employee accounts in Settings → Manager &
   employee access. A one-time temporary password (72-hour expiry) is shown to
@@ -263,11 +263,42 @@ remain for production use:
   bell covering the whole business. No email or push delivery.
 - [x] Focused tests: `ManagerEmployeeAccessTests` (SQLite). User sessions are
   rejected from admin APIs.
-- [ ] Verify in disposable PostgreSQL (new tables `tenant_users`,
-  `attendance_notifications`, `attendance_notification_reads` and RLS) once the
-  database host is reachable, then mark the change request `done`.
-- [ ] The SQLite→PostgreSQL import does not copy the three new tables (they
+- [x] Apply missing PostgreSQL tables `tenant_users`, `attendance_notifications`,
+  and `attendance_notification_reads`, archive support and related attendance
+  columns. Schema and notification RLS checks passed on 2026-11-04; synthetic
+  verification writes were rolled back.
+- [x] User verified manager sign-in, forced password change and MFA on
+  2026-11-04.
+- [x] User verified managers are restricted to assigned teams on 2026-11-04.
+- [x] User verified notification reading and archiving are per user on
+  2026-11-04.
+- [x] User confirmed account disabling and session revocation checks passed
+  on 2026-11-04.
+- [x] User confirmed attendance actions and audit history checks passed
+  on 2026-11-04.
+- [x] Marked the request `done` in SQLite and PostgreSQL after the user
+  confirmed all remaining checks passed on 2026-11-04. Also aligned PostgreSQL's
+  stale `tier-entitlements` status to `done`, matching its completed checklist
+  and SQLite status, before completing the dependent request.
+- [x] The SQLite→PostgreSQL import does not copy the three new tables (they
   have no legacy data).
+
+## Planned change request: attendance snapshots (`snapshot-email-reports`)
+
+Recorded on 2026-11-04; not implemented. This extends the existing request and
+retains its `workforce-dashboards` prerequisite.
+
+- Generate daily snapshots at **7 AM, 3 PM and 11 PM (Jamaica time)** and on
+  demand from Attendance; save timestamped history for authorised downloads.
+- Produce styled XLSX files and HTML email summaries similar to the supplied
+  Oct 27 snapshot, with location/role/shift summaries and employee exceptions.
+  Highlight late names in amber and absent names in red, with status labels.
+- Support downloads, optional email distribution, or both. Automatic sending
+  requires an authenticated sending integration; the current mail-client drafts
+  do not send unattended or attach files automatically.
+- Run independently of browser visibility; preserve attendance cutoff, leave,
+  overnight and worked-time rules, show data freshness/failures, prevent duplicate
+  generation/delivery, and enforce recipient scope and report-tier entitlements.
 
 ## Test evidence and handoff
 
