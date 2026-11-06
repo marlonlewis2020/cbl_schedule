@@ -3813,7 +3813,8 @@ class DeveloperChangeRequestTests(unittest.TestCase):
                 "SELECT depends_on FROM developer_change_request_dependencies WHERE request_id=?",
                 (definition[0],),
             ).fetchall()
-        self.assertEqual(row, (definition[1], definition[2], "pending"))
+        expected = definition[2] + "\n\nImplementation update: " + scheduler.WORKFORCE_IMPLEMENTATION_NOTES[definition[0]]
+        self.assertEqual(row, (definition[1], expected, "pending"))
         self.assertEqual({item[0] for item in dependencies}, set(definition[3]))
         for requirement in ("site-navigation-alerts", "MFA", "server-side", "deep links",
                             "platform owners", "15-minute"):

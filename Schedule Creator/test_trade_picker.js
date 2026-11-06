@@ -6,7 +6,7 @@ async function runTradePickerTests() {
     a: [{hours: 8, requiredHours: 11, message: "Reduced rest: 8 hours; required 11 hours."}],
     b: [{hours: 9, requiredHours: 11, message: "Reduced rest: 9 hours; required 11 hours."}]
   };
-  const choices = {employee1: "a", schedules: [
+  const choices = {employee1: "a", lockedLocation: {id:"loc-1",name:"Kingston",role:"Cashier"}, schedules: [
     {runId: "week-1", locationId: "loc-1", locationName: "Kingston", team: "Cashier",
       start: "2026-11-09", end: "2026-11-15", employees: [{id: "a", name: "Ann"}, {id: "b", name: "Bob"}]}
   ]};
@@ -23,6 +23,7 @@ async function runTradePickerTests() {
   const $ = selector => dialog.querySelector(selector);
   assert(dialog.open, "Native modal must be open");
   assert($("[data-team]").options.length === 2, "Location/team choices must come from server");
+  assert($("[data-team]").disabled && $("[data-team]").value === '["loc-1","Cashier"]', "Personal location/team must be preselected and immutable");
   $("[data-team]").selectedIndex = 1; $("[data-team]").dispatchEvent(new Event("change"));
   $("[data-week]").value = "0"; $("[data-week]").dispatchEvent(new Event("change"));
   assert($("[data-first]").disabled && $("[data-first]").value === "a", "Employee 1 must be immutable");
@@ -40,10 +41,13 @@ async function runTradePickerTests() {
   $("[data-reason]").value = "Balance the period"; $("form").requestSubmit(); await settle();
   assert(submitted.method === "POST" && submitted.body.employeeA === "a" && submitted.body.employeeB === "b", "Submit validated participant IDs");
   assert(JSON.stringify(submitted.body.days) === "[0,1]" && submitted.body.acknowledgeWarnings && submitted.body.warnings === warnings, "Submit combined days and exact acknowledged warnings");
+  assert(submitted.body.locationId === "loc-1", "Submit the verified location ID for stale-assignment validation");
   assert(completed && !document.querySelector("#workforceTradeDialog"), "Successful submission closes modal");
   choices.employee1 = null;
+  choices.lockedLocation = null;
   await TradePicker.open({base: "/api/shift-trades", api});
   dialog = document.querySelector("#workforceTradeDialog");
+  assert(!$("[data-team]").disabled, "Management location choices remain editable");
   $("[data-team]").selectedIndex = 1; $("[data-team]").dispatchEvent(new Event("change"));
   $("[data-week]").value = "0"; $("[data-week]").dispatchEvent(new Event("change"));
   assert(!$("[data-first]").disabled && $("[data-first]").options.length === 3, "Managers/admins select employee 1");

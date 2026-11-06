@@ -668,6 +668,10 @@ class TradeWorkflowTests(unittest.TestCase):
             "code": scheduler.totp_value(secret, int(time.time() // 30)),
         })
         manager_headers = {"X-CSRF-Token": response.get_json()["csrfToken"]}
+        self.assertIsNone(manager.get("/api/access/trades/choices").get_json()["lockedLocation"])
+        personal_choices = manager.get("/api/access/trades/choices?view=employee").get_json()
+        self.assertEqual(personal_choices["employee1"], "emp-b")
+        self.assertEqual(personal_choices["lockedLocation"]["id"], "loc1")
         employee = self.portal_employee_client()
         trade = self.create(employee, self.csrf.copy())
         body = {"action": "confirm", "version": 1, "reason": "My own trade"}

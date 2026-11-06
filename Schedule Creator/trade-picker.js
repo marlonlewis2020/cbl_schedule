@@ -50,7 +50,7 @@ window.TradePicker = {
     document.body.append(dialog);
     dialog.showModal();
     const $ = selector => dialog.querySelector(selector);
-    let schedules = [], fixedEmployee = null, selectedSchedule = null, options = null, revision = 0;
+    let schedules = [], fixedEmployee = null, fixedLocation = null, selectedSchedule = null, options = null, revision = 0;
     const close = () => { revision++; dialog.close(); dialog.remove(); };
     $("[data-close]").onclick = close;
     dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
@@ -98,7 +98,7 @@ window.TradePicker = {
       const ticket = revision;
       $("[data-message]").textContent = "Checking combined swaps…";
       try {
-        const result = await api(`${base}/options`, "POST", {runId: selectedSchedule.runId, employeeA, employeeB});
+        const result = await api(`${base}/options`, "POST", {runId: selectedSchedule.runId, employeeA, employeeB, locationId: selectedSchedule.locationId});
         if (ticket !== revision || !dialog.isConnected) return;
         options = result;
         $("[data-options]").disabled = false;
@@ -157,7 +157,7 @@ window.TradePicker = {
       $("[data-submit]").disabled = true;
       try {
         const result = await api(base, "POST", {runId: selectedSchedule.runId, employeeA: $("[data-first]").value,
-          employeeB: $("[data-second]").value, days: option.days, reason: $("[data-reason]").value,
+          employeeB: $("[data-second]").value, locationId: selectedSchedule.locationId, days: option.days, reason: $("[data-reason]").value,
           warnings: option.warnings || option.restWarnings, acknowledgeWarnings: $("[data-ack]").checked});
         close(); await onCreated(result);
       } catch (error) {
@@ -167,10 +167,19 @@ window.TradePicker = {
     try {
       const result = await api(`${base}/choices`);
       if (!dialog.isConnected) return;
-      schedules = result.schedules; fixedEmployee = result.employee1;
+      schedules = result.schedules; fixedEmployee = result.employee1; fixedLocation = result.lockedLocation;
       if (base.startsWith("/api/access") && fixedEmployee) $("footer a").href = "/trades?view=employee";
       const teams = new Map(schedules.map(schedule => [JSON.stringify([schedule.locationId, schedule.team]), `${schedule.locationName} × ${schedule.team}`]));
       fill($("[data-team]"), [...teams].map(([value, label]) => ({value, label})), "Choose location × team");
+      if (fixedLocation) {
+        const value = JSON.stringify([fixedLocation.id, fixedLocation.role]);
+        if (teams.has(value)) {
+          $("[data-team]").value = value;
+          $("[data-team]").onchange();
+        }
+        $("[data-team]").disabled = true;
+        $(".trade-intro").textContent = `Your location is fixed to ${fixedLocation.name} × ${fixedLocation.role}. Choose the period and receiving employee.`;
+      }
       if (!schedules.length) $("[data-message]").textContent = "No visible accepted schedules with eligible team assignments.";
     } catch (error) { if (dialog.isConnected) $("[data-message]").textContent = error.message; }
   }

@@ -49,6 +49,8 @@ from directory_seed import (
 import workforce_trades
 import membership_billing
 import session_idle
+import attendance_reports
+import application_shell
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -97,6 +99,9 @@ STATIC_ASSETS = {
     "workforce-ui.css",
     "trade-picker.js",
     "session-idle.js",
+    "application-shell.js",
+    "application-shell.css",
+    "attendance-reports.js",
 }
 DEVELOPER_REQUESTS = (
     (
@@ -239,12 +244,53 @@ DEVELOPER_REQUESTS = (
         ("shift-trades", "manager-employee-dual-access"),
     ),
     (
+        "interactive-attendance-snapshot",
+        "Interactive branded HTML attendance snapshot dashboard",
+        "Generate a self-contained interactive HTML dashboard alongside each attendance snapshot XLSX. Use the supplied intraday snapshot for reporting structure and operations dashboard for visual inspiration: company logo saved in business branding, executive KPI cards first, location/role/shift charts and summaries next, then employee exceptions and evidence-based risks. Include confirmed attendance percentage, expected shifts so far, matching clock-ins, late arrivals, missing punches, absences, approved leave, early departures, overtime and missing clock-outs when verified by saved evidence. Provide coordinated location/role/shift/status/search filters, chart drill-down, sortable exception details, accessible labels/tables, responsive layout and print/PDF support. Embed assets/data for offline use without external services. Capture the business logo/name with the report; later branding changes must not rewrite history. Preserve tenant/role/tier download authorization, immutable saved cutoffs and source freshness, overnight/leave/worked-time/absence rules, and XLSX compatibility. Do not copy the sample's two-hour absence rule, invent trends/demand scores, or enable automatic email. Existing snapshots may render only their saved evidence; do not attach current branding retrospectively. Implemented; awaiting user acceptance.",
+        ("snapshot-email-reports",),
+    ),
+    (
+        "workspace-readiness",
+        "Workspace readiness loading and recovery experience with environment toggle",
+        "Hide the scheduling workspace body behind a clean, branded, theme-aware loading screen with a centered spinner and accessible loading message until essential initialization, authentication, permissions and core scheduling data are verified ready. Prevent interaction with partially loaded controls, respect reduced-motion preferences, and provide bounded waiting with meaningful status and recovery options instead of an indefinite spinner. On application-level loading failures, show an engaging branded error/recovery page with a plain-language explanation, explicitly available and unavailable functions, Retry loading, Continue with limited functionality only when safe, and Contact support/helpdesk with a non-sensitive reference or timestamp. Essential authentication, permission or core-data failures must block workspace access; optional integration failures may allow explicitly described degraded operation without presenting missing data as empty or stale evidence as current. Preserve saved/local workspace data and avoid duplicate writes on retry. Do not require every optional background integration to respond before essential workspace readiness. Provide a documented server-side environment-file flag SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED, default enabled, allowing operators to disable only this loading/recovery presentation and retain the existing startup experience; disabling must never bypass authentication, authorization, validation or other safety guards. Validate flag values using repository configuration conventions and document restart requirements. Complete network/server outages may still use browser errors unless separately supported by an offline fallback. Verify successful and slow loading, essential and optional failures, safe continuation, retry, accessibility, desktop/mobile themes, disabled behavior and preservation of saved records. Approved for recording only; implementation pending.",
+        (),
+    ),
+    (
+        "primary-admin-change-request-visibility",
+        "Primary administrator read-only change requests and developer-only editing",
+        "Restrict business-user visibility of the developer change requests link and read-only register to the business's designated primary administrator, not all administrators. Preserve separately authenticated developer access and make the developer the only actor allowed to create, edit, delete or change request statuses and dependencies. Primary administrators can view business-appropriate completed, in-progress and planned changes to understand what has happened and what is expected next, without editing controls or mutation permissions. Other administrators, managers, employees and platform-owner sessions without explicit developer authentication must not gain register access. Enforce page, read API and mutation authorization server-side, including direct URLs and tampered requests, rather than relying on hidden navigation or disabled buttons. Recheck current primary-administrator designation and tenant scope; preserve developer authentication, CSRF, audit and existing prerequisite/status rules. Exclude secrets, sensitive internal implementation notes and other businesses' information from the primary-administrator view while retaining the developer's authorized full register. Verify developer read/write access, primary-administrator read-only access, denial for other roles and anonymous users, direct mutation rejection, reassignment, tenant isolation and navigation visibility. Approved for recording only; implementation pending.",
+        ("developer-change-log", "primary-admin-data-settings"),
+    ),
+    (
+        "historical-attendance-trend-reports",
+        "Historical weekly and monthly attendance reports with employee and DC trends",
+        "Allow administrators and managers to generate attendance reports for a selected historical week or previous month, downloadable as matching Excel and self-contained interactive HTML. Administrators may select all or specific distribution centres (DCs)/locations; managers may report only on authorized teams, with tenant/team scope enforced server-side during generation, history access and downloads. Include branded executive/DC summaries of expected shifts, confirmed attendance, attendance percentage, approved leave, verified late arrivals and absences; an employee register with the existing documented attendance-score calculation, expected/confirmed shifts, late and absence counts with dates and shift times; and dated attendance evidence and exception details. Add week-over-week and month-over-month comparisons per employee and DC, showing counts, eligible-shift denominators, rates and percentage-point changes across comparable completed periods. Analyze employee late/absence patterns by shift-start time, weekday, first scheduled shift after a verified day off, and first scheduled shift after dated approved time off; separate leave types where reliable evidence exists. Show incidents and eligible shifts for every pattern, not raw counts alone. Provide coordinated DC/team/employee/period filters, search, sortable tables and evidence drill-down, with KPI cards, comparison charts, trend lines and heatmaps where evidence supports them. Excel must include corresponding summary, employee, comparison, pattern-analysis and detailed-evidence worksheets using identical calculations. Reuse reporting infrastructure and saved branding; show Jamaica-time reporting boundaries, source freshness and incomplete evidence. Preserve attendance-score rules, worked-time validation, approved-leave exclusions, corrections and overnight attribution to shift start date; distinguish verified late arrivals from missing-punch late statuses. Use dated schedule, attendance and assignment evidence rather than reconstructing history from current settings or employee teams. Define historical manager access without exposing other teams after transfers. Missing schedule records are not proof of a day off. Comparisons require evidence for both periods; unavailable history must remain unavailable, not zero. Agree the week boundary, comparison/history window, minimum eligible-shift sample and historical manager-access policy before implementation. Clearly distinguish observed patterns, insufficient evidence and no recorded incidents; label partial periods and avoid misleading full-period comparisons. Describe association, not cause or predictions; post-leave patterns must not automatically trigger disciplinary action. Verify authorization and transfers, period boundaries, denominators/scores, late/absence dates, overnight/leave/correction rules, shift/day/post-day-off/post-time-off analysis, insufficient history/sample cases, cross-format parity and offline HTML interaction. Automatic email is not included. Approved for recording only; implementation pending.",
+        ("snapshot-email-reports", "interactive-attendance-snapshot", "manager-employee-access"),
+    ),
+    (
+        "workload-fte-headcount-planning",
+        "Manager-defined workload FTE modelling and annual headcount planning with approved scheduling integration",
+        "Create a workforce capacity and annual headcount planning module separate from day-to-day scheduling. Managers are primarily responsible for defining work within their authorized locations and roles: required tasks, standard completion times, workload units such as cases/orders/pallets/transactions, explicit unit definitions and conversions, workload-to-task mappings, and fixed work independent of volume. Enforce manager tenant/team/location permissions server-side. Workforce administrators oversee staffing-model assumptions, review work definitions and approve plans for scheduling integration. Accept dated manual or imported workload forecasts for a full year; translate workload and fixed work into required labour hours, then required FTE using productive hours available per FTE. Staffing models must explicitly account for working hours, breaks, leave, training, absence allowances, part-time capacity and shift coverage, identifying allowances already included in task standards to avoid double-counting. Show FTE separately from employee headcount and explain rounding/coverage assumptions. Present weekly and monthly workload, labour hours, required FTE/headcount, available/planned capacity, staffing gaps and week-over-week/month-over-month changes by role and location, with alternative scenarios and visible model assumptions. Use approved, versioned, effective-dated plans to automatically update only agreed scheduling demand/capacity settings; calculate proposed changes rather than silently overwriting settings whenever a forecast changes. Define daily/shift distribution before translating weekly requirements into scheduling inputs. Preserve employee availability, contractual limits, safety rules, configuration locks and accepted schedules; never rewrite accepted schedules. Show proposed settings changes, conflicts and effective dates, maintain an audit trail and support rollback. Results are model-based requirements, not guaranteed staffing outcomes. Agree staffing models, forecast inputs, approval authority, manager definition/review workflow and the exact scheduling settings permitted for automatic updates before implementation. Verify task/unit conversions, fixed work, allowance accounting, productive-hour/FTE/headcount calculations, year and period boundaries, weekly/monthly comparisons, scenario isolation, manager/admin/tenant access, approval/effective dates, locked-setting conflicts, rollback and preservation of saved schedules and employee records. Approved for recording only; implementation pending.",
+        ("manager-employee-access",),
+    ),
+    (
+        "faq-guides-knowledge-base",
+        "FAQ, user guide, tutorials, glossary and administrator-approved knowledge base",
+        "Add a dedicated help/FAQ page containing frequently asked questions, a user guide, full step-by-step tutorials, glossaries and a searchable knowledge base of concise knowledge bites. Reuse and keep directly related existing user-manual content consistent with implemented workflows; organize content by topic and user role, with accessible navigation, search and responsive presentation. Managers may submit new knowledge bites or proposed changes to existing bites within their authorized business scope. An authorized business administrator reviews submissions and approves or rejects them with feedback; only approved versions become published and visible to the intended audience. Preserve the previous published version while edits await review. Track draft/submitted/approved/rejected states, authorship, reviewers, revision history and review timestamps; support resubmission and guard against conflicting/stale edits. Enforce tenant, role, audience and review permissions server-side for reads, submissions and publication, not only through hidden controls. Managers must not self-publish or approve their own submissions using manager permissions. Keep platform-wide application documentation separate from tenant-specific operational knowledge; business approvals must not overwrite shared product guidance or expose another business's content. Sanitize rendered content, validate inputs and preserve CSRF/audit protections. Define permitted content formats, audience visibility, ownership of shared documentation and notification workflow before implementation. Verify FAQ/guide/tutorial/glossary navigation and search, manager submission, administrator approval/rejection and feedback, pending-edit publication isolation, revision conflicts/resubmission, tenant/role boundaries and safe content rendering. Approved for recording only; implementation pending.",
+        ("manager-employee-access",),
+    ),
+    (
         "session-idle-expiry",
         "Fifteen-minute idle session expiry",
         "Expire authenticated business administrator, manager, employee, platform-owner and developer sessions after 15 minutes without genuine user activity. Enforce the deadline server-side across browser tabs and direct API requests; automatic attendance/notification polling, background refresh, worker jobs and passive open tabs must not extend the idle deadline. Retain the existing eight-hour session lifetime as an absolute maximum that user activity cannot extend. Provide a warning before expiry, preserve unsaved-work warnings where applicable, stop authenticated polling on expiry, clear protected displays, and require normal sign-in/MFA again. Define a bounded, validated user-activity reporting mechanism rather than treating every HTTP request as activity. Test the exact 900-second boundary, activity renewal before expiry, expiry despite continuous polling, cross-tab behavior, absolute maximum, all account types and rejection of stale sessions. Planned work only.",
         ("tenant-identity", "manager-employee-access", "developer-change-log", "business-hub"),
     ),
 )
+WORKFORCE_IMPLEMENTATION_NOTES = {
+    "unified-application-shell": "Implemented: shared /signin account/business selection and role-aware Access/Trades/Business/owner navigation, branding/themes, scoped alerts and preserved legacy/deep links. Administrator browser workspace remains at /. Existing MFA, role, tenant, team and idle-session guards are retained. Awaiting acceptance; prerequisite statuses are unchanged.",
+    "employee-trade-location-lock": "Implemented: personal trade location/team and Employee 1 are preselected and locked, including linked-manager personal mode. Choices/options/submission recheck current verified assignments; management choices retain authorized scope. Awaiting acceptance; prerequisite statuses are unchanged.",
+    "snapshot-email-reports": "Implemented download-only scope: immutable Silver+ attendance XLSX/history, on-demand capture, opt-in 07:00/15:00/23:00 Jamaica worker captures, exact cutoff/verified overnight context, source freshness and explicit stale/failed/missed states with deduplication. Run report_worker.py independently with the app database/environment. Automatic email/recipient/delivery work is deferred by agreement; no email is sent. Staffing-vs-demand interval analytics are separate Gold/Platinum work. Awaiting acceptance and disposable PostgreSQL policy verification; prerequisite statuses are unchanged.",
+}
 MEMBERSHIP_TIERS = {
     "bronze": {
         "name": "Bronze",
@@ -649,6 +695,7 @@ def initialize_database() -> None:
             if column not in trade_columns:
                 connection.execute(f"ALTER TABLE shift_trades ADD COLUMN {column} {definition}")
         connection.executescript(membership_billing.SCHEMA)
+        connection.executescript(attendance_reports.SCHEMA)
         if "plan_id" not in {row[1] for row in connection.execute("PRAGMA table_info(billing_accounts)")}:
             connection.execute("ALTER TABLE billing_accounts ADD COLUMN plan_id TEXT NOT NULL DEFAULT ''")
         tenant_default = (
@@ -941,7 +988,7 @@ def initialize_database() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS developer_users (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
+                id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 auth_version INTEGER NOT NULL DEFAULT 1,
@@ -1120,6 +1167,7 @@ def initialize_database() -> None:
             "INSERT OR IGNORE INTO tenants (tenant_id, business_name) VALUES (?, ?)",
             (DEFAULT_TENANT_ID, DEFAULT_APP_CONFIG["businessName"]),
         )
+        migrate_developer_accounts(connection)
         for request_id, title, description, _ in DEVELOPER_REQUESTS:
             status = "done" if request_id == "developer-change-log" else "pending"
             connection.execute(
@@ -1130,6 +1178,16 @@ def initialize_database() -> None:
                 """,
                 (request_id, title, description, status),
             )
+        for request_id, note in WORKFORCE_IMPLEMENTATION_NOTES.items():
+            if connection.execute(
+                "INSERT OR IGNORE INTO app_migrations(migration_id) VALUES (?)",
+                ("workforce-download-shell-v1:" + request_id,),
+            ).rowcount:
+                connection.execute(
+                    "UPDATE developer_change_requests SET description=description || ?,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE request_id=?",
+                    ("\n\nImplementation update: " + note, request_id),
+                )
         if connection.execute(
             "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
             ("attendance-automation-tier-update",),
@@ -1405,6 +1463,8 @@ def initialize_database() -> None:
                 "shift_trade_publish",
                 "shift_trade_reads",
                 "billing_accounts",
+                "attendance_reports",
+                "attendance_report_settings",
                 "billing_events",
             ):
                 connection.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
@@ -1729,6 +1789,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             name: source_rows(name) for name in (
                 "tenant_users", "shift_trades", "shift_trade_events", "shift_trade_reads",
                 "shift_trade_publish", "billing_accounts", "billing_events",
+                "attendance_reports", "attendance_report_settings",
                 "billing_subscription_index", "billing_webhook_receipts",
                 "attendance_notifications", "attendance_notification_reads",
             )
@@ -1762,7 +1823,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             (DEFAULT_TENANT_ID,),
         ).fetchone()
         developer_exists = connection.execute(
-            "SELECT 1 FROM developer_users WHERE id = 1"
+            "SELECT 1 FROM developer_users LIMIT 1"
         ).fetchone()
         if admin_exists or schedules_exist or (developer_exists and developer_users):
             raise RuntimeError(
@@ -2076,12 +2137,13 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             connection.executemany(
                 """
                 INSERT INTO developer_users
-                    (id, username, password_hash, auth_version, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (id, username, password_hash, auth_version, created_at, updated_at, username_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     username = excluded.username,
                     password_hash = excluded.password_hash,
                     auth_version = excluded.auth_version,
+                    username_key = excluded.username_key,
                     updated_at = excluded.updated_at
                 """,
                 [
@@ -2092,6 +2154,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                         source_value(row, "auth_version", 1),
                         source_value(row, "created_at", datetime.now().isoformat()),
                         source_value(row, "updated_at", datetime.now().isoformat()),
+                        row["username"].casefold(),
                     )
                     for row in developer_users
                 ],
@@ -3555,6 +3618,8 @@ def hub_delete_business(tenant_id: str):
             "shift_trade_events",
             "shift_trade_publish",
             "shift_trade_reads",
+            "attendance_reports",
+            "attendance_report_settings",
             "billing_events",
             "billing_accounts",
             "billing_subscription_index",
@@ -5311,7 +5376,7 @@ def employee_team_attendance():
 @app.get("/")
 def index():
     if not tenant_authenticated():
-        return send_from_directory(APP_DIRECTORY, "tenant-login.html")
+        return send_from_directory(APP_DIRECTORY, "tenant-login.html" if request.args.get("legacyLogin") == "1" else "unified-login.html")
     if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return send_from_directory(APP_DIRECTORY, "business-status.html")
     return send_from_directory(APP_DIRECTORY, "CBL-Scheduler2.html")
@@ -5342,19 +5407,49 @@ def developer_csrf_valid() -> bool:
     return bool(supplied and expected and secrets.compare_digest(supplied, expected))
 
 
+def migrate_developer_accounts(connection: DatabaseConnection):
+    if DATABASE_URL:
+        connection.execute("ALTER TABLE developer_users DROP CONSTRAINT IF EXISTS developer_users_id_check")
+        connection.execute("ALTER TABLE developer_users ADD COLUMN IF NOT EXISTS username_key TEXT")
+    else:
+        schema = connection.execute("SELECT sql FROM sqlite_master WHERE name='developer_users'").fetchone()[0]
+        if re.search(r"CHECK\s*\(\s*id\s*=\s*1\s*\)", schema, re.IGNORECASE):
+            connection.execute("ALTER TABLE developer_users RENAME TO developer_users_single")
+            connection.execute(
+                "CREATE TABLE developer_users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,"
+                "password_hash TEXT NOT NULL, auth_version INTEGER NOT NULL DEFAULT 1,"
+                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+            connection.execute("INSERT INTO developer_users SELECT * FROM developer_users_single")
+            connection.execute("DROP TABLE developer_users_single")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(developer_users)")}
+        if "username_key" not in columns:
+            connection.execute("ALTER TABLE developer_users ADD COLUMN username_key TEXT")
+    for account_id, username in connection.execute("SELECT id,username FROM developer_users").fetchall():
+        connection.execute("UPDATE developer_users SET username_key=? WHERE id=?", (username.casefold(), account_id))
+    connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS developer_username_key ON developer_users(username_key)")
+
+
+def developer_account(connection: DatabaseConnection, username: str):
+    # Legacy sessions and imported accounts retain their original display name.
+    return next(
+        (row for row in connection.execute("SELECT username,password_hash,auth_version,id FROM developer_users")
+         if row[0].casefold() == username.casefold()),
+        None,
+    )
+
+
 def developer_authenticated() -> bool:
     username = session.get("developer_username")
     auth_version = session.get("developer_auth_version")
     if not isinstance(username, str) or not isinstance(auth_version, int):
         return False
     with closing(database_connect()) as connection:
-        account = connection.execute(
-            "SELECT username, auth_version FROM developer_users WHERE id = 1"
-        ).fetchone()
+        account = developer_account(connection, username)
     if (
         not account
         or account[0] != username
-        or account[1] != auth_version
+        or account[2] != auth_version
     ):
         session.clear()
         return False
@@ -5399,7 +5494,7 @@ def developer_auth_state():
         session["developer_csrf"] = csrf_token
     with closing(database_connect()) as connection:
         configured = connection.execute(
-            "SELECT 1 FROM developer_users WHERE id = 1"
+            "SELECT 1 FROM developer_users LIMIT 1"
         ).fetchone() is not None
     authenticated = developer_authenticated()
     return jsonify(
@@ -5428,13 +5523,15 @@ def setup_developer_account():
         ), 400
     username = payload["username"].strip()
     with closing(database_connect()) as connection, connection:
+        if connection.execute("SELECT 1 FROM developer_users LIMIT 1").fetchone():
+            return jsonify(error="Developer access has already been initialized."), 409
         try:
             connection.execute(
                 """
-                INSERT INTO developer_users (id, username, password_hash)
-                VALUES (1, ?, ?)
+                INSERT INTO developer_users (id, username, password_hash, username_key)
+                VALUES (1, ?, ?, ?)
                 """,
-                (username, generate_password_hash(payload["password"])),
+                (username, generate_password_hash(payload["password"]), username.casefold()),
             )
         except database_integrity_errors():
             return jsonify(error="Developer access has already been initialized."), 409
@@ -5468,9 +5565,7 @@ def developer_login():
             failures, window_started_at = 0, now
         else:
             failures, window_started_at = attempt[0], attempt[1]
-        account = connection.execute(
-            "SELECT username, password_hash, auth_version FROM developer_users WHERE id = 1"
-        ).fetchone()
+        account = developer_account(connection, payload["username"].strip()) if isinstance(payload.get("username"), str) else None
         valid = bool(
             account
             and isinstance(payload.get("username"), str)
@@ -5533,31 +5628,70 @@ def update_developer_credentials():
         ), 400
     username = payload["username"].strip()
     with closing(database_connect()) as connection, connection:
-        account = connection.execute(
-            "SELECT password_hash FROM developer_users WHERE id = 1"
-        ).fetchone()
-        if not account or not check_password_hash(account[0], payload["currentPassword"]):
+        account = developer_account(connection, session["developer_username"])
+        if not account or not check_password_hash(account[1], payload["currentPassword"]):
             return jsonify(error="The current password is incorrect."), 403
         try:
             connection.execute(
                 """
                 UPDATE developer_users
-                SET username = ?, password_hash = ?, auth_version = auth_version + 1,
+                SET username = ?, password_hash = ?, username_key = ?, auth_version = auth_version + 1,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = 1
+                WHERE id = ?
                 """,
-                (username, generate_password_hash(payload["newPassword"])),
+                (username, generate_password_hash(payload["newPassword"]), username.casefold(), account[3]),
             )
         except database_integrity_errors():
             return jsonify(error="That developer username is already in use."), 409
         auth_version = connection.execute(
-            "SELECT auth_version FROM developer_users WHERE id = 1"
+            "SELECT auth_version FROM developer_users WHERE id = ?", (account[3],)
         ).fetchone()[0]
     session.clear()
     session["developer_username"] = username
     session["developer_auth_version"] = auth_version
     session["developer_csrf"] = secrets.token_urlsafe(32)
     return jsonify(username=username, csrfToken=session["developer_csrf"])
+
+
+@app.post("/api/developer/accounts")
+def create_developer_account():
+    if not developer_authenticated():
+        return jsonify(error="Sign in to the developer area first."), 401
+    if not developer_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("currentPassword"), str)
+        or not valid_developer_username(payload.get("username"))
+        or not valid_developer_password(payload.get("newPassword"))
+    ):
+        return jsonify(error="Enter your current password, a username of 3–64 characters and a new password of at least 14 characters."), 400
+    username = payload["username"].strip()
+    with closing(database_connect()) as connection, connection:
+        account = developer_account(connection, session["developer_username"])
+        if not account or not check_password_hash(account[1], payload["currentPassword"]):
+            return jsonify(error="The current password is incorrect."), 403
+        try:
+            provision_developer_account(connection, username, payload["newPassword"])
+        except ValueError as error:
+            return jsonify(error=str(error)), 409
+    return jsonify(username=username), 201
+
+
+def provision_developer_account(connection: DatabaseConnection, username: str, password: str):
+    if not valid_developer_username(username) or not valid_developer_password(password):
+        raise ValueError("Use a username of 3–64 characters and a password of at least 14 characters.")
+    username = username.strip()
+    if developer_account(connection, username):
+        raise ValueError("That developer username is already in use.")
+    try:
+        connection.execute(
+            "INSERT INTO developer_users(id,username,password_hash,username_key) VALUES(?,?,?,?)",
+            (secrets.randbelow(2147483646) + 2, username, generate_password_hash(password), username.casefold()),
+        )
+    except database_integrity_errors() as error:
+        raise ValueError("The identifier or username is already in use. Retry with a unique username.") from error
 
 
 @app.get("/api/developer/change-requests")
@@ -9523,6 +9657,8 @@ def publish_bamboohr_schedules():
 
 trade_workflow = workforce_trades.register(app, sys.modules[__name__])
 billing_provider = membership_billing.register(app, sys.modules[__name__])
+attendance_reports.register(app, sys.modules[__name__])
+application_shell.register(app, sys.modules[__name__])
 
 
 def main() -> None:
@@ -9570,7 +9706,26 @@ def main() -> None:
         default=DATABASE_PATH,
         help="SQLite database to import (defaults to the app's local database).",
     )
+    developer_command = commands.add_parser(
+        "add-developer",
+        help="Create an independent developer account using a hidden local password prompt.",
+    )
+    developer_command.add_argument("--username", required=True)
     arguments = parser.parse_args()
+    if arguments.command == "add-developer":
+        password = getpass("New developer password (14+ characters): ")
+        if password != getpass("Confirm new developer password: "):
+            parser.error("The passwords do not match.")
+        try:
+            with closing(database_connect()) as connection, connection:
+                migrate_developer_accounts(connection)
+                provision_developer_account(connection, arguments.username, password)
+        except ValueError as error:
+            parser.error(str(error))
+        except database_errors() as error:
+            parser.error(str(error))
+        print("Developer account created. Sign in at /developer/change-requests.")
+        return
     initialize_database()
     if migrate_environment_bamboohr_key():
         print(

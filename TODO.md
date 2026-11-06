@@ -543,10 +543,11 @@ Depends on `tenant-identity`.
   also preserved an existing accepted record byte-for-byte in an isolated test.
   Real-browser user acceptance remains.
 
-## Planned change request: attendance snapshots (`snapshot-email-reports`)
+## Attendance snapshots (`snapshot-email-reports`) - implemented, awaiting acceptance
 
-Recorded on 2026-11-04; not implemented. This extends the existing request and
-retains its `workforce-dashboards` prerequisite.
+Download-only scope implemented. Automatic email, recipient management and delivery
+retries remain explicitly deferred until an authenticated sender is configured.
+The `workforce-dashboards` acceptance prerequisite remains unchanged.
 
 - Generate daily snapshots at **7 AM, 3 PM and 11 PM (Jamaica time)** and on
   demand from Attendance; save timestamped history for authorised downloads.
@@ -559,6 +560,42 @@ retains its `workforce-dashboards` prerequisite.
 - Run independently of browser visibility; preserve attendance cutoff, leave,
   overnight and worked-time rules, show data freshness/failures, prevent duplicate
   generation/delivery, and enforce recipient scope and report-tier entitlements.
+
+Implementation: Attendance now has Capture now, a timestamped history and immutable
+XLSX downloads (Silver+). Primary administrators can opt into the three daily
+captures; run `Schedule Creator\Run Attendance Reports Worker.bat` independently
+of Flask, under a supervisor for continuous service. The workbook contains blue
+summary headings, location/role/shift counts and employee attendance details,
+with late names amber and absent names red. Captures include the reporting day's
+shifts so far and verified overnight carry-in. Scheduled runs use an exact Jamaica
+cutoff, unique tenant/run keys and explicit stale/failed/missed states. Cutoffs
+missed by more than two minutes are recorded, not reconstructed from later data.
+Worker heartbeat and BambooHR freshness failures remain visible. This does not
+implement staffing-vs-demand interval analytics (Gold/Platinum).
+
+## Interactive HTML attendance snapshot (`interactive-attendance-snapshot`) - implemented, awaiting acceptance
+
+- Added View HTML and Download HTML alongside existing Silver+ XLSX downloads.
+- Self-contained offline dashboard follows the supplied references: executive
+  KPI cards, location/role/shift SVG charts and summary tables, followed by
+  employee exceptions and evidence-based operational attention.
+- Coordinated location/role/shift/status/search filters, chart drill-down,
+  sortable employee details, responsive layout and Print / Save PDF.
+- Each new capture embeds the business's saved company logo and name. Later
+  branding changes do not alter captured HTML; older snapshots never borrow
+  current branding or provider evidence retrospectively.
+- Confirmed attendance separates matching punches from worked-time validation.
+  Preserve four-hour absence rules, leave exclusion, overnight carry-in and
+  source warnings; unavailable rates show N/A. No invented demand scores/trends.
+- Retain tenant/administrator/tier authorization and existing XLSX compatibility.
+  Downloaded employee information must be shared responsibly; offline copies
+  cannot be revoked. Automatic email remains deferred.
+- Depends on `snapshot-email-reports`; prerequisite and acceptance statuses
+  remain unchanged.
+- Validation: 29 Python report/register regressions and 74 interactive browser
+  checks passed, including standalone HTML without network requests. Desktop/
+  mobile layouts, print scope, empty/stale/legacy evidence and inert malicious
+  names were checked. Real-business user acceptance remains.
 
 ## Planned requests accepted on 2026-11-05
 
@@ -602,7 +639,7 @@ Requests below remain pending unless implementation evidence is explicitly noted
   below; its scoped alerts, accessibility and navigation requirements carry over.
 - **Unified application shell and role-based navigation**
   (`unified-application-shell`): recorded at user request on 2026-11-05;
-  pending, not implemented. Integrate Access, Shift Trades and Business into
+  implemented, awaiting acceptance. Integrate Access, Shift Trades and Business into
   the existing administrator shell instead of separate interfaces. Reuse the
   header/sidebar, branding, tables/dialogs, light/dark themes and mobile layout.
   Provide one sign-in entry point with account/business selection and role-based
@@ -624,7 +661,10 @@ Requests below remain pending unless implementation evidence is explicitly noted
   Prerequisites: `business-hub`, `manager-employee-access`, `shift-trades`,
   `business-membership-controls`, `primary-admin-data-settings`,
   `meta-data-settings` and `session-idle-expiry`.
-  Approved for recording only; implementation requires a separate instruction.
+  Implemented with `/signin`, role-aware shared navigation and `/app/...` views.
+  The administrator workspace remains at `/` to preserve its pathname-scoped
+  browser database. Existing Access/Trades/Business URLs and embedded trade
+  approvals remain supported. Existing account and API guards remain authoritative.
 - **Primary administrator access to Data & Settings**
   (`primary-admin-data-settings`): restrict the group to the designated primary
   business administrator. Enforce corresponding server permissions as well as
@@ -709,7 +749,130 @@ Requests below remain pending unless implementation evidence is explicitly noted
   preserve existing trade rules, and explain missing assignments/eligible schedules.
   Verify reassignment, tampered requests, all modes and tenant isolation.
   Depends on `shift-trades` and `manager-employee-dual-access`.
-  Approved; implementation pending.
+  Implemented, awaiting acceptance: personal choices expose a verified locked
+  location/team, the picker preselects and disables it, and choices/options/
+  submission recheck current assignments, including linked-manager personal mode.
+  Management choices remain editable and scoped.
+
+## Workspace readiness (`workspace-readiness`) - approved, implementation pending
+
+- Hide the scheduling workspace until essential initialization, authentication,
+  permissions and core data are ready. Use a branded, theme-aware spinner screen,
+  accessible status announcements and reduced-motion support.
+- Bound long waits; show a polished recovery page explaining the failure and
+  which functions remain available or unavailable. Offer Retry loading, safe
+  limited-functionality continuation and Contact support/helpdesk.
+- Essential failures block access. Optional integration failures need not block
+  safe local workflows; never disguise missing data or stale evidence as current.
+  Preserve saved workspace data and avoid duplicate writes when retrying.
+- Add the documented environment-file toggle
+  `SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED` (default enabled). Disabling
+  restores the existing startup presentation, not weaker authentication,
+  authorization or data-safety checks. Validate configuration values and document
+  the restart required to apply changes.
+- Cover successful/slow loading, essential/optional failures, continuation,
+  retry, accessibility, desktop/mobile themes, toggle-off behavior and saved-data
+  preservation. Browser-level network errors remain outside this feature unless
+  an offline fallback is separately implemented.
+- Recording only: no runtime feature or environment-file change made yet.
+
+## Change request visibility (`primary-admin-change-request-visibility`) - approved, implementation pending
+
+- Only the business's designated primary administrator sees the business-user
+  link and read-only register of completed, current and planned changes.
+- Preserve separate developer access; only the authenticated developer may
+  create, edit, delete or change statuses and dependencies.
+- Deny other business users and platform-owner sessions without developer
+  authentication. Enforce page/API permissions server-side, including direct
+  URLs, mutations and current primary-admin designation.
+- Present business-appropriate information without secrets, sensitive internal
+  notes or other businesses' data. Preserve developer authentication, CSRF,
+  auditing and existing prerequisite/status rules.
+- Verify role access, read-only enforcement, navigation, reassignment and tenant
+  isolation. Depends on `developer-change-log` and `primary-admin-data-settings`.
+- Recording only; implementation pending.
+
+## Historical attendance trends (`historical-attendance-trend-reports`) - approved, implementation pending
+
+- Generate historical weekly and previous-month reports in Excel and offline
+  interactive HTML. Admins select all/specific DCs; managers are restricted
+  server-side to authorized teams for generation, history and downloads.
+- Include executive/DC KPIs, employee attendance scores using the existing
+  documented formula, expected/confirmed shifts, late/absence totals with dates
+  and shift times, approved leave and detailed dated evidence.
+- Compare employees and DCs week over week and month over month using counts,
+  eligible-shift denominators, rates and percentage-point changes.
+- Analyze late/absence patterns by shift-start time, weekday, first scheduled
+  shift after a verified day off and first scheduled shift after approved time
+  off. Separate leave types where evidence supports it; show incidents and
+  eligible shifts for every pattern.
+- HTML includes coordinated filters/search, sortable tables, drill-down, KPI
+  cards, comparison/trend charts and heatmaps where supported. Excel provides
+  matching summary, employee, comparison, pattern and evidence worksheets.
+- Preserve Jamaica boundaries, overnight start-date attribution, leave,
+  worked-time validation, corrections and verified late-arrival distinctions.
+  Use historical assignment/schedule evidence, not today's teams/settings.
+- Missing schedules are not verified days off. Missing history is unavailable,
+  not zero. Distinguish observed patterns, insufficient evidence and no incidents;
+  normalize comparisons and explicitly label partial periods.
+- Agree week boundaries, comparison/history window, minimum sample size and
+  historical manager-access policy before implementation. Avoid cross-team
+  disclosure after transfers, causal claims and automatic disciplinary actions.
+- Reuse saved branding/report infrastructure; show freshness and incomplete
+  evidence. Automatic email is outside scope.
+- Verify access/transfers, period and score calculations, incident dates,
+  all pattern categories, insufficient evidence, cross-format parity and offline
+  interaction. Depends on `snapshot-email-reports`,
+  `interactive-attendance-snapshot` and `manager-employee-access`.
+- Recording only; implementation pending.
+
+## Workload and headcount planning (`workload-fte-headcount-planning`) - approved, implementation pending
+
+- Separate workforce capacity/annual planning module. Managers primarily define
+  required tasks, standard times, workload units/conversions, workload-to-task
+  mappings and fixed work for their authorized locations/roles. Enforce scope
+  server-side; workforce admins oversee models, review definitions and approve
+  scheduling integration.
+- Use dated manual/imported forecasts to calculate workload labour hours and
+  required FTE from productive hours per FTE. Define working hours, breaks,
+  leave/training/absence allowances, part-time capacity and shift coverage;
+  avoid counting allowances already included in task standards twice.
+- Distinguish fractional FTE from employee headcount, with explicit rounding and
+  coverage assumptions. Show year-long weekly/monthly requirements by role and
+  location, available/planned capacity, gaps, period changes and scenarios.
+- Approved, versioned, effective-dated plans automatically update only agreed
+  scheduling demand/capacity settings. Preview changes/conflicts; derive daily/
+  shift distribution before translating weekly requirements into scheduling.
+- Preserve availability, contracts, safety rules, configuration locks and
+  accepted schedules. Audit changes and support rollback; do not silently
+  overwrite settings on forecast edits or rewrite accepted schedules.
+- Agree models, forecast inputs, approval authority, definition/review workflow
+  and permitted scheduling-setting updates before implementation. Label results
+  as model-based requirements, not guarantees.
+- Verify conversions, fixed work, allowances, FTE/headcount, year/period
+  boundaries, scenarios, scoped access, approval/effective dates, conflicts,
+  rollback and saved-data preservation. Depends on `manager-employee-access`.
+- Recording only; implementation pending.
+
+## Help and knowledge base (`faq-guides-knowledge-base`) - approved, implementation pending
+
+- Dedicated FAQ/help page with user guide, full step-by-step tutorials,
+  glossaries and searchable, categorized knowledge bites. Keep existing manual
+  guidance consistent; provide accessible, role-aware, responsive navigation.
+- Managers submit new knowledge bites or edits within their business scope.
+  Authorized admins approve/reject with feedback; only approved versions publish.
+  Retain the current published version while changes await review.
+- Track submission/review states, authorship, reviewers, timestamps and revision
+  history; support resubmission and prevent conflicting/stale edits.
+- Enforce tenant/role/audience/submission/review permissions server-side.
+  Manager permissions cannot approve or self-publish submissions.
+- Separate shared product guidance from tenant operational knowledge; business
+  approval cannot overwrite platform documentation or expose other tenants.
+  Validate/sanitize content and preserve CSRF/audit protections.
+- Agree content formats, audiences, shared-document ownership and notifications
+  before implementation. Verify navigation/search, approval/rejection/feedback,
+  publication isolation, revisions, scoped access and safe rendering.
+- Separate request; depends on `manager-employee-access`. Recording only.
 
 ## Test evidence and handoff
 

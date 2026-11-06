@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__SNAPSHOT_CSP__">
+<title>Workforce interval snapshot</title>
+<style>
+:root{color-scheme:light;--bg:#edf6fb;--surface:#fff;--ink:#16344d;--muted:#526c80;--line:#dce9f2;--blue:#176bd5;--teal:#079998;--amber:#a86100;--red:#bd3045;--soft:#f4f9fd}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top left,#d8efff,transparent 65%),var(--bg);color:var(--ink);font:14px/1.5 "Segoe UI",Arial,sans-serif}
+main{max-width:1450px;margin:auto;padding:28px}h1,h2,h3,p{margin:0}h1{font-size:clamp(24px,3vw,34px);letter-spacing:-.7px}h2{font-size:18px}h3{font-size:15px}
+.eyebrow{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:var(--blue)}.subtle,small{color:var(--muted)}small{font-size:12px}
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}
+.brand{display:flex;align-items:center;gap:16px;min-width:0}.brand img{width:auto;max-width:130px;max-height:76px;object-fit:contain;flex-shrink:0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap}button,select,input{font:inherit;border:1px solid var(--line);border-radius:9px;padding:9px 12px;color:var(--ink);background:var(--surface)}
+button{cursor:pointer}button:hover{border-color:var(--blue);background:#eaf3ff}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.primary{background:var(--blue);color:white}.primary:hover{color:var(--ink)}a{color:var(--blue)}
+.panel,.kpi{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 22px #1f638009}
+.panel{padding:22px;margin-bottom:18px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.panel-head p{margin-top:4px}
+.metadata{display:flex;flex-wrap:wrap;gap:10px 24px;font-size:12px;padding:14px 0}.metadata strong{display:block;color:var(--ink)}
+.notice{border-left:4px solid var(--teal);background:#eaf8f6;padding:14px 18px;border-radius:10px;margin-bottom:18px}
+.notice.warning{border-color:var(--amber);background:#fff5df;color:#714800}.notice.error{border-color:var(--red);background:#fff0f2;color:#8c1d30}
+.filters{display:flex;flex-wrap:wrap;align-items:end;gap:12px}.filters label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;flex:1;min-width:145px}.filters input,.filters select{width:100%}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}
+.kpi{padding:20px;position:relative;overflow:hidden}.kpi:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--blue)}
+.kpi:nth-child(3n):before{background:var(--teal)}.kpi.alert:before{background:var(--amber)}.kpi.critical:before{background:var(--red)}
+.kpi .label{font-size:12px;font-weight:600;color:var(--muted)}.kpi strong{display:block;font-size:30px;line-height:1.3;margin:8px 0;letter-spacing:-.8px}.kpi small{display:block}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px}.grid>.panel{min-width:0}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin:12px 0}.legend span{display:inline-flex;align-items:center;gap:6px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.present{background:var(--blue);fill:var(--blue)}.absent{background:var(--red);fill:var(--red)}.pending{background:#e0a544;fill:#e0a544}.leave{background:var(--teal);fill:var(--teal)}
+.chart-row{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:13px 0;background:transparent}
+.chart-label{display:flex;justify-content:space-between;gap:12px}.chart-label strong{font-size:13px}.chart-row svg{display:block;width:100%;height:14px;margin:9px 0 5px}
+.chart-row small{display:block}.chart-row:hover{background:var(--soft)}.bar-track{fill:var(--soft)}.empty{text-align:center;padding:24px;color:var(--muted)}
+.donut-layout{display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap;padding:16px 0}
+.donut{width:180px;height:180px;flex-shrink:0}.donut circle{fill:none;stroke-width:16}.donut .track{stroke:var(--soft)}.donut .arc{stroke:var(--blue);stroke-linecap:round;transform:rotate(-90deg);transform-origin:100px 100px}.donut text{fill:var(--ink);font-size:28px;font-weight:700;text-anchor:middle}.donut .caption{font-size:11px;font-weight:400;fill:var(--muted)}
+.disposition{display:grid;gap:8px;min-width:170px}.disposition button{text-align:left;display:flex;justify-content:space-between;gap:20px}.disposition button[aria-pressed=true]{border-color:var(--blue);background:#eaf3ff}
+.tablewrap{overflow:auto;max-height:620px}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:var(--soft);position:sticky;top:0;z-index:1;color:var(--muted);font-size:12px}th,td{padding:12px;border-bottom:1px solid var(--line);vertical-align:top}th button{border:0;background:transparent;padding:0;text-align:left;font-size:inherit;font-weight:700;color:inherit}td small{display:block;white-space:nowrap}.name-late{color:var(--amber);font-weight:700}.name-absent{color:var(--red);font-weight:700}
+.badge{font-size:11px;font-weight:700;padding:3px 8px;display:inline-block;border-radius:20px;background:#eaf3ff;color:var(--blue);white-space:nowrap}.badge.warn{background:#fff2d6;color:#805000}.badge.bad{background:#ffe5e9;color:#a91f37}.badge.good{background:#e0f6f1;color:#067669}
+.risks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.risk{padding:16px;border:1px solid var(--line);background:var(--soft);border-radius:12px}.risk strong{display:block;margin-bottom:6px}.risk button{margin-top:10px}
+.section-label{margin:25px 0 14px}.scope{font-size:12px;min-height:20px;color:var(--muted);margin:12px 0}footer{font-size:12px;color:var(--muted);padding:10px 0 30px}
+details summary{cursor:pointer;font-weight:600}details p{margin-top:10px}#printScope{display:none}[hidden]{display:none!important}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){main{padding:14px}.panel{padding:16px}header{align-items:flex-start;flex-direction:column}.kpis{gap:10px}.kpi{padding:14px}.kpi strong{font-size:25px}.risks{grid-template-columns:1fr}.filters label{min-width:120px}.donut-layout{gap:12px}.panel-head{align-items:flex-start;flex-direction:column}}
+@media print{body{background:white;color:#111}main{padding:0;max-width:none}.toolbar,.filters,.chart-hint{display:none}#printScope{display:block}.panel,.kpi{box-shadow:none;break-inside:avoid}.grid{display:block}.kpis{grid-template-columns:repeat(4,1fr)}.tablewrap{max-height:none;overflow:visible}th{position:static}thead{display:table-header-group}tr{break-inside:avoid}.risks{grid-template-columns:repeat(3,1fr)}a{color:inherit}footer{padding:10px 0}}
+</style>
+</head>
+<body>
+<main>
+<header>
+ <div class="brand"><img id="companyLogo" hidden alt=""><div><p class="eyebrow" id="business"></p><h1>Workforce interval snapshot</h1><p class="subtle">A clear view of attendance. A focused view of what needs action.</p></div></div>
+ <div class="toolbar"><button id="reset">Reset filters</button><button id="print" class="primary">Print / Save PDF</button></div>
+</header>
+<div class="metadata" id="metadata"></div>
+<div id="freshness" class="notice" role="status"></div>
+<section class="panel" aria-label="Report filters">
+ <div class="filters">
+  <label>Location<select id="location"><option value="">All locations</option></select></label>
+  <label>Role<select id="role"><option value="">All roles</option></select></label>
+  <label>Shift start (Jamaica)<select id="shift"><option value="">All shift starts</option></select></label>
+  <label>Attendance status<select id="status"><option value="">All statuses</option></select></label>
+  <label>Employee / reason<input id="search" type="search" placeholder="Search name, ID or reason"></label>
+ </div>
+ <p class="scope" id="scope" aria-live="polite"></p><p id="printScope"></p>
+</section>
+<h2 class="section-label">Executive highlights</h2>
+<section class="kpis" id="kpis" aria-label="Executive KPIs"></section>
+<div class="grid">
+ <section class="panel"><div class="panel-head"><div><h2>Attendance by location</h2><p class="subtle">Confirmed attendance as a share of expected shifts so far.</p></div></div><div class="legend" id="legend"></div><div id="locations"></div><p class="chart-hint subtle">Select a location to focus every card, chart and table.</p></section>
+ <section class="panel"><h2>Attendance composition</h2><p class="subtle">Mutually exclusive groups; approved leave is not expected.</p><div id="composition"></div></section>
+</div>
+<div class="grid">
+ <section class="panel"><div class="panel-head"><div><h2>Role performance</h2><p class="subtle">Compare attendance, gaps and leave across job roles.</p></div></div><div id="roles"></div><p class="chart-hint subtle">Select a role to drill into its workforce.</p></section>
+ <section class="panel"><h2>Shift-start coverage</h2><p class="subtle">Verified snapshot evidence, grouped by Jamaica shift-start time.</p><div id="shifts"></div><p class="chart-hint subtle">Select a shift-start group to investigate.</p></section>
+</div>
+<section class="panel">
+ <div class="panel-head"><div><h2>Location and role summary</h2><p class="subtle">Accessible tabular detail for the charts above.</p></div></div>
+ <div class="tablewrap"><table><thead><tr><th>Location</th><th>Role</th><th>Expected</th><th>Confirmed</th><th>Absent</th><th>Awaiting validation</th><th>Leave</th><th>Attendance</th></tr></thead><tbody id="summary"></tbody></table></div>
+</section>
+<h2 class="section-label" id="exceptionsHeading">Employee exceptions and risks</h2>
+<section class="panel"><h2>Operational attention</h2><p class="subtle">Evidence-based follow-up, not a staffing-demand forecast.</p><div class="risks" id="risks"></div></section>
+<section class="panel">
+ <div class="panel-head"><div><h2>Employee exception register</h2><p class="subtle" id="exceptionCount"></p></div><label><input id="exceptionsOnly" type="checkbox" checked> Exceptions only</label></div>
+ <div class="tablewrap"><table><thead><tr>
+  <th aria-sort="ascending"><button data-sort="location">Location / role</button></th>
+  <th aria-sort="none"><button data-sort="name">Employee</button></th>
+  <th aria-sort="none"><button data-sort="shiftStart">Shift (Jamaica)</button></th>
+  <th aria-sort="none"><button data-sort="status">Status / validation</button></th>
+  <th>Clock in / out (Jamaica)</th><th aria-sort="none"><button data-sort="workedMinutes">Worked min</button></th>
+  <th>Exception / follow-up</th>
+ </tr></thead><tbody id="employees"></tbody></table></div>
+</section>
+<section class="panel"><details><summary>Definitions, scope and responsible use</summary>
+ <p id="definitions"></p>
+ <p>Counts represent shift records, not unique employees. The snapshot contains shifts already started on its reporting day plus verified overnight carry-in. Full-day scheduled totals and future shifts are not available in this saved scope. Approved leave is excluded from expected shifts and attendance percentage.</p>
+ <p>Confirmed attendance respects saved attendance decisions and worked-time validation: attended records are confirmed; late records additionally require a matching clock-in and at least 60 worked minutes (or the full shift for shorter shifts). A late status without a clock-in is a missing punch, not a confirmed arrival. Open shifts awaiting the worked-time minimum remain unconfirmed. Saved absence and correction decisions are not reclassified by this report.</p>
+ <p>Missing clock-outs are flagged for follow-up only after a known shift end. Open shifts are not automatically missing-clock-out incidents. Early departure and overtime minutes are the saved rule results. Unknown shift ends/worked time stay unavailable. No fabricated trends, comparisons, demand forecasts or automatic emails are included.</p>
+ <p>Filters affect this local view only; the captured data never changes. A downloaded report contains employee information: share only with authorized recipients. Downloaded copies cannot be revoked when your app session expires.</p>
+</details></section>
+<footer>Immutable attendance evidence · America/Jamaica · Offline interactive HTML · No external services or tracking</footer>
+<noscript><div class="notice error">JavaScript is required for this interactive report. Enable it in a trusted browser, or use the accompanying XLSX download for tabular attendance evidence.</div></noscript>
+<div id="reportError" class="notice error" role="alert" hidden></div>
+</main>
+<script id="snapshot-data" type="application/json">__SNAPSHOT_DATA__</script>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);
+try{
+ const data=JSON.parse($('snapshot-data').textContent),cutoff=Date.parse(data.cutoff),all=data.shifts;
+ const leaveStatuses=new Set(['approved_leave','sick','vacation']);
+ const labels={attended:'Attended',late:'Late',absent:'Absent',scheduled:'Pending validation',approved_leave:'Approved leave',sick:'Sick leave',vacation:'Vacation'};
+ const dateFormat=new Intl.DateTimeFormat('en-JM',{timeZone:'America/Jamaica',year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+ const timeFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Jamaica',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+ const fmt=value=>value&&Number.isFinite(Date.parse(value))?dateFormat.format(new Date(value)):'Unavailable';
+ const shiftKey=r=>Number.isFinite(Date.parse(r.shiftStart))?timeFormat.format(new Date(r.shiftStart)):'Unknown';
+ const minutes=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
+ const n=value=>value.toLocaleString('en-US');
+ const percent=(part,total)=>total?(100*part/total).toFixed(1)+'%':'N/A';
+ const element=(tag,text,className)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;};
+ const isLeave=r=>leaveStatuses.has(r.status);
+ const confirmed=r=>{
+  if(isLeave(r))return false;
+  if(r.status==='attended')return true;
+  if(r.status!=='late'||!r.clockIn)return false;
+  const duration=(Date.parse(r.shiftEnd)-Date.parse(r.shiftStart))/60000;
+  return Number.isFinite(duration)&&duration>0&&minutes(r.workedMinutes)!==null&&r.workedMinutes>=Math.min(60,duration);
+ };
+ const category=r=>isLeave(r)?'leave':confirmed(r)?'present':r.status==='absent'?'absent':'pending';
+ const missingOut=r=>!isLeave(r)&&r.clockIn&&!r.clockOut&&Number.isFinite(Date.parse(r.shiftEnd))&&Date.parse(r.shiftEnd)<=cutoff;
+ const issues=r=>{
+  const items=[];
+  if(r.status==='absent')items.push('Saved absence: verify coverage and follow up.');
+  if(r.status==='late')items.push(r.clockIn?'Late arrival recorded.':'No matching clock-in: lateness rule triggered; arrival unconfirmed.');
+  if(!isLeave(r)&&!r.clockIn&&r.status!=='absent'&&r.status!=='late')items.push('No matching clock-in yet; check attendance evidence.');
+  if(!isLeave(r)&&r.clockIn&&!confirmed(r)&&r.status!=='absent')items.push('Worked-time validation pending or unavailable.');
+  if(missingOut(r))items.push('Shift ended; clock-out not recorded. Verify the timesheet.');
+  if(minutes(r.earlyMinutes)>0)items.push(n(r.earlyMinutes)+' minutes early departure.');
+  if(minutes(r.overtimeMinutes)>0)items.push(n(r.overtimeMinutes)+' overtime minutes.');
+  if(r.reason)items.push(r.reason);
+  return items;
+ };
+ const exception=r=>!isLeave(r)&&(r.status==='late'||r.status==='absent'||!confirmed(r)||missingOut(r)||minutes(r.earlyMinutes)>0||minutes(r.overtimeMinutes)>0);
+ function metrics(rows){
+  const m={total:rows.length,expected:0,present:0,absent:0,pending:0,leave:0,clocked:0,late:0,missing:0,early:0,overtime:0,missingOut:0};
+  for(const r of rows){
+   const type=category(r);m[type]++;
+   if(type==='leave')continue;
+   m.expected++;
+   if(r.clockIn)m.clocked++;
+   if(r.status==='late'&&r.clockIn)m.late++;
+   if(!r.clockIn)m.missing++;
+   if(minutes(r.earlyMinutes)>0)m.early++;
+   if(minutes(r.overtimeMinutes)>0)m.overtime+=r.overtimeMinutes;
+   if(missingOut(r))m.missingOut++;
+  }
+  return m;
+ }
+ function groups(rows,getKey){
+  const map=new Map();
+  for(const row of rows){const key=getKey(row);if(!map.has(key))map.set(key,[]);map.get(key).push(row);}
+  return [...map].map(([key,items])=>({key,items,m:metrics(items)}));
+ }
+ function options(id,values){
+  for(const value of [...new Set(values)].sort((a,b)=>a.localeCompare(b))){const option=element('option',value);option.value=value;$(id).append(option);}
+ }
+ options('location',all.map(r=>r.location||'Unassigned'));
+ options('role',all.map(r=>r.role||'Unassigned'));
+ options('shift',all.map(shiftKey));
+ for(const value of [...new Set(all.map(r=>r.status))].sort()){const opt=element('option',labels[value]||value);opt.value=value;$('status').append(opt);}
+ $('business').textContent=data.businessName;
+ if(data.logoDataUrl){
+  if(!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(data.logoDataUrl))throw Error('Saved company logo is invalid');
+  $('companyLogo').src=data.logoDataUrl;$('companyLogo').alt=data.businessName+' logo';$('companyLogo').hidden=false;
+ }
+ document.title=data.businessName+' | Workforce snapshot | '+fmt(data.cutoff);
+ for(const [label,value] of [['Snapshot cutoff',fmt(data.cutoff)],['Generated',fmt(data.generatedAt)],['Source refreshed',fmt(data.lastSyncedAt)],['Shift source',data.shiftSource]]){
+  const box=element('div',label);box.append(element('strong',value));$('metadata').append(box);
+ }
+ const outdated=data.refreshError||!data.lastSyncedAt||Date.parse(data.lastSyncedAt)>cutoff;
+ $('freshness').classList.toggle('warning',Boolean(outdated));
+ $('freshness').textContent=outdated?'Source warning: '+(data.refreshError||'Source refresh timestamp is missing or newer than the cutoff. Treat this evidence as incomplete.'):'Source refreshed for this capture. This is a fixed snapshot, not a live feed.';
+ $('definitions').textContent='Reporting timezone: America/Jamaica. Saved lateness tolerance: '+(data.tolerance??'unavailable')+' minutes. The app uses its four-hour no-clock-in absence rule and existing worked-time/leave/override decisions; the sample template does not change these rules.';
+ const compositionNames={present:'Confirmed',absent:'Absent',pending:'Awaiting validation',leave:'Approved leave'};
+ for(const key of Object.keys(compositionNames)){const label=element('span');label.append(element('i',undefined,'dot '+key),document.createTextNode(compositionNames[key]));$('legend').append(label);}
+ let sortKey='location',direction=1,selectedCategory='';
+ function filtered(){
+  const search=$('search').value.trim().toLocaleLowerCase();
+  return all.filter(r=>(!$('location').value||(r.location||'Unassigned')===$('location').value)&&
+   (!$('role').value||(r.role||'Unassigned')===$('role').value)&&
+   (!$('shift').value||shiftKey(r)===$('shift').value)&&
+   (!$('status').value||r.status===$('status').value)&&
+   (!selectedCategory||category(r)===selectedCategory)&&
+   (!search||[r.name,r.employeeId,r.reason].some(value=>String(value||'').toLocaleLowerCase().includes(search))));
+ }
+ const svgElement=(tag,attrs)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [key,value] of Object.entries(attrs))el.setAttribute(key,value);return el;};
+ function chart(id,rows,getKey,filterId){
+  const entries=groups(rows,getKey).sort((a,b)=>(a.m.expected?a.m.present/a.m.expected:2)-(b.m.expected?b.m.present/b.m.expected:2)||a.key.localeCompare(b.key));
+  const container=$(id);container.replaceChildren();
+  if(!entries.length){container.append(element('p','No shifts in this selection.','empty'));return;}
+  for(const entry of entries){
+   const button=element('button',undefined,'chart-row');button.type='button';
+   const label=element('span',undefined,'chart-label');label.append(element('strong',entry.key),element('strong',percent(entry.m.present,entry.m.expected)));
+   const svg=svgElement('svg',{viewBox:'0 0 100 8',preserveAspectRatio:'none','aria-hidden':'true'});
+   svg.append(svgElement('rect',{x:0,y:0,width:100,height:8,rx:3,class:'bar-track'}));
+   let x=0;
+   for(const key of Object.keys(compositionNames)){
+    const width=entry.m.total?entry.m[key]/entry.m.total*100:0;
+    svg.append(svgElement('rect',{x,y:0,width,height:8,class:key}));x+=width;
+   }
+   const description=`${entry.m.present} confirmed / ${entry.m.expected} expected; ${entry.m.absent} absent; ${entry.m.pending} awaiting validation; ${entry.m.leave} leave`;
+   button.title=entry.key+': '+description;button.setAttribute('aria-label',entry.key+', '+percent(entry.m.present,entry.m.expected)+'. '+description+'. Filter this group.');
+   button.append(label,svg,element('small',description));
+   button.onclick=()=>{$(filterId).value=entry.key;update();};
+   container.append(button);
+  }
+ }
+ function composition(m){
+  const container=$('composition');container.replaceChildren();
+  const layout=element('div',undefined,'donut-layout'),svg=svgElement('svg',{viewBox:'0 0 200 200',class:'donut',role:'img','aria-label':percent(m.present,m.expected)+' confirmed attendance'});
+  const track=svgElement('circle',{cx:100,cy:100,r:78,class:'track'});
+  const arc=svgElement('circle',{cx:100,cy:100,r:78,class:'arc',pathLength:100,'stroke-dasharray':`${m.expected?100*m.present/m.expected:0} 100`});
+  const text=svgElement('text',{x:100,y:100});text.textContent=percent(m.present,m.expected);
+  const caption=svgElement('text',{x:100,y:121,class:'caption'});caption.textContent='confirmed / expected';svg.append(track,arc,text,caption);
+  const list=element('div',undefined,'disposition');
+  for(const key of Object.keys(compositionNames)){
+   const button=element('button');button.type='button';button.setAttribute('aria-pressed',String(selectedCategory===key));
+   const label=element('span');label.append(element('i',undefined,'dot '+key),document.createTextNode(' '+compositionNames[key]));
+   button.append(label,element('strong',n(m[key])));button.title='Toggle '+compositionNames[key]+' filter';
+   button.onclick=()=>{selectedCategory=selectedCategory===key?'':key;update();};list.append(button);
+  }
+  layout.append(svg,list);container.append(layout);
+ }
+ function summary(rows){
+  const body=$('summary');body.replaceChildren();
+  const entries=groups(rows,r=>JSON.stringify([r.location||'Unassigned',r.role||'Unassigned'])).sort((a,b)=>a.key.localeCompare(b.key));
+  for(const {key,m} of entries){
+   const row=element('tr');for(const text of [...JSON.parse(key),m.expected,m.present,m.absent,m.pending,m.leave,percent(m.present,m.expected)])row.append(element('td',String(text)));body.append(row);
+  }
+  if(!entries.length){const row=element('tr'),cell=element('td','No summary data.','empty');cell.colSpan=8;row.append(cell);body.append(row);}
+ }
+ function riskCards(rows,m){
+  const container=$('risks');container.replaceChildren();
+  const locations=groups(rows,r=>r.location||'Unassigned').filter(g=>g.m.expected).sort((a,b)=>a.m.present/a.m.expected-b.m.present/b.m.expected);
+  const lowest=locations[0];
+  for(const [title,description] of [
+   ['Attendance gaps',`${m.missing} expected shift(s) without a matching clock-in; ${m.absent} saved absence(s). These counts overlap and must not be added.`],
+   ['Timesheet follow-up',`${m.missingOut} ended shift(s) without clock-out; ${m.early} early departure(s); ${m.overtime} saved overtime minute(s).`],
+   ['Location to review',lowest?`${lowest.key}: ${percent(lowest.m.present,lowest.m.expected)} confirmed (${lowest.m.present}/${lowest.m.expected} expected). This is a relative comparison, not a demand-based risk score.`:'No expected shifts in this selection.']
+  ]){const card=element('div',undefined,'risk');card.append(element('strong',title),element('p',description));container.append(card);}
+ }
+ function employees(rows){
+  const selected=rows.filter(r=>!$('exceptionsOnly').checked||exception(r));
+  selected.sort((a,b)=>{
+   let result=sortKey==='workedMinutes'?(minutes(a[sortKey])??-1)-(minutes(b[sortKey])??-1):String(a[sortKey]||'').localeCompare(String(b[sortKey]||''),undefined,{numeric:true});
+   return direction*result||String(a.employeeId).localeCompare(String(b.employeeId));
+  });
+  $('exceptionCount').textContent=`${selected.length} of ${rows.length} selected shift records. Select column headings to sort.`;
+  const body=$('employees');body.replaceChildren();
+  for(const r of selected){
+   const row=element('tr'),where=element('td',r.location||'Unassigned');where.append(element('small',r.role||'Unassigned'));
+   const who=element('td',r.name||r.employeeId,r.status==='absent'?'name-absent':r.status==='late'?'name-late':'');who.append(element('small',r.employeeId));
+   const shift=element('td',fmt(r.shiftStart));shift.append(element('small','to '+fmt(r.shiftEnd)));
+   const status=element('td'),badge=element('span',labels[r.status]||r.status,'badge '+(r.status==='absent'?'bad':r.status==='late'?'warn':isLeave(r)?'good':''));
+   status.append(badge,element('small',compositionNames[category(r)]));
+   const clock=element('td',r.clockIn?fmt(r.clockIn):'Not recorded');clock.append(element('small',r.clockOut?fmt(r.clockOut):r.clockIn?(missingOut(r)?'Clock-out missing after shift end':'Open / clock-out unavailable'):'No clock-out evidence'));
+   const notes=element('td');for(const item of issues(r))notes.append(element('p',item));
+   if(!notes.childNodes.length)notes.textContent=isLeave(r)?'Excluded from attendance denominator.':'No recorded exception.';
+   row.append(where,who,shift,status,clock,element('td',minutes(r.workedMinutes)===null?'Unavailable':n(r.workedMinutes)),notes);body.append(row);
+  }
+  if(!selected.length){const row=element('tr'),cell=element('td','No employee exceptions match these filters.','empty');cell.colSpan=7;row.append(cell);body.append(row);}
+ }
+ function update(){
+  const rows=filtered(),m=metrics(rows);
+  const scope=[$('location').value||'All locations',$('role').value||'All roles',$('shift').value||'All shift starts',$('status').value||'All statuses',selectedCategory?compositionNames[selectedCategory]:'All validation groups',$('search').value?'Search: '+$('search').value:''].filter(Boolean).join(' / ');
+  $('scope').textContent=`${rows.length} of ${all.length} captured shift records. ${scope}`;$('printScope').textContent=$('scope').textContent;
+  $('kpis').replaceChildren();
+  for(const [label,value,note,kind] of [
+   ['Confirmed attendance',percent(m.present,m.expected),`${m.present} confirmed / ${m.expected} expected`,m.absent?'critical':''],
+   ['Expected so far',n(m.expected),'Started shifts; approved leave excluded',''],
+   ['Clock-in evidence',n(m.clocked),'Not necessarily worked-time validated',''],
+   ['Late arrivals',n(m.late),'Late status with a matching clock-in','alert'],
+   ['Missing clock-ins',n(m.missing),'Includes saved absences; do not add them','alert'],
+   ['Saved absences',n(m.absent),'Preserves attendance rules and corrections','critical'],
+   ['Approved leave',n(m.leave),'Excluded from attendance denominator',''],
+   ['Overtime minutes',n(m.overtime),'Saved timesheet overtime, not forecast','']
+  ]){const card=element('article',undefined,'kpi '+(kind||''));card.append(element('span',label,'label'),element('strong',value),element('small',note));$('kpis').append(card);}
+  chart('locations',rows,r=>r.location||'Unassigned','location');chart('roles',rows,r=>r.role||'Unassigned','role');chart('shifts',rows,shiftKey,'shift');
+  composition(m);summary(rows);riskCards(rows,m);employees(rows);
+ }
+ for(const id of ['location','role','shift','status','exceptionsOnly'])$(id).addEventListener('change',update);
+ $('search').addEventListener('input',update);
+ $('reset').onclick=()=>{for(const id of ['location','role','shift','status','search'])$(id).value='';selectedCategory='';$('exceptionsOnly').checked=true;update();};
+ $('print').onclick=()=>window.print();
+ for(const button of document.querySelectorAll('[data-sort]'))button.onclick=()=>{
+  direction=sortKey===button.dataset.sort?-direction:1;sortKey=button.dataset.sort;
+  for(const other of document.querySelectorAll('[data-sort]'))other.closest('th').setAttribute('aria-sort',other===button?(direction===1?'ascending':'descending'):'none');
+  employees(filtered());
+ };
+ update();
+}catch(error){
+ $('reportError').hidden=false;$('reportError').textContent='Unable to display this saved snapshot: '+error.message+'. Use its XLSX download or contact an administrator.';
+ console.error('Snapshot rendering failed:',error);
+}
+})();
+</script>
+</body>
+</html>

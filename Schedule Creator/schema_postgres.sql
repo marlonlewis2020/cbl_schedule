@@ -155,8 +155,9 @@ CREATE TABLE IF NOT EXISTS app_migrations (
 );
 
 CREATE TABLE IF NOT EXISTS developer_users (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
+    id INTEGER PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
+    username_key TEXT UNIQUE,
     password_hash TEXT NOT NULL,
     auth_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -363,6 +364,16 @@ CREATE TABLE IF NOT EXISTS billing_webhook_receipts (
     id TEXT PRIMARY KEY, applied INTEGER NOT NULL DEFAULT 0
 );
 -- Opaque subscription-to-tenant routing, consulted before webhook tenant context.
+CREATE TABLE IF NOT EXISTS attendance_reports (
+    tenant_id TEXT NOT NULL, id TEXT NOT NULL, run_key TEXT NOT NULL,
+    cutoff TEXT NOT NULL, created_at TEXT NOT NULL, state TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, id), UNIQUE (tenant_id, run_key)
+);
+CREATE TABLE IF NOT EXISTS attendance_report_settings (
+    tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+    checked_at TEXT NOT NULL, heartbeat TEXT
+);
 -- Contains no prices, payment details, credentials, employee or business names.
 CREATE TABLE IF NOT EXISTS billing_subscription_index (
     subscription_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL
@@ -375,7 +386,7 @@ DECLARE table_name TEXT;
 BEGIN
     FOREACH table_name IN ARRAY ARRAY[
         'shift_trades','shift_trade_events','shift_trade_reads','shift_trade_publish',
-        'billing_accounts','billing_events'
+        'billing_accounts','billing_events','attendance_reports','attendance_report_settings'
     ] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);

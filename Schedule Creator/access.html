@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <base href="/">
+  <link rel="stylesheet" href="/application-shell.css">
+  <script src="/application-shell.js" defer></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manager and employee access | CBL Schedule</title>
@@ -139,7 +142,7 @@
     let timer = null;
     let portalSchedules = [];
     let accountRole = "";
-    let personalMode = false;
+    let personalMode = new URLSearchParams(location.search).get("view") === "employee";
     let ownEmployeeId = null;
     let ownSchedules = [], unlockedSchedules = [];
 
@@ -477,11 +480,7 @@
       try { await loadData(); } catch (error) { $("#appMessage").textContent = error.message; }
     });
     $("#personalView").addEventListener("click", async () => {
-      personalMode = !personalMode;
-      $("#appMessage").textContent = "";
-      renderSchedules([]);
-      renderRecords([]);
-      try { await start(); } catch (error) { $("#appMessage").textContent = error.message; }
+      location.assign(personalMode ? "/app/access" : "/app/access?view=employee");
     });
     $("#refreshSchedules").addEventListener("click", async () => {
       try {

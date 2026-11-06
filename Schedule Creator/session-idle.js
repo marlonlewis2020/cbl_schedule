@@ -2,7 +2,7 @@
     'use strict';
     const originalFetch=window.fetch.bind(window);
     let clock=null,csrf='',expired=false,lastReport=-Infinity,inFlight=false,pendingActivity=null,banner=null;
-    const loginPath=location.pathname.startsWith('/developer/')?'/developer/change-requests':
+    const loginPath=location.pathname.startsWith('/developer/')?'/developer/change-requests':location.pathname.startsWith('/app/')?'/signin':
         location.pathname==='/hub'||(location.pathname==='/billing'&&new URLSearchParams(location.search).get('view')==='owner')?'/hub':
         location.pathname==='/access'||(location.pathname==='/trades'&&!new URLSearchParams(location.search).has('adminView'))?'/access':'/';
 

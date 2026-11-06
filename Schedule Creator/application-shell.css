@@ -1,0 +1,29 @@
+.unified-login{margin:0;min-height:100vh;display:grid;place-items:center;background:#f2f6f8;color:#153746;font:14px "Segoe UI",Arial,sans-serif}
+.unified-login main{max-width:460px;width:calc(100% - 64px);padding:24px;background:white;border-radius:12px}
+.unified-login label{display:block;margin:14px 0}.unified-login input,.unified-login select{display:block;width:100%;box-sizing:border-box;padding:10px;font:inherit}
+.unified-login button{padding:10px 18px;background:#159bd5;color:white;border:0;border-radius:8px;cursor:pointer}
+.unified-login [hidden],[data-shell][hidden]{display:none!important}
+body.unified-experience{display:block!important;margin:0!important;padding:0 24px 24px 268px!important;background:var(--bg,#f2f6f8);color:var(--ink,#153746);font:14px "Segoe UI",Arial,sans-serif}
+.unified-experience>main{width:100%;max-width:none;box-sizing:border-box;margin:24px 0;padding:24px;background:var(--shell-surface,#fff);border:1px solid var(--line,#dce6eb);box-shadow:none}
+#applicationSidebar{position:fixed;inset:0 auto 0 0;width:220px;padding:24px 12px;box-sizing:border-box;background:var(--shell-surface,#fff);border-right:1px solid var(--line,#dce6eb);overflow:auto;z-index:100}
+#applicationSidebar a{display:block;padding:12px;margin:6px 0;border-radius:8px;color:inherit;text-decoration:none}
+#applicationSidebar a[aria-current="page"]{background:var(--blue,#159bd5);color:white}
+#applicationSidebar img{max-width:160px;max-height:70px}
+#applicationSidebar[data-role="owner"]{display:flex;flex-direction:column;flex-wrap:nowrap;margin:0;gap:0}
+#applicationHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0;border-bottom:1px solid var(--line,#dce6eb)}
+#applicationHeader button{margin:0;padding:10px 14px;border:1px solid var(--line,#dce6eb);border-radius:8px;background:var(--blue,#159bd5);color:#fff;font:inherit;cursor:pointer}
+#applicationAlerts{position:fixed;right:24px;top:76px;width:min(420px,calc(100vw - 48px));max-height:70vh;overflow:auto;z-index:200;padding:16px;background:var(--shell-surface,#fff);border:1px solid var(--line,#dce6eb);border-radius:10px}
+#applicationAlerts a{display:block;color:inherit;padding:12px 0}
+.shell-admin-links{display:flex;flex-wrap:wrap;gap:12px;padding:12px}
+.unified-experience[data-theme="dark"],[data-theme="dark"] .unified-experience{--shell-surface:#162936;--bg:#0e1c28;--ink:#dcebf3;--line:#314858}
+[data-theme="dark"] body.unified-experience{--shell-surface:#162936;--bg:#0e1c28;--ink:#dcebf3;--line:#314858}
+[data-theme="dark"] .unified-experience input,[data-theme="dark"] .unified-experience select,[data-theme="dark"] .unified-experience textarea{background:#213b4b;color:#deebf3}
+[data-theme="dark"] .unified-experience th{background:#203946;color:#b5ccd6}
+[data-theme="dark"] .unified-experience :is(.notice,.card,.panel,#panel){background:#1b3343;color:#deebf3;border-color:#314858}
+[data-theme="dark"] .unified-experience a{color:#82d4fa}
+@media(max-width:850px){
+ body.unified-experience{padding:0 12px 20px!important}
+ #applicationSidebar{position:static;width:auto;display:flex;flex-wrap:wrap;gap:4px;padding:8px;border-right:0;border-bottom:1px solid var(--line,#dce6eb)}
+ #applicationSidebar a{padding:8px;margin:0}#applicationSidebar strong{width:100%}
+ #applicationHeader{flex-wrap:wrap}#applicationHeader>div{display:flex;flex-wrap:wrap;gap:6px}
+}

@@ -88,6 +88,18 @@
                 try{const result=await api('/api/developer/credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(values))});csrfToken=result.csrfToken;currentUser=result.username;await showRequests()}
                 catch(error){showError(error.message)}
             });
+            const accounts=document.createElement('details');accounts.className='card';
+            accounts.innerHTML='<summary>Add a developer account</summary><p class="muted">Each developer has independent credentials and full change-request access. Confirm your current password to authorize creation.</p><form id="developerAccountForm"><label>Your current password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New developer username<input name="username" minlength="3" maxlength="64" autocomplete="off" required></label><label>New developer password<input name="newPassword" type="password" minlength="14" autocomplete="new-password" required></label><button>Create developer account</button><p role="status" id="accountResult"></p></form>';
+            app.append(accounts);
+            document.getElementById('developerAccountForm').addEventListener('submit',async event=>{
+                event.preventDefault();const form=event.currentTarget,button=form.querySelector('button'),status=document.getElementById('accountResult');
+                button.disabled=true;status.textContent='';
+                try{
+                    const result=await api('/api/developer/accounts',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+                    form.reset();status.className='success';status.textContent='Developer account created: '+result.username+'. They can now sign in separately.';
+                }catch(error){status.className='error';status.textContent=error.message}
+                finally{button.disabled=false}
+            });
             await loadList()
         }
         function showError(text){const node=document.getElementById('error');if(node){node.textContent=text;node.hidden=false}}

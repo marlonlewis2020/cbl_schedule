@@ -735,7 +735,7 @@ function attendancePage(){
     let sourceControl=collapsiblePanel('attendance-source','Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" ${sourceInfo.selected==='bamboohr'?'selected':''}>BambooHR shifts</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}. BambooHR clock events remain the source of attendance evidence.</p>`)+(sourceInfo.selected==='bamboohr'?collapsiblePanel('attendance-discrepancies','Unresolved BambooHR shift discrepancies',sourceInfo.bamboohrAvailable===true?(discrepancies.length?`<p>${discrepancies.length} unresolved difference${discrepancies.length===1?'':'s'} match the current filters. Differences are rechecked before each resolution.</p><div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Accepted app shift</th><th>BambooHR shift</th><th>Resolution</th></tr></thead><tbody>${discrepancyRows}</tbody></table></div>`:'<p>No unresolved shift discrepancies match the current filters.</p>'):'<p class="badtext">BambooHR shifts could not be checked. Refresh the attendance page before relying on this comparison.</p>'):'');
     return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+
         collapsiblePanel('attendance-sync','BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
-        sourceControl+
+        sourceControl+'<section id="attendanceReports" class="panel"></section>'+
         collapsiblePanel('attendance-filters','Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
         collapsiblePanel('attendance-rules','Attendance rules',`<div class="formgrid"><label>Lateness tolerance · minutes<input id="attendanceTolerance" type="number" min="0" max="120" step="1" value="${settings.latenessToleranceMinutes}"></label><label>Attendance score period · days<input id="attendancePeriod" type="number" min="30" max="45" step="1" value="${settings.scorePeriodDays}"></label></div><div class="actions"><button type="button" class="primary" data-action="saveAttendanceSettings">Save attendance rules</button></div><p class="note">Clock entries count as attendance evidence even if they are awaiting BambooHR approval. Approved leave is excluded from absence classification and the score denominator.</p>`)+
         stats([['Expected shifts',f(summary.expected),'Accepted shifts in selected period'],['Clocked in',f(summary.clockedIn),'Includes late arrivals'],['Attendance',summary.attendancePercent===null?'—':f(summary.attendancePercent,2)+'%','Clocked in ÷ expected'],['Late / absent',f(summary.late)+' / '+f(summary.absent),'Exceptions in selected period'],['Approved leave',f(summary.approvedLeave),'Excluded from attendance rate']])+
@@ -3326,6 +3326,8 @@ function render(preserveScroll=false){
     profileHeader();
     applyMenuSettings();
     document.documentElement.dataset.theme=model.theme;
+    try{localStorage.setItem('cbl-application-theme',model.theme);}
+    catch(error){console.warn('Unable to remember application theme:',error);}
     $('sourceName').textContent=model.sourceName;
     $('lockState').textContent=model.locked?'● Locked · rev '+model.revision:'○ Editable · rev '+model.revision;
     $('lockState').className=model.locked?'lock locked':'lock';
@@ -5047,6 +5049,11 @@ async function init(){
             storageReason=e.message;
             storageStatus()
         }
+        try{
+            let sharedTheme=localStorage.getItem('cbl-application-theme');
+            if(['light','dark'].includes(sharedTheme))model.theme=sharedTheme;
+        }
+        catch(error){console.warn('Unable to restore application theme:',error);}
         await loadBusinessConfig();
         await clearLegacyBambooCredentials();
         await loadAcceptedSchedules();

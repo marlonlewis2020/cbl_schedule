@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in | Scheduling Command Centre</title>
+<link rel="stylesheet" href="/application-shell.css"></head>
+<body class="unified-login"><main>
+<h1>Scheduling Command Centre</h1><p>One application. Your authorized workspace.</p>
+<form id="login">
+<label>Account experience<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option><option value="owner">Platform owner</option></select></label>
+<label id="businessLabel">BambooHR subdomain<input id="business" maxlength="63" required autocomplete="organization"></label>
+<label>Email or employee ID<input id="identifier" maxlength="254" required autocomplete="username"></label>
+<label>Password<input id="password" type="password" required autocomplete="current-password"></label>
+<label id="changeLabel" hidden>New password (at least 14 characters)<input id="newPassword" type="password" minlength="14" autocomplete="new-password"></label>
+<label>Authenticator code (when enrolled)<input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></label>
+<button type="submit">Sign in</button></form>
+<form id="enroll" hidden><p>Enroll your authenticator, then verify its six-digit code.</p><img id="qr" alt="Authenticator enrollment QR code" width="220" height="220"><details><summary>Manual enrollment key</summary><p id="secret"></p></details><label>Verification code<input id="setupCode" required maxlength="7" inputmode="numeric" autocomplete="one-time-code"></label><button>Verify and continue</button></form>
+<p id="message" role="alert"></p>
+<p><a href="/hub">Register a business</a> · <a href="/?legacyLogin=1">Initial local administrator setup</a> · <a href="/developer/change-requests">Developer access</a></p>
+</main><script>
+(()=>{
+const $=id=>document.getElementById(id);
+let csrf="",base="",ready=false,stateRevision=0;
+const params=new URLSearchParams(location.search);
+if(["admin","workforce","owner"].includes(params.get("experience")))$("experience").value=params.get("experience");
+const target=()=>{
+ const fallback=({admin:"/",workforce:"/app/access",owner:"/app/owner"})[$("experience").value];
+ const next=params.get("next");if(!next)return fallback;
+ const url=new URL(next,location.origin);
+ const allowed=({admin:["/","/app/business","/app/trades","/app/billing"],workforce:["/app/access","/app/trades"],owner:["/app/owner","/app/billing"]})[$("experience").value];
+ return url.origin===location.origin&&allowed.includes(url.pathname)?url.pathname+url.search+url.hash:fallback;
+};
+async function state(){
+ const revision=++stateRevision,button=$("login").querySelector("button");
+ button.disabled=true;
+ ready=false; base=({admin:"/api/tenant-auth",workforce:"/api/access",owner:"/api/hub"})[$("experience").value];
+ const endpoint=base;
+ $("businessLabel").hidden=$("experience").value==="owner";$("business").required=$("experience").value!=="owner";
+ $("changeLabel").hidden=true;$("newPassword").value="";$("enroll").hidden=true;$("login").hidden=false;$("message").textContent="";
+ try{const response=await fetch(endpoint+"/state",{cache:"no-store"});const data=await response.json();if(revision!==stateRevision)return;if(!response.ok)throw Error(data.error||"Unable to load sign-in.");
+ csrf=data.csrfToken;ready=true;}catch(error){if(revision===stateRevision)$("message").textContent=error.message;}
+ finally{if(revision===stateRevision)button.disabled=!ready;}
+}
+async function submit(path,body){
+ const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify(body)});
+ const data=await response.json();if(!response.ok)throw Error(data.error||"Sign-in failed.");
+ if(data.csrfToken)csrf=data.csrfToken;
+ if(data.passwordChangeRequired){$("changeLabel").hidden=false;$("newPassword").focus();return;}
+ if(data.mfaCodeRequired){$("message").textContent="Enter your authenticator code.";$("code").focus();return;}
+ if(data.mfaEnrollmentRequired){$("login").hidden=true;$("enroll").hidden=false;$("qr").src=data.qrCode;$("secret").textContent=data.secret;return;}
+ if(data.authenticated)location.assign(target());
+}
+$("experience").onchange=state;
+$("login").onsubmit=async event=>{event.preventDefault();if(!ready)return;
+ const role=$("experience").value,button=event.submitter;button.disabled=true;$("message").textContent="";
+ try{await submit(base+(role==="owner"?"/owner/login":"/login"),{email:$("identifier").value,identifier:$("identifier").value,password:$("password").value,bamboohrSubdomain:$("business").value,code:$("code").value,...($("newPassword").value?{newPassword:$("newPassword").value}:{})});}catch(error){$("message").textContent=error.message;}finally{button.disabled=false;}};
+$("enroll").onsubmit=async event=>{event.preventDefault();try{await submit(base+($("experience").value==="owner"?"/owner/verify-mfa":"/verify-mfa"),{code:$("setupCode").value});}catch(error){$("message").textContent=error.message;}};
+state();
+})();
+</script></body></html>

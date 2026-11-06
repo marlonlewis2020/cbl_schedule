@@ -68,6 +68,27 @@ def register(app, s):
     def fail(message, status=400):
         return jsonify(error=message), status
 
+    def personal_location(c, user):
+        if user["role"] != "employee":
+            return None
+        row = c.execute(
+            "SELECT e.schedule_location_id,l.location,e.role,l.name FROM employees e "
+            "JOIN schedule_locations l ON l.id=e.schedule_location_id AND l.tenant_id=e.tenant_id "
+            "WHERE e.tenant_id=? AND e.employee_id=? AND e.active=1 AND e.location=l.location",
+            (user["tenantId"], user["employeeId"]),
+        ).fetchone()
+        if not row:
+            raise ValueError("Your active employee assignment has no verified schedule location. Contact an administrator.")
+        return {"id": row[0], "location": row[1], "role": row[2], "name": row[3]}
+
+    def require_personal_location(c, user, doc, location_id, payload=None):
+        fixed = personal_location(c, user)
+        if fixed and (location_id != fixed["id"] or doc.get("location") != fixed["location"]
+                      or doc.get("role") != fixed["role"]):
+            raise ValueError("Your location or team changed. Reload and select a schedule for your current assignment.")
+        if fixed and payload and payload.get("locationId", fixed["id"]) != fixed["id"]:
+            raise ValueError("Trade location is fixed to your current verified assignment.")
+
     def event(c, trade, user, state, reason):
         c.execute(
             "INSERT INTO shift_trade_events(id,tenant_id,trade_id,state,actor_id,reason,created_at) "
@@ -226,6 +247,7 @@ def register(app, s):
         if a == b:
             raise ValueError("Choose two different employees.")
         people = assignments(c, doc, a, b, user["tenantId"])
+        require_personal_location(c, user, doc, people[a][0][0])
         if user["role"] == "employee" and user["employeeId"] != a:
             raise ValueError("Employee 1 must be your own linked employee record.")
         if user["role"] == "manager" and not visible(c, {"locationId": people[a][0][0]}, user):
@@ -303,19 +325,28 @@ def register(app, s):
         if failure:
             return failure
         with closing(s.database_connect()) as c:
+            try:
+                fixed = personal_location(c, user)
+            except ValueError as error:
+                return fail(str(error), 403)
             groups = s.scoped_portal_groups(c, user) if user["role"] != "admin" else s.portal_schedule_groups(c)
             items = []
             for group in groups:
+                if fixed and group["locationId"] != fixed["id"]:
+                    continue
                 teams = {}
                 for employee in group["employees"]:
                     teams.setdefault(employee["role"], []).append({"id": employee["id"], "name": employee["name"]})
                 for team, employees in teams.items():
+                    if fixed and team != fixed["role"]:
+                        continue
                     items.append({
                         "runId": group["runId"], "locationId": group["locationId"],
                         "locationName": group["locationName"], "team": team,
                         "start": group["start"], "end": group["end"], "employees": employees,
                     })
-        return jsonify(schedules=items, employee1=user["employeeId"] if user["role"] == "employee" else None)
+        return jsonify(schedules=items, employee1=user["employeeId"] if user["role"] == "employee" else None,
+                       lockedLocation=fixed)
 
     @app.post("/api/access/trades/options")
     @app.post("/api/shift-trades/options")
@@ -331,6 +362,7 @@ def register(app, s):
                 doc = schedule(c, p["runId"], user["tenantId"])
                 a, b = p["employeeA"], p["employeeB"]
                 people = assignments(c, doc, a, b, user["tenantId"])
+                require_personal_location(c, user, doc, people[a][0][0], p)
                 if user["role"] == "employee" and a != user["employeeId"]:
                     return fail("Employee 1 is fixed to your own employee record.", 403)
                 if user["role"] == "manager" and not visible(c, {"locationId": people[a][0][0]}, user):
@@ -413,6 +445,7 @@ def register(app, s):
             try:
                 days = selected_days(p)
                 doc = schedule(c, run_id, user["tenantId"], True)
+                require_personal_location(c, user, doc, personal_location(c, user)["id"] if user["role"] == "employee" else None, p)
                 if user["role"] == "employee" and user["employeeId"] != a:
                     return fail("You can request trades only for your own shifts.", 403)
                 people, _, issues, warnings = candidate(c, doc, a, b, days, user)

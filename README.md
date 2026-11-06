@@ -255,7 +255,26 @@ they can be included in a confirmation email.
 
 ## Developer change requests
 
-Open **Developer change requests** from the app menu. On first use, create a
+Open **Developer change requests** from the app menu. Signed-in developers can
+expand **Add a developer account** and confirm their current password to create
+another independent developer login (unique username, password of at least 14
+characters). All developer accounts have full change-request access; business
+administrator credentials do not authorize account creation. Credential changes
+affect only the signed-in developer and invalidate that account's older sessions,
+not other developers. Existing accounts are preserved during schema migration.
+An operator with trusted access to the server can also add an account locally:
+
+```powershell
+cd 'Schedule Creator'
+python scheduler.py add-developer --username new-developer
+```
+
+Enter and confirm the password at the hidden terminal prompts, never as a command
+argument or in chat. This command uses the configured database and performs only
+the developer-account migration/creation, not unrelated initialization. Restrict
+server/database access to trusted operators.
+
+On first use, create a
 developer username and a unique password with at least 14 characters. Initial
 setup is restricted to the computer running the app; there is no built-in
 `developer/developer` credential. The developer log supports sign-in, credential
@@ -277,6 +296,70 @@ manager/employee access, the employee portal, shift trades, payment, and
 Copilot automation remain separate implementation phases.
 
 ## Manager and employee access
+
+### Unified application and attendance downloads
+
+Use `/signin` to choose Business administrator, Manager/employee or Platform owner.
+Business/workforce sign-in includes the business subdomain; existing password
+replacement and MFA enrollment/verification remain required. Initial local
+administrator setup is available from the sign-in page. Shared navigation,
+branding, themes, scoped alerts and sign-out wrap the existing workflows at
+`/app/access`, `/app/trades`, `/app/business`, `/app/owner` and `/app/billing`.
+Legacy URLs and selected-trade links still work. The administrator workspace
+stays at `/`: its IndexedDB identity and accepted schedules are not migrated.
+Platform owners do not receive business permissions. Linked managers explicitly
+switch between personal and management views.
+
+In personal trade mode the current verified location/team and offering employee
+are preselected and cannot be changed. The server rechecks assignments when
+loading options and submitting; a reassignment requires reloading the choices.
+Authorized management users retain their scoped location choices.
+
+Attendance snapshots are Silver+ and download-only for now. Attendance has
+Capture now, Refresh history, View HTML, Download HTML and Download XLSX.
+The interactive HTML dashboard shows executive KPI cards, location/role/
+shift charts and summaries, then employee exceptions and evidence-based risks.
+Location, role, shift, status and search filters coordinate the entire dashboard;
+chart drill-down, sortable exception details and Print / Save PDF are available.
+HTML contains its own data, charts and saved company logo, so downloaded files
+work offline without external services. New captures freeze the business name
+and logo from branding settings; later branding changes do not rewrite history.
+Older captures use only saved evidence, without adding today's branding.
+XLSX downloads remain available with exception colors and employee clock details.
+The primary administrator may enable scheduled captures at 07:00, 15:00 and 23:00
+America/Jamaica. Start the independent worker with:
+
+```powershell
+cd 'Schedule Creator'
+python report_worker.py
+```
+
+Or use `Run Attendance Reports Worker.bat`. Keep it running with the same
+environment/database as Flask; use a service supervisor for unattended
+deployment. The browser does not schedule captures. Scheduling is opt-in,
+requires an active Silver+ membership and exposes the worker's last heartbeat.
+Scheduled cutoffs have unique per-tenant keys. Missed cutoffs older than two
+minutes are recorded as missed rather than retrospectively reconstructed.
+Abandoned running captures become explicit failures after 15 minutes; on-demand
+capture provides recovery. Refresh failures produce clearly marked stale
+downloads, not false successful refreshes. Snapshots preserve the exact cutoff,
+existing worked-time/absence rules, approved-leave exclusion and verified
+overnight carry-in. Both source freshness and actual capture time are recorded.
+There is a one-minute on-demand cooldown.
+
+HTML distinguishes confirmed attendance from clock-in evidence: late records
+without a matching punch or the required worked-time validation are not counted
+as confirmed. Approved leave is excluded; zero expected shifts show N/A.
+Missing punches and saved absences overlap and must not be added together.
+All counts represent shift records, not unique employees or future staffing
+demand. Downloaded reports contain employee information; share only with
+authorized recipients. Offline copies cannot be revoked when a session expires.
+
+Automatic email and email-only/both modes remain deferred by agreement. No email
+is sent by this worker. Staffing-vs-demand interval analytics are not part of
+these attendance downloads and retain their separate Gold/Platinum entitlement.
+SQLite tests and browser checks cover this implementation; the new PostgreSQL
+table policies still require disposable-database deployment acceptance.
 
 Data & settings / Source & backups is restricted to the designated primary
 business administrator. Source import and mapping approval, restore, workspace
