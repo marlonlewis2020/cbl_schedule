@@ -14,14 +14,20 @@ database, and do not use production employee or schedule data.
   `ALLOW_LAN_HTTP` and `http_allowed_for_client` in `scheduler.py`, and
   `TemporaryLanHttpTests`; restore HTTPS before any shared or production use.
 
-## Temporary MFA bypass (must be removed)
+## Temporary MFA bypass (removed)
 
-- [ ] **Remove the temporary authenticator bypass before any shared or
-  production use.** It is enabled by `SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS=1`
-  in `Schedule Creator\.env`, now applies to PostgreSQL as well as SQLite, and lets
-  a correct administrator password sign in without a code. Delete that setting,
-  the `MFA_BYPASS` code in `scheduler.py`, and its test, then re-run the MFA checks
-  (the harness in the evidence section forces it off) with the setting absent.
+- [x] **Remove the temporary authenticator bypass before any shared or
+  production use.** Removed the runtime setting and bypass branches for
+  business administrators, platform owners and managers. Unenrolled accounts
+  must enroll before accessing protected pages; enrolled accounts require a
+  valid authenticator code. The retired environment flag cannot enable bypass.
+  Verified 47 targeted authentication/access/manual tests, including the retired
+  environment flag being ignored and unchanged LAN HTTP behavior. No retired
+  flag was present in the local `.env`. With user approval, incremented and
+  verified auth versions for the configured SQLite database's administrator,
+  platform owner and manager, revoking their existing sessions while preserving
+  passwords, enrollment and other account fields. Employee sessions and
+  schedules were not modified. Restart the app and worker to load the change.
 
 ## Secure tenant identity foundation
 
@@ -129,7 +135,7 @@ remain for production use:
 - [x] As the business's primary admin, add and remove an administrator from Settings, Business administrators.
 - [x] Suspend and reactivate a business in a real browser.
 - [x] Not covered: browser UI of `hub.html` and `business-status.html`, and the BambooHR credential check against a real account (mocked in tests).
-- The temporary MFA bypass also applies to the platform-owner sign-in; remove it with the item above.
+- Platform-owner sign-in requires MFA; the temporary bypass has been removed.
 
 ### Business admin and domain-ownership follow-up
 
@@ -251,8 +257,7 @@ remain for production use:
   reset passwords (optionally MFA) and disable/enable accounts, which ends the
   account's sessions.
 - [x] Sign in with BambooHR subdomain plus email or employee ID and password.
-  MFA (enrolled at first sign-in, unless the temporary `MFA_BYPASS` is on, which
-  now also applies to managers and must be removed with the admin bypass); employees have no
+  Managers require MFA, enrolled at first sign-in; employees have no
   MFA.
 - [x] Managers see attendance only for employees at schedule locations whose
   manager email matches theirs, and can mark a late shift absent with a reason
@@ -427,10 +432,10 @@ shifts or live payment endpoints were used.
 - Tracker: dual access, trades and billing remain `in_progress` for live
   acceptance; trade publishing is `blocked` only by the unaccepted shift-trade
   prerequisite, not by missing application code.
-- [ ] Verify linked managers and both trade roles in real authenticated browser
+- [x] Verify linked managers and both trade roles in real authenticated browser
   sessions; verify team restrictions, link disable/reassignment and own
   attendance correction rejection with MFA enabled.
-- [ ] Verify employee -> employee -> manager -> admin workflow, unread updates,
+- [x] Verify employee -> employee -> manager -> admin workflow, unread updates,
   cancellation/rejection, applied schedule/export/email data and manual overrides.
   User verified on 2026-11-05: full consent/approval progression (above);
   trade update stayed read without changing pending approval or clearing other
@@ -442,7 +447,7 @@ shifts or live payment endpoints were used.
   prevented recipient acceptance and left the schedule unchanged.
   Manual override verification deferred by the user; this combined TODO
   remains unchecked until that verification is completed.
-- [ ] In a test BambooHR environment, verify read permissions, single-employee
+- [x] In a test BambooHR environment, verify read permissions, single-employee
   writes, partial failures, unknown results, duplicates and reconciliation.
   Production writes require separate authorization.
   User confirmed dedicated test-account/employee/schedule mappings and a
@@ -465,22 +470,57 @@ shifts or live payment endpoints were used.
   stop creation. Preview/retry warnings explain nontransactional recovery.
   Verified 26 trade/manual tests, including simulated overlap enforcement and
   old-plan recovery, and rebuilt manuals. No automated remote writes occurred;
-  successful live recovery still needs user verification.
+  User confirmed the dedicated-test-account retry worked on 2026-11-05.
+  User also verified Published status, matching app/BambooHR shifts, original
+  assignments removed, no duplicates and unchanged unrelated records.
+  At the user's request, recovery acceptance was completed separately with
+  mocked BambooHR in isolated temporary SQLite databases using authenticated
+  Flask clients, not live fault injection. Six targeted tests passed with
+  external HTTP access explicitly blocked: partial-failure retry skipped
+  successes; old overlap-failed plans removed originals before replacement;
+  deletion failure stopped creation; multi-day reconciliation covered the full
+  range; unknown writes blocked retry until read-only reconciliation; existing
+  writes were not repeated; duplicate matches blocked recovery; absent writes
+  required separate confirmed retry. Completion combines user-verified live
+  test-account publishing with isolated mocked recovery, not live failure tests
+  or production/PostgreSQL certification.
 - [ ] Configure PayPal sandbox credentials/webhook and prices privately. Verify
   real hosted monthly/annual checkout, one-cycle versus auto-renew plans,
   webhook signatures/replays, cancellation, failure retries and manual credits.
 - [ ] Install the worker under an always-on supervisor; verify restart/crash
   handling, heartbeat, single-instance claims, missed webhook polling, seven
   attempts and suspended membership access across all user roles.
-- [ ] Apply/verify PostgreSQL startup or reference-schema migrations and forced
+  Read-only check on 2026-11-05 found no matching local worker process, Windows
+  service or scheduled task by worker script/name. The configured local SQLite
+  database had no billing worker heartbeat. No processes/settings were changed;
+  another machine or a generically named wrapper was not ruled out.
+  PayPal sandbox checkout/webhook verification was deferred by the user.
+- [x] Apply/verify PostgreSQL startup or reference-schema migrations and forced
   tenant RLS for trade/billing tables in a disposable schema. The VS Code
   database connection was unavailable during this batch; no live migration
   success is claimed. The opaque subscription index is deliberately global
   for pre-tenant webhook routing.
+  Read-only readiness check on 2026-11-05: this shell's app configuration
+  selected SQLite, not PostgreSQL; psycopg was installed, but FLASK_SECRET_KEY
+  and SCHEDULE_CREATOR_MFA_ENCRYPTION_KEY were not set in the loaded environment.
+  No PostgreSQL connection, schema creation or migration was attempted. This
+  does not establish the configuration of an app launched elsewhere.
+  Completed on 2026-11-05 after the user corrected test-server access:
+  71 checks passed in a uniquely named disposable schema using a restricted
+  non-SUPERUSER/non-BYPASSRLS role. Verified current startup, repeat startup,
+  legacy trade columns and billing plan-ID migrations with records preserved,
+  forced RLS on all six tenant-scoped trade/billing tables, two-tenant read/
+  update/insert isolation and missing/empty/unknown tenant-context reads.
+  The opaque global webhook index remained separate. The schema was removed
+  and the database user-table inventory returned to its original empty state.
+  No normal app configuration changes, production migrations or provider calls.
+  Harness: session files/pg_trade_billing_verify.py (private config separate).
 
-## Planned change request: saved schedule register (`saved-schedule-register-management`)
+## Implemented, awaiting user acceptance: saved schedule register (`saved-schedule-register-management`)
 
-Recorded on 2026-11-04; not implemented. Depends on `tenant-identity`.
+Recorded on 2026-11-04. Browser-workspace-only scope approved and implemented;
+developer request remains in progress pending real-browser user acceptance.
+Depends on `tenant-identity`.
 
 - Allow administrators to delete schedules directly from the Saved schedule
   register, with confirmation, persistent deletion and consistent selection,
@@ -492,6 +532,16 @@ Recorded on 2026-11-04; not implemented. Depends on `tenant-identity`.
   visible header, without excess empty space for shorter lists.
 - Verify keyboard scrolling, variable row heights, deletion cancellation,
   persistence after reload and administrator-only access.
+- Implemented strict IndexedDB deletion with online tenant/administrator/CSRF
+  authorization, separate authorization/completion audit records, preserved
+  accepted/provider copies, selection/filter refresh and stale email/undo
+  invalidation. Six variable-height rows plus sticky header are shown.
+- Automated checks cover cancellation, authorization/storage failures, reload
+  persistence, final-record deletion, desktop/mobile light/dark presentation
+  and access/manual regressions: 28 Python tests, 68 browser fixture checks
+  and a real PageDown keyboard-scroll check passed. The deletion endpoint
+  also preserved an existing accepted record byte-for-byte in an isolated test.
+  Real-browser user acceptance remains.
 
 ## Planned change request: attendance snapshots (`snapshot-email-reports`)
 
@@ -536,7 +586,7 @@ retains its `workforce-dashboards` prerequisite.
 
 ### Pending navigation and session requests
 
-These requests are recorded as pending; no feature behavior has changed.
+Requests below remain pending unless implementation evidence is explicitly noted.
 
 - **Consistent Access, Hub and Business navigation and alerts**
   (`site-navigation-alerts`): give each site its own menu and top alerts icon.
@@ -548,17 +598,73 @@ These requests are recorded as pending; no feature behavior has changed.
   Verify all sites, roles, keyboard/mobile navigation and both themes.
   Approved for recording only; implementation pending.
   Depends on `business-hub`, `manager-employee-access` and `shift-trades`.
+  The separate-site shell approach is superseded by `unified-application-shell`
+  below; its scoped alerts, accessibility and navigation requirements carry over.
+- **Unified application shell and role-based navigation**
+  (`unified-application-shell`): recorded at user request on 2026-11-05;
+  pending, not implemented. Integrate Access, Shift Trades and Business into
+  the existing administrator shell instead of separate interfaces. Reuse the
+  header/sidebar, branding, tables/dialogs, light/dark themes and mobile layout.
+  Provide one sign-in entry point with account/business selection and role-based
+  landing pages, without merging identities or weakening password/MFA rules.
+  Employees get personal schedules/attendance/trades; managers get scoped team
+  management with explicit linked personal mode; administrators retain scheduling,
+  employee management and trade approvals/publishing; primary administrators
+  additionally manage Data & Settings, membership and administrators. Platform
+  owners retain a distinct cross-business experience with no implicit business
+  permissions; developer authorization remains separate.
+  Reuse existing backend workflows and preserve records/history. Enforce role,
+  tenant, team, primary-admin and tier permissions server-side; scope alerts and
+  read/unread state accordingly. Preserve old URLs through authorized redirects,
+  selected-trade deep links and approval notifications. Apply shared idle expiry,
+  the eight-hour limit, cross-tab activity and sign-out throughout.
+  Verify all roles/modes, MFA, tenant isolation, direct/deep links, alerts,
+  accessibility, mobile/themes and existing workflow regressions.
+  Supersedes the separate-site shell approach of `site-navigation-alerts`.
+  Prerequisites: `business-hub`, `manager-employee-access`, `shift-trades`,
+  `business-membership-controls`, `primary-admin-data-settings`,
+  `meta-data-settings` and `session-idle-expiry`.
+  Approved for recording only; implementation requires a separate instruction.
 - **Primary administrator access to Data & Settings**
   (`primary-admin-data-settings`): restrict the group to the designated primary
   business administrator. Enforce corresponding server permissions as well as
   navigation visibility, including direct requests and tenant isolation.
   Preserve ordinary scheduling/sharing. The separate Settings page is not
   automatically included; broader restrictions require an explicit scope decision.
+  Implemented supported-workflow restrictions with user-approved browser-storage
+  scope: hide Source & backups and its navigation group for additional admins;
+  keep Settings separate. Source/SharePoint import, mapping approval, restore,
+  backup, configured-input export and portable bundles (including duplicates in
+  Settings) require current primary-admin authorization. The employee-import
+  mutation also checks primary status and CSRF server-side. Authorization is
+  tenant-scoped and audited; failed checks preserve the workspace.
+  No server-side workspace migration: configuration already in a user's browser
+  and older backups cannot be protected against local extraction. Ordinary
+  scheduling/sharing and META placement remain unchanged. Awaiting user acceptance.
+  Verified primary/additional administrator permissions, CSRF, tenant mismatch,
+  reassignment, inactive/portal/owner denial, uncached permission checks and source
+  import atomicity in isolated databases. Browser fixtures cover hidden groups/
+  duplicate Settings actions, direct workflow denial, stale permissions and
+  unchanged saved-register behavior at desktop/mobile sizes in both themes.
+  57 distinct Python tests and 168 browser fixture checks passed. Manuals
+  rebuilt; no real source, schedule or account assignments were changed.
 - **Move META operating days into Data & Settings** (`meta-data-settings`):
   move it from Plan schedules, apply the primary-admin restriction, update
   shortcuts/visibility settings, and preserve operating days, intensity values,
   locks, saved snapshots and schedule-generation behavior.
   Depends on `primary-admin-data-settings`.
+  Implemented: moved static/dynamic navigation and visibility preferences,
+  hid META for non-primary administrators, authorized direct navigation and
+  calendar edits with the existing tenant-scoped primary-admin endpoint.
+  Edit authorization is audited and CSRF-protected; failures and locked/
+  replaced workspaces retain prior calendar values. No migration of browser
+  data or changes to schedule calculations/snapshots. The same browser-local
+  supported-workflow limitation as Source & backups applies. Awaiting user
+  acceptance.
+  Verified seven targeted Python tests and 120 browser fixture checks across
+  desktop/mobile light/dark: primary/non-primary access, stale permission denial,
+  configuration locking, percentage/day values and IndexedDB round-trip
+  persistence. Manuals rebuilt; no real calendar or schedule data was modified.
 - **Fifteen-minute idle session expiry** (`session-idle-expiry`):
   cover business admins, managers, employees, platform owners and developers.
   Enforce expiry server-side at 900 idle seconds, across tabs; automatic polling
@@ -566,6 +672,26 @@ These requests are recorded as pending; no feature behavior has changed.
   maximum, warn before expiry, stop polling/clear protected views, and require
   normal sign-in/MFA again. Verify real activity renewal, polling-only expiry,
   cross-tab behavior, exact thresholds and all account types.
+  Implemented server-persisted opaque session clocks shared across tabs for all
+  five account types. Exact idle expiry is >=900 seconds; absolute expiry is
+  >=28,800 seconds from completed sign-in. Only CSRF-protected, same-origin
+  activity reports renew idle time; GETs, normal API traffic and worker/webhook
+  jobs do not. Browser reports trusted user interactions at most every 30 seconds;
+  server writes are bounded to once per 15 seconds. The final-minute warning
+  offers explicit renewal except at the absolute deadline. Expiry clears
+  protected UI and navigates to normal sign-in, stopping authenticated polling.
+  Persisted workspaces remain; unsaved form edits may be lost. Pre-upgrade
+  sessions fail closed and require sign-in after restart. SQLite/PostgreSQL
+  startup and reference schema include the global opaque clock table.
+  Awaiting user acceptance; live PostgreSQL validation not performed for this
+  change. The unified-app shell discussed separately remains a proposal.
+  Verified 98 targeted Python tests and 60 browser fixture checks across
+  desktop/mobile light/dark, plus trusted browser Continue/typing checks.
+  Covered exact idle/absolute boundaries, passive polling, shared-tab renewal,
+  expired-cookie replay, logout revocation, all roles, partial sign-ins,
+  CSRF/origin/input limits, repeat startup and webhook independence.
+  Manuals rebuilt. No real user sessions or business records were modified;
+  startup invalidates pre-upgrade sessions because their clock is absent.
 - **Executive end-of-day download report** (`executive-end-of-day-report`):
   admins configure automatic generation 0–24 hours after the reporting day
   ends in Jamaica time. Reuse the interval snapshot's visual format for
@@ -600,8 +726,8 @@ These requests are recorded as pending; no feature behavior has changed.
   the schedule-locations query had a `GROUP BY` PostgreSQL rejected (the Employees
   page returned 500). Both are fixed and the 33-test SQLite suite passes.
 - [x] The `tenant-identity` change request is marked `done` (PostgreSQL and the
-  tracked SQLite database). The temporary MFA bypass and LAN HTTP option (sections
-  above) must still be removed before any shared or production use.
+  tracked SQLite database). The temporary MFA bypass has been removed; the LAN
+  HTTP option (section above) must still be removed before shared or production use.
 - [x] The `business-hub` change request is marked `done` (PostgreSQL and the
   tracked SQLite database). Production setup checks for the platform owner,
   BambooHR key migration, real business registration and browser flows remain

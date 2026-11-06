@@ -79,5 +79,9 @@
 .trade-page details{margin-top:16px}.trade-page summary{cursor:pointer;font-weight:600}
 .trade-approval-dialog{box-sizing:border-box;width:min(1200px,96vw);max-width:96vw;height:90vh;padding:16px;overflow:auto}
 .trade-approval-dialog iframe{width:100%;height:calc(100% - 70px);border:0;border-radius:8px}
+.schedule-register{overflow:auto}
+.schedule-register table{border-collapse:separate;border-spacing:0}
+.schedule-register thead th{position:sticky;top:0;z-index:1}
+.schedule-register:focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:3px}
 @media(max-width:600px){.trade-page{margin:12px}.trade-page main,.trade-page .trade-card{padding:16px}.trade-page-header{flex-wrap:wrap}.trade-page .trade-swap-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.workforce-trade{padding:16px}.workforce-trade .trade-fields{grid-template-columns:1fr}.workforce-trade footer{flex-wrap:wrap}}

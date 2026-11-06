@@ -22,6 +22,13 @@
 
 BEGIN;
 
+-- Global opaque browser-session clocks; no account or tenant data is stored.
+CREATE TABLE IF NOT EXISTS browser_sessions (
+    id TEXT PRIMARY KEY,
+    started_at BIGINT NOT NULL,
+    last_activity BIGINT NOT NULL
+);
+
 -- Tenant data (row-level security, composite keys led by tenant_id) ----------
 
 CREATE TABLE IF NOT EXISTS accepted_schedules (

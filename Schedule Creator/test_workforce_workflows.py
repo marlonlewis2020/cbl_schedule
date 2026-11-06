@@ -717,6 +717,46 @@ class TradeWorkflowTests(unittest.TestCase):
             writes.assert_not_called()
 
 
+    def test_unknown_missing_write_requires_explicit_retry_and_duplicate_matches_block_it(self):
+        doc = self.seed()
+        payload = {"scheduleId": 501, "employeeIds": [101],
+                   "start": doc["start"] + "T19:00:00+00:00",
+                   "end": doc["start"] + "T23:00:00+00:00"}
+        trade = self.create()
+        ops = [{"method": "POST", "path": "scheduling/shifts",
+                "payload": payload, "state": "unknown"}]
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("INSERT INTO shift_trade_publish VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                      (trade, scheduler.DEFAULT_TENANT_ID, "unused", "{}", json.dumps(doc),
+                       json.dumps(ops), "bamboohr", "unknown"))
+        body = {"confirmed": True, "reason": "Isolated recovery verification"}
+        with patch.object(scheduler, "bamboo_shift_request") as writes:
+            duplicates = [dict(payload, id=str(i)) for i in (901, 902)]
+            with patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=duplicates):
+                response = self.admin.post(f"/api/shift-trades/{trade}/reconcile",
+                                           headers=self.headers, json=body)
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("Duplicate", response.get_json()["error"])
+            self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/retry",
+                                            headers=self.headers, json={"confirmed": True}).status_code, 409)
+            with patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[]):
+                response = self.admin.post(f"/api/shift-trades/{trade}/reconcile",
+                                           headers=self.headers, json=body)
+                self.assertEqual(response.status_code, 200, response.get_json())
+                self.assertEqual(response.get_json()["operations"][0]["state"], "pending")
+            writes.assert_not_called()
+            self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/retry",
+                                            headers=self.headers, json={"confirmed": False}).status_code, 400)
+            writes.assert_not_called()
+        with patch.object(scheduler, "bamboo_shift_request",
+                          return_value={"success": True, "status": 201}) as writes:
+            response = self.admin.post(f"/api/shift-trades/{trade}/retry",
+                                       headers=self.headers, json={"confirmed": True})
+            self.assertEqual(response.status_code, 200, response.get_json())
+            writes.assert_called_once()
+            self.assertEqual(response.get_json()["state"], "published")
+
+
 class BillingWorkflowTests(unittest.TestCase):
     def setUp(self):
         test_scheduler.ManagerEmployeeAccessTests.setUp(self)

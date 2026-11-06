@@ -48,6 +48,7 @@ from directory_seed import (
 )
 import workforce_trades
 import membership_billing
+import session_idle
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -74,8 +75,6 @@ def http_allowed_for_client() -> bool:
         return False
     return address.is_loopback or address.is_private
 
-# TEMPORARY: lets a correct password sign in without MFA (SQLite and PostgreSQL); remove later.
-MFA_BYPASS = os.environ.get("SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS", "").strip() == "1"
 if TRUSTED_PROXY_HOPS < 0:
     raise RuntimeError("SCHEDULE_CREATOR_TRUSTED_PROXY_HOPS cannot be negative.")
 MAX_ACCEPTED_SCHEDULE_BYTES = 16 * 1024 * 1024
@@ -97,6 +96,7 @@ STATIC_ASSETS = {
     "CBL-MicrosoftAuth.html",
     "workforce-ui.css",
     "trade-picker.js",
+    "session-idle.js",
 }
 DEVELOPER_REQUESTS = (
     (
@@ -218,6 +218,13 @@ DEVELOPER_REQUESTS = (
         "Consistent Access, Hub and Business navigation and alerts",
         "Add a navigation menu to each Access, Hub and Business site, with similar layout and design to the admin hub and consistent app branding, light/dark themes and responsive behavior. Put a site-specific alerts icon at the top of each site, with authorized site-scoped alerts and unread indicators; do not expose other sites', users' or tenants' protected alerts. Place shift trades and their inbox under Access navigation, retaining employee/personal-manager/team-manager permissions and administrator review, approval and publishing access. Preserve each site's existing functions, content organization and workflows while aligning its navigation and visual shell with the admin hub; do not remove functionality or alter permissions as a styling side effect. Support accessible keyboard navigation and mobile menus. Reuse existing alert/read behavior where available and surface failures explicitly. Verify navigation, alert scope, unread/read behavior, role permissions and light/dark mobile layouts on all three sites. User approved recording this request only; implementation remains pending.",
         ("business-hub", "manager-employee-access", "shift-trades"),
+    ),
+    (
+        "unified-application-shell",
+        "Unified application shell and role-based navigation",
+        "Unify Access, Shift Trades and Business management within the existing administrator application's visual shell, rather than maintaining separate site interfaces. Supersedes the separate-site shell approach in site-navigation-alerts while retaining its authorized alerts, navigation and accessibility requirements. Reuse the administrator header, sidebar, branding, dialogs, tables, responsive layouts and light/dark themes. Provide one sign-in entry point that identifies the account and business without merging identities or granting implicit access; preserve password-change, MFA and tenant-selection requirements. Route employees to personal schedules, attendance, trade requests and notifications; managers to authorized team attendance and trade approvals with an explicit linked personal-employee mode; business administrators to scheduling, employee management, trade approval/publishing and business information; primary administrators additionally to Data & Settings and membership/administrator management; platform owners to an explicitly separated cross-business administration experience without implicit business-user permissions. Keep developer access separately authorized. Build role-aware navigation and landing pages, reusing existing backend workflows and account identities. Enforce role, tenant, team, primary-admin and membership-entitlement permissions server-side on every protected endpoint; hidden menus are not authorization. Integrate authorized alerts with unread/read behavior without leaking other users' or tenants' data. Preserve schedule data, trade history, approvals, publishing journals and existing workflows. Retain old Access, Trades and Business URLs as authorized redirects to integrated views, preserving selected-trade deep links and administrator approval notifications. Apply the shared 15-minute idle warning/expiry, eight-hour absolute deadline, cross-tab activity and sign-out consistently. Verify every role and personal/management mode, tenant isolation, direct/deep-link access, MFA, notifications, keyboard/mobile navigation, both themes and existing scheduling/trade/business regressions. Approved for recording only; implementation pending.",
+        ("business-hub", "manager-employee-access", "shift-trades", "business-membership-controls",
+         "primary-admin-data-settings", "meta-data-settings", "session-idle-expiry"),
     ),
     (
         "executive-end-of-day-report",
@@ -695,6 +702,7 @@ def initialize_database() -> None:
         )
         connection.executescript(
             f"""
+            {session_idle.SCHEMA}
             CREATE TABLE IF NOT EXISTS schedule_locations (
                 id TEXT NOT NULL,
                 tenant_id TEXT NOT NULL DEFAULT {tenant_default},
@@ -2539,9 +2547,7 @@ def tenant_authenticated() -> bool:
             """,
             (admin_id, tenant_id),
         ).fetchone()
-    if not account or account[0] != auth_version or not account[1] or not (
-        account[2] or MFA_BYPASS
-    ):
+    if not account or account[0] != auth_version or not account[1] or not account[2]:
         session.clear()
         g.tenant_id = DEFAULT_TENANT_ID
         return False
@@ -2665,6 +2671,9 @@ def cross_origin_request() -> bool:
     )
 
 
+session_idle.register(app, sys.modules[__name__])
+
+
 @app.before_request
 def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
@@ -2676,6 +2685,8 @@ def enforce_tenant_authentication():
             400,
         )
     if request.path == "/api/payments/paypal/webhook":
+        return None
+    if request.path == "/api/session/state":
         return None
     if request.path.startswith("/api/hub/"):
         if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
@@ -2716,7 +2727,7 @@ def audit_tenant_mutation(response):
     if request.path == "/" or request.path.startswith(
         ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub", "/api/access",
          "/access", "/api/schedule-portal/", "/trades", "/billing",
-         "/api/shift-trades", "/api/shift-overrides")
+         "/api/shift-trades", "/api/shift-overrides", "/api/workspace/")
     ):
         response.headers["Cache-Control"] = "no-store"
     actor_id = session.get("tenant_admin_id") or session.get("pending_tenant_admin_id")
@@ -2767,7 +2778,7 @@ def tenant_auth_state():
         profile = (
             connection.execute(
                 """
-                SELECT display_name FROM tenant_admins
+                SELECT display_name, is_primary FROM tenant_admins
                 WHERE id = ? AND tenant_id = ?
                 """,
                 (session.get("tenant_admin_id"), active_tenant_id()),
@@ -2779,8 +2790,10 @@ def tenant_auth_state():
     return jsonify(
         configured=configured,
         authenticated=authenticated,
+        tenantId=active_tenant_id() if authenticated else None,
         email=session.get("tenant_admin_email") if authenticated else None,
         displayName=profile[0] if profile else None,
+        isPrimaryAdmin=bool(profile and profile[1]),
         businessStatus=g.tenant_status if authenticated else None,
         membership=membership,
         csrfToken=csrf_token,
@@ -2790,6 +2803,25 @@ def tenant_auth_state():
             and request.remote_addr in {"127.0.0.1", "::1"}
         ),
     )
+
+
+@app.post("/api/workspace/schedule-deletions")
+def authorize_workspace_schedule_deletion():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("scope") != "browser-workspace":
+        return jsonify(error="Confirm browser-workspace deletion only."), 400
+    if payload.get("tenantId") != active_tenant_id():
+        return jsonify(error="The signed-in business changed. Reload before deleting."), 409
+    run_id = payload.get("runId")
+    if not isinstance(run_id, str) or not 1 <= len(run_id.strip()) <= 200:
+        return jsonify(error="Choose a valid saved workspace schedule."), 400
+    with closing(database_connect()) as connection, connection:
+        hub_audit(connection, "workspace-schedule-delete-authorized", active_tenant_id(),
+                  json.dumps({"runId": run_id, "scope": "browser-workspace"}),
+                  actor_email=session.get("tenant_admin_email"))
+    return jsonify(authorized=True, scope="browser-workspace")
 
 
 def membership_features_for_request() -> dict[str, bool]:
@@ -2913,11 +2945,7 @@ def tenant_admin_login():
                 connection, login_key, failures, window_started_at, now
             )
             return jsonify(error="The email or password is incorrect."), 401
-        if MFA_BYPASS:
-            connection.execute(
-                "DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,)
-            )
-        elif not account[5]:
+        if not account[5]:
             g.tenant_id = account[1]
             secret, otp_uri = start_mfa_enrollment(
                 connection, account[0], account[2]
@@ -3100,9 +3128,7 @@ def platform_owner_authenticated() -> bool:
             "SELECT auth_version, active, mfa_enabled FROM platform_owners WHERE id = ?",
             (owner_id,),
         ).fetchone()
-    if not account or account[0] != auth_version or not account[1] or not (
-        account[2] or MFA_BYPASS
-    ):
+    if not account or account[0] != auth_version or not account[1] or not account[2]:
         clear_hub_session()
         return False
     return True
@@ -3294,9 +3320,7 @@ def hub_owner_login():
         if not account or not check_password_hash(account[2], payload["password"]):
             record_tenant_auth_failure(connection, login_key, *attempt_state, now)
             return jsonify(error="The email or password is incorrect."), 401
-        if MFA_BYPASS:
-            connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
-        elif not account[4]:
+        if not account[4]:
             secret, otp_uri = start_mfa_enrollment(
                 connection, account[0], account[1], platform_owner=True
             )
@@ -3687,8 +3711,32 @@ def primary_admin_guard():
             (session.get("tenant_admin_id"), active_tenant_id()),
         ).fetchone()
     if not admin or not admin[0]:
-        return jsonify(error="Only the main business administrator can manage administrators or membership."), 403
+        return jsonify(error="Only the main business administrator can perform this operation."), 403
     return None
+
+
+@app.route("/api/workspace/data-settings", methods=["GET", "POST"])
+def workspace_data_settings():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    if request.method == "GET":
+        return jsonify(authorized=True, tenantId=active_tenant_id())
+    payload = request.get_json(silent=True)
+    operation = payload.get("operation") if isinstance(payload, dict) else None
+    if not isinstance(operation, str) or operation not in {
+        "source-import", "restore", "backup", "configured-inputs", "portable", "meta-update"
+    }:
+        return jsonify(error="Choose a valid Data & Settings operation."), 400
+    if payload.get("tenantId") != active_tenant_id():
+        return jsonify(error="The signed-in business changed. Reload before continuing."), 409
+    with closing(database_connect()) as connection, connection:
+        hub_audit(
+            connection, "workspace-data-settings-authorized", active_tenant_id(),
+            json.dumps({"operation": operation, "scope": "browser-workspace"}),
+            actor_email=session.get("tenant_admin_email"),
+        )
+    return jsonify(authorized=True, tenantId=active_tenant_id())
 
 
 @app.post("/api/business/membership")
@@ -4054,7 +4102,7 @@ def access_user() -> dict[str, object] | None:
         or row[4] != version
         or not row[5]
         or row[7]
-        or (row[0] == "manager" and not row[6] and not MFA_BYPASS)
+        or (row[0] == "manager" and not row[6])
     ):
         session.clear()
         g.tenant_id = DEFAULT_TENANT_ID
@@ -4661,7 +4709,7 @@ def access_login():
                 return jsonify(passwordChangeRequired=True)
             if not 14 <= len(new_password) <= 1024 or new_password == password:
                 return jsonify(error="Choose a new password of at least 14 characters that differs from the temporary one."), 400
-        if role == "manager" and account[8] and not MFA_BYPASS:
+        if role == "manager" and account[8]:
             if not isinstance(code, str) or not code.strip():
                 return jsonify(mfaCodeRequired=True)
             try:
@@ -4685,7 +4733,7 @@ def access_login():
                 (generate_password_hash(new_password), version, user_id, tenant_id),
             )
         connection.execute("DELETE FROM tenant_login_attempts WHERE login_key = ?", (login_key,))
-        if role == "manager" and not account[8] and not MFA_BYPASS:
+        if role == "manager" and not account[8]:
             secret = new_totp_secret()
             connection.execute(
                 "UPDATE tenant_users SET mfa_pending_secret = ? WHERE id = ? AND tenant_id = ?",
@@ -6282,6 +6330,9 @@ def update_employee_roles():
 
 @app.put("/api/employees/import-review")
 def confirm_imported_employee_mappings():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
     payload = request.get_json(silent=True)
     mappings = payload.get("employees") if isinstance(payload, dict) else None
     if not isinstance(mappings, list) or not mappings:

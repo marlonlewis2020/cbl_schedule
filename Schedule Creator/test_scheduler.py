@@ -16,7 +16,6 @@ import scheduler
 
 # Unit tests must never use the deployment database loaded from .env.
 scheduler.DATABASE_URL = ""
-scheduler.MFA_BYPASS = False
 
 def authenticate_test_admin(client):
     with closing(scheduler.database_connect()) as connection, connection:
@@ -24,8 +23,8 @@ def authenticate_test_admin(client):
             """
             INSERT INTO tenant_admins
                 (id, tenant_id, email, display_name, password_hash,
-                 mfa_secret, mfa_enabled, active, auth_version)
-            VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1)
+                 mfa_secret, mfa_enabled, active, auth_version, is_primary)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1, 1)
             """,
             (
                 "test-admin",
@@ -42,10 +41,19 @@ def authenticate_test_admin(client):
         browser_session["tenant_admin_email"] = "test-admin@example.com"
         browser_session["tenant_auth_version"] = 1
         browser_session["tenant_auth_csrf"] = "test-csrf-token"
+        token = scheduler.secrets.token_urlsafe(32)
+        browser_session["idle_session_id"] = token
+        browser_session["idle_csrf"] = "idle-test-token"
+    with closing(scheduler.database_connect()) as connection, connection:
+        now = int(time.time())
+        connection.execute(
+            "INSERT INTO browser_sessions(id,started_at,last_activity) VALUES(?,?,?)",
+            (token, now, now),
+        )
 
 
-class TemporaryMfaBypassTests(unittest.TestCase):
-    def test_bypass_signs_in_with_password_only_when_enabled(self):
+class RetiredMfaBypassTests(unittest.TestCase):
+    def test_obsolete_environment_setting_cannot_skip_admin_enrollment(self):
         with tempfile.TemporaryDirectory() as directory:
             original_path = scheduler.DATABASE_PATH
             scheduler.DATABASE_PATH = Path(directory) / "bypass.sqlite3"
@@ -53,25 +61,133 @@ class TemporaryMfaBypassTests(unittest.TestCase):
                 scheduler.initialize_database()
                 scheduler.provision_tenant_admin("A", "a@example.com", "test-password-123456")
                 credentials = {"email": "a@example.com", "password": "test-password-123456"}
-                for enabled, expected in ((False, 200), (True, 200)):
+                for setting in ("", "1"):
                     client = scheduler.app.test_client()
                     token = client.get("/api/tenant-auth/state").get_json()["csrfToken"]
-                    with patch.object(scheduler, "MFA_BYPASS", enabled):
+                    with patch.dict(os.environ, {"SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS": setting}):
                         response = client.post(
                             "/api/tenant-auth/login",
                             headers={"X-CSRF-Token": token},
                             json=credentials | {"bamboohrSubdomain": "cbljm"},
                         )
-                        self.assertEqual(response.status_code, expected)
-                        self.assertEqual(
-                            bool(response.get_json().get("authenticated")), enabled
-                        )
-                        self.assertEqual(
-                            client.get("/api/employees").status_code,
-                            200 if enabled else 401,
-                        )
+                        self.assertEqual(response.status_code, 200)
+                        self.assertTrue(response.get_json()["mfaEnrollmentRequired"])
+                        self.assertFalse(response.get_json().get("authenticated"))
+                        self.assertEqual(client.get("/api/employees").status_code, 401)
             finally:
                 scheduler.DATABASE_PATH = original_path
+
+
+class PrimaryAdminDataSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.original_path = scheduler.DATABASE_PATH
+        scheduler.DATABASE_PATH = Path(self.directory.name) / "primary.sqlite3"
+        scheduler.initialize_database()
+        self.primary = scheduler.app.test_client()
+        authenticate_test_admin(self.primary)
+        self.headers = {"X-CSRF-Token": "test-csrf-token"}
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """INSERT INTO tenant_admins
+                   (id, tenant_id, email, display_name, password_hash,
+                    mfa_secret, mfa_enabled, active, auth_version, is_primary)
+                   SELECT 'additional', tenant_id, 'additional@example.test',
+                          display_name, password_hash, mfa_secret, 1, 1, 1, 0
+                   FROM tenant_admins WHERE id='test-admin'"""
+            )
+        self.additional = self.admin_client("additional")
+
+    def tearDown(self):
+        scheduler.DATABASE_PATH = self.original_path
+        self.directory.cleanup()
+
+    def admin_client(self, admin_id, tenant_id=None):
+        client = scheduler.app.test_client()
+        with self.primary.session_transaction() as current:
+            state = dict(current)
+        state["tenant_admin_id"] = admin_id
+        state["tenant_id"] = tenant_id or scheduler.DEFAULT_TENANT_ID
+        with client.session_transaction() as current:
+            current.update(state)
+        return client
+
+    def test_primary_operations_require_live_permission_tenant_and_csrf(self):
+        path = "/api/workspace/data-settings"
+        state = self.primary.get("/api/tenant-auth/state").get_json()
+        self.assertTrue(state["isPrimaryAdmin"])
+        self.assertFalse(self.additional.get("/api/tenant-auth/state").get_json()["isPrimaryAdmin"])
+        permission = self.primary.get(path)
+        self.assertEqual(permission.status_code, 200)
+        self.assertEqual(permission.headers["Cache-Control"], "no-store")
+        for operation in ("source-import", "restore", "backup", "configured-inputs", "portable", "meta-update"):
+            payload = {"operation": operation, "tenantId": scheduler.DEFAULT_TENANT_ID}
+            denied = self.additional.post(path, headers=self.headers, json=payload)
+            self.assertEqual(denied.status_code, 403)
+            result = self.primary.post(path, headers=self.headers, json=payload)
+            self.assertEqual(result.status_code, 200, result.get_json())
+        self.assertEqual(self.primary.post(path, json=payload).status_code, 400)
+        self.assertEqual(self.primary.post(
+            path, headers=self.headers, json=payload | {"tenantId": "other"}).status_code, 409)
+        self.assertEqual(self.primary.post(
+            path, headers=self.headers, json=payload | {"operation": "unknown"}).status_code, 400)
+        self.assertEqual(self.primary.post(
+            path, headers=self.headers, json=payload | {"operation": {}}).status_code, 400)
+        self.assertEqual(self.additional.get(path).status_code, 403)
+        # Additional administrators retain normal scheduling and Settings APIs.
+        for endpoint in ("/api/accepted-shifts", "/api/app-config", "/api/employees"):
+            self.assertEqual(self.additional.get(endpoint).status_code, 200)
+        self.assertEqual(self.additional.put(
+            "/api/employees/import-review", headers=self.headers,
+            json={"employees": []}).status_code, 403)
+        self.assertEqual(self.primary.put(
+            "/api/employees/import-review", json={"employees": []}).status_code, 400)
+        with closing(scheduler.database_connect()) as connection, connection:
+            events = connection.execute(
+                "SELECT detail FROM hub_audit_events WHERE action='workspace-data-settings-authorized'"
+            ).fetchall()
+            self.assertEqual(len(events), 6)
+            connection.execute("UPDATE tenant_admins SET is_primary=0 WHERE id='test-admin'")
+            connection.execute("UPDATE tenant_admins SET is_primary=1 WHERE id='additional'")
+        self.assertEqual(self.primary.get(path).status_code, 403)
+        self.assertEqual(self.additional.get(path).status_code, 200)
+        self.assertTrue(self.additional.get("/api/tenant-auth/state").get_json()["isPrimaryAdmin"])
+        self.assertFalse(self.primary.get("/api/tenant-auth/state").get_json()["isPrimaryAdmin"])
+        reloaded = self.admin_client("additional")
+        self.assertEqual(reloaded.get(path).status_code, 200)
+
+    def test_no_owner_portal_or_cross_tenant_permission(self):
+        path = "/api/workspace/data-settings"
+        for role_session in (
+            {}, {"platform_owner_id": "owner", "platform_auth_version": 1},
+            {"access_user_id": "manager", "access_auth_version": 1},
+            {"access_user_id": "employee", "access_auth_version": 1},
+        ):
+            client = scheduler.app.test_client()
+            with client.session_transaction() as current:
+                current.update(role_session)
+            self.assertEqual(client.get(path).status_code, 401)
+            self.assertEqual(client.put(
+                "/api/employees/import-review", headers=self.headers, json={}).status_code, 401)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "INSERT INTO tenants(tenant_id,business_name) VALUES('other','Other business')"
+            )
+        forged = self.admin_client("test-admin", "other")
+        self.assertEqual(forged.get(path).status_code, 401)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenant_admins SET active=0 WHERE id='test-admin'")
+        self.assertEqual(self.primary.get(path).status_code, 401)
+
+    def test_settings_is_separate_from_restricted_navigation_group(self):
+        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
+        group = markup.split('Data & settings</span>', 1)[1].split("</div>", 1)[0]
+        self.assertIn('data-page="source" hidden', group)
+        self.assertIn('data-page="meta" hidden', group)
+        planning = markup.split('Plan schedules</span>', 1)[1].split("</div>", 1)[0]
+        self.assertNotIn('data-page="meta"', planning)
+        self.assertNotIn('data-page="settings"', group)
+        self.assertIn('</div>\n                <button type="button" data-page="settings">', markup)
 
 
 class TemporaryLanHttpTests(unittest.TestCase):
@@ -754,6 +870,7 @@ class BusinessHubTests(unittest.TestCase):
             1,
         )
 
+    @patch.dict(os.environ, {"SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS": "1"})
     def test_platform_owner_requires_mfa_enrollment_and_valid_codes(self):
         self.make_owner()
         client = scheduler.app.test_client()
@@ -2109,6 +2226,7 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         )
         assigned = self.client.put(
             "/api/employees/import-review",
+            headers={"X-CSRF-Token": "test-csrf-token"},
             json={
                 "employees": [
                     {
@@ -2151,6 +2269,7 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
 
         invalid_batch = self.client.put(
             "/api/employees/import-review",
+            headers={"X-CSRF-Token": "test-csrf-token"},
             json={
                 "employees": [
                     {
@@ -3682,6 +3801,24 @@ class DeveloperChangeRequestTests(unittest.TestCase):
             ("Completed title", "Completed description", "done"),
         )
 
+    def test_unified_application_shell_is_recorded_pending_with_dependencies(self):
+        definition = next(row for row in scheduler.DEVELOPER_REQUESTS
+                          if row[0] == "unified-application-shell")
+        with closing(scheduler.database_connect()) as connection:
+            row = connection.execute(
+                "SELECT title,description,status FROM developer_change_requests WHERE request_id=?",
+                (definition[0],),
+            ).fetchone()
+            dependencies = connection.execute(
+                "SELECT depends_on FROM developer_change_request_dependencies WHERE request_id=?",
+                (definition[0],),
+            ).fetchall()
+        self.assertEqual(row, (definition[1], definition[2], "pending"))
+        self.assertEqual({item[0] for item in dependencies}, set(definition[3]))
+        for requirement in ("site-navigation-alerts", "MFA", "server-side", "deep links",
+                            "platform owners", "15-minute"):
+            self.assertIn(requirement, row[1])
+
     def test_live_attendance_request_migration_refreshes_only_active_requests(self):
         definitions = {
             request[0]: request for request in scheduler.DEVELOPER_REQUESTS
@@ -3998,6 +4135,7 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         self.assertEqual(client.get("/api/attendance").status_code, 401)
         self.assertEqual(client.get("/api/access-accounts").status_code, 401)
 
+    @patch.dict(os.environ, {"SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS": "1"})
     def test_temporary_password_cannot_be_reused_and_mfa_is_required_on_return(self):
         client, secret, created = self.sign_in_manager()
         self.assertEqual(client.post("/api/access/logout", headers=self.csrf, json={}).status_code, 200)
@@ -4138,6 +4276,36 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.csrf = {"X-CSRF-Token": response.get_json()["csrfToken"]}
         return client
+
+    def test_workspace_schedule_deletion_authorization_is_admin_scoped_and_non_destructive(self):
+        self.seed_portal_schedule("browser-week")
+        path = "/api/workspace/schedule-deletions"
+        payload = {"runId": "browser-week", "tenantId": scheduler.DEFAULT_TENANT_ID,
+                   "scope": "browser-workspace"}
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        employee = self.portal_employee_client()
+        self.assertEqual(employee.post(path, headers=self.csrf, json=payload).status_code, 401)
+        manager, _, _ = self.sign_in_manager()
+        self.assertEqual(manager.post(path, headers=self.csrf, json=payload).status_code, 401)
+        self.assertEqual(self.admin.post(path, json=payload).status_code, 400)
+        self.assertEqual(self.admin.post(path, headers=headers,
+                                        json=payload | {"tenantId": "another-business"}).status_code, 409)
+        self.assertEqual(self.admin.post(path, headers=headers,
+                                        json=payload | {"scope": "accepted"}).status_code, 400)
+        with closing(scheduler.database_connect()) as c:
+            before = [tuple(row) for row in c.execute("SELECT * FROM accepted_schedules").fetchall()]
+        self.assertTrue(before)
+        with patch.object(scheduler, "urlopen", side_effect=AssertionError("No provider calls")):
+            response = self.admin.post(path, headers=headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()["authorized"])
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(
+                [tuple(row) for row in c.execute("SELECT * FROM accepted_schedules").fetchall()], before)
+            event = c.execute("SELECT tenant_id,detail FROM hub_audit_events "
+                              "WHERE action='workspace-schedule-delete-authorized'").fetchone()
+        self.assertEqual(event[0], scheduler.DEFAULT_TENANT_ID)
+        self.assertEqual(json.loads(event[1])["runId"], "browser-week")
 
     def test_access_role_round_trip_preserves_identity_and_enforces_mfa_and_scope(self):
         employee = self.portal_employee_client()
@@ -4508,11 +4676,11 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
             headers={"X-CSRF-Token": "test-csrf-token"}, json={"employeeId": None},
         ).status_code, 200)
 
-    def test_temporary_mfa_bypass_applies_to_managers(self):
+    def test_obsolete_bypass_setting_cannot_skip_manager_enrollment(self):
         created = self.create_account(
             role="manager", displayName="Mary Manager", email="mgr@acme.example"
         ).get_json()
-        with patch.object(scheduler, "MFA_BYPASS", True):
+        with patch.dict(os.environ, {"SCHEDULE_CREATOR_TEMPORARY_MFA_BYPASS": "1"}):
             client = self.new_client()
             signed_in = client.post(
                 "/api/access/login", headers=self.csrf,
@@ -4520,8 +4688,9 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
                       "password": created["temporaryPassword"],
                       "newPassword": "Manager-New-Password-2026!"},
             )
-            self.assertTrue(signed_in.get_json()["authenticated"])
-            self.assertEqual(client.get("/api/access/manager/attendance").status_code, 200)
+            self.assertTrue(signed_in.get_json()["mfaEnrollmentRequired"])
+            self.assertFalse(signed_in.get_json().get("authenticated"))
+            self.assertEqual(client.get("/api/access/manager/attendance").status_code, 401)
         self.assertEqual(client.get("/api/access/manager/attendance").status_code, 401)
 
     def test_disabling_an_account_ends_its_session(self):

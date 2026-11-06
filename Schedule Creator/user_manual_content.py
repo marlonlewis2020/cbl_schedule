@@ -69,12 +69,14 @@ SECTIONS = [
         "title": "3. Finding your way around",
         "blocks": [
             ("p", "The sidebar groups the pages. All groups start collapsed; select a group title to show its pages, which collapses any other open group. Controls & lock, Weekly schedules and Settings are always available; other pages can be hidden or shown in Settings."),
+            ("p", "All signed-in roles, including platform owners and developers, expire after 15 minutes without reported user interaction and at most eight hours after successful sign-in. The app warns during the final minute; Stay signed in renews an idle session but cannot extend the eight-hour limit. Genuine interaction is reported at most every 30 seconds. Activity in another tab shares the same server session clock; notification/attendance polling, refreshes and background tasks never count as activity. After expiry, protected views are cleared and normal sign-in/MFA is required. Save edits before the warning expires: unsaved forms may be lost, while persisted workspace data is retained. Sessions created before this upgrade require a new sign-in."),
+            ("p", "Data & settings (Source & backups and META operating days) is available only to the designated primary business administrator. The separate Settings page remains available to other business administrators. Source uploads and portable-workspace exports duplicated in Settings follow the same primary-admin restriction. Ordinary scheduling, schedule downloads and sharing are unchanged."),
             ("table", ["Group", "Pages"], [
                 ["Workspace", "Overview"],
                 ["People", "Employees, Schedule locations, Attendance"],
                 ["Integrations", "Publish to BambooHR, Workforce Links"],
-                ["Plan schedules", "Location roles, Roster settings, Controls & lock, META · operating days, Weekly schedules"],
-                ["Data & settings", "Source & backups"],
+                ["Plan schedules", "Location roles, Roster settings, Controls & lock, Weekly schedules"],
+                ["Data & settings", "Source & backups, META · operating days (primary administrator only)"],
             ]),
             ("note", "Features such as employee schedule access, shift trades, schedule history and overtime forecasting depend on the business membership tier (see section 8)."),
         ],
@@ -139,6 +141,7 @@ SECTIONS = [
                 "id": "meta",
                 "title": "5.5 META · operating days",
                 "blocks": [
+                    ("p", "Open Data & settings → META operating days as the primary business administrator. Opening this page and editing a calendar require current server authorization; configuration must be unlocked before editing. Existing operating days and intensity values are preserved, and all administrators can continue generating schedules from those values. Like other workspace configuration, these calendars remain browser-resident; supported-workflow permissions do not prevent extraction or tampering through browser developer tools."),
                     ("p", "Define how each location works: daily operating intensity per location. Intensities are normalised across open days. A closed day receives no demand or make-up shifts; you may explicitly enter 0 for a closed day."),
                 ],
             },
@@ -147,6 +150,7 @@ SECTIONS = [
                 "title": "5.6 Weekly schedules",
                 "blocks": [
                     ("p", "Lists every saved schedule, by pool and week, with demand coverage, supplemental shifts and employee target shortfalls."),
+                    ("p", "The Saved schedule register scrolls vertically when it contains more than six records, with a sticky header and keyboard-focusable scrolling region. Administrators can select Delete on a record and confirm browser-workspace-only deletion. The selected workspace copy is removed only after browser storage succeeds; accepted database copies, BambooHR shifts and existing audit history are retained. Working persistent browser storage is required. The server audits authorization and the workspace records completed deletion. Related selectors and stale email preparation refresh, and shuffle undo is cleared so it cannot resurrect the deleted schedule. Backups exported earlier remain separate copies and restoring one can restore its schedules."),
                     ("h3", "Common actions"),
                     ("ul", [
                         "Generate schedules or Refresh & shuffle all: each generation uses fresh randomness. Undo last shuffle restores the previous result.",
@@ -249,7 +253,7 @@ SECTIONS = [
                         "Download workspace backup and Restore backup save and restore the workspace.",
                         "Download configured inputs · XLSX exports the current inputs.",
                     ]),
-                    ("note", "Saved schedules retain the source settings they were generated with."),
+                    ("note", "Saved schedules retain the source settings they were generated with. Source imports and mapping approvals, restores, workspace backups, configured-input downloads and portable bundles require fresh online primary-administrator authorization for the current business; failed checks leave the workspace unchanged. These are restrictions on supported workflows, not protection against extracting configuration already available in your browser for ordinary scheduling. Existing browser data and previously exported backups are not removed or remotely secured."),
                 ],
             },
             {
@@ -261,10 +265,10 @@ SECTIONS = [
                         "BambooHR API key: Test key for saved tenant runs a read-only check. Use as app API key explicitly promotes a successfully tested key to the server.",
                         "Business membership & administrators: view the tier and manage administrators (see section 8).",
                         "Manager & employee access: create manager and employee sign-in accounts, reset passwords (optionally MFA) and disable or enable accounts (see section 5.14).",
-                        "Upload source (also available here, no longer in the page header): replaces the configuration basis with a pre-filled workbook; see Source & backups for the mapping review.",
+                        "Upload source (primary administrator only, also available here): replaces the configuration basis with a pre-filled workbook; see Source & backups for the mapping review.",
                         "Sidebar menu: show or hide pages. This is a preference, not a security boundary.",
                         "Schedule email: the fixed Cc to the workforce mailbox can be switched off, and additional non-working dates (one YYYY-MM-DD per line) can be added. Deadlines exclude the sending day, weekends and the listed dates (Jamaica time).",
-                        "Workspace file: Download Portable ZIP Bundle exports configuration and saved schedules. API credentials are excluded; treat the bundle as confidential.",
+                        "Workspace file (primary administrator only): Download Portable ZIP Bundle exports configuration and saved schedules. API credentials are excluded; treat the bundle as confidential.",
                         "Overtime planning (Gold and above): overtime forecasting and warehouse FTE volume capacity.",
                     ]),
                 ],
@@ -288,7 +292,7 @@ SECTIONS = [
                     ("p", "After signing in, a linked manager switches between My shifts / employee view and Manage teams. Personal shifts and attendance follow the employee ID even outside managed locations; team schedules still require employee assignment, visibility, tier and team-code checks. Manager MFA remains required in both views. Personal assignment never grants additional management rights, and administrators must correct the manager's own attendance."),
                     ("h3", "Managers"),
                     ("ul", [
-                        "At first sign-in the manager replaces the temporary password (at least 14 characters) and enrols an authenticator app. MFA is mandatory for managers; later sign-ins need the six-digit code (unless the temporary MFA bypass is enabled on the server).",
+                        "At first sign-in the manager replaces the temporary password (at least 14 characters) and enrols an authenticator app. MFA is mandatory for managers; later sign-ins need the six-digit code. The temporary server-side MFA bypass has been removed for managers, business administrators and platform owners.",
                         "The attendance page has From and To date filters that default to today (Jamaica time) when it opens; change the dates and select Apply, or Today to reset. The table lists the manager's own employees for that range, with each shift's date and start time. Mark absent is offered for late shifts and needs a reason; it is audited.",
                         "The bell shows the unread count of late and absent alerts for the manager's employees and refreshes every 30 seconds. Select the bell to open a list below it and Close to hide it. Unread alerts are highlighted in amber; select one to expand its details (status, employee, location, shift date, time detected) and it turns pale as read. Mark all read clears the count for that manager only. Select the ✕ beside an alert to remove it: it moves to the archives (for that manager only) and stops counting. Select View archives at the bottom of the list to see removed alerts, and Back to notifications to return. Alerts appear only in the app; no email is sent.",
                     ]),

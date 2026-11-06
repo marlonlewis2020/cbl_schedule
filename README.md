@@ -44,6 +44,21 @@ The same email can be an administrator for multiple businesses; credentials and
 MFA enrollment are managed separately for each business. Administrator MFA is
 mandatory. Sign out from the application header when finished.
 
+All authenticated browser roles (business administrators, platform owners,
+managers, employees and developers) expire after 900 seconds without reported
+user interaction, with an absolute eight-hour limit from successful sign-in.
+Server-persisted opaque session clocks are shared across tabs. Notification/
+attendance polling, page refresh and background jobs never renew activity.
+The shared browser monitor reports trusted interaction at most every 30 seconds,
+warns during the final minute and offers Stay signed in before idle expiry;
+the absolute deadline cannot be extended. Expiry clears protected views and
+requires normal sign-in/MFA, without deleting persisted workspace data.
+Save form edits before expiry: unsaved edits may be lost.
+Existing pre-upgrade sessions have no clock and must sign in again after
+restart. Startup creates the clock table on SQLite/PostgreSQL; the PostgreSQL
+reference schema includes it. It stores opaque IDs/timestamps only, not tenant
+or account data. Previously expired cookies cannot recreate a clock.
+
 Local development uses SQLite at
 `Schedule Creator\data\schedule_creator.sqlite3`. Flask's session-signing key
 and the independent MFA-encryption key are generated in
@@ -263,6 +278,29 @@ Copilot automation remain separate implementation phases.
 
 ## Manager and employee access
 
+Data & settings / Source & backups is restricted to the designated primary
+business administrator. Source import and mapping approval, restore, workspace
+backup, configured-input export and portable bundles require fresh server
+authorization; mutation authorization uses CSRF and the current tenant.
+Duplicate source/portable actions in Settings have the same restriction.
+The separate Settings page, ordinary scheduling, schedule exports and sharing
+remain available to other administrators. META operating days is now in
+Data & settings and follows the same primary-admin permission: opening it and
+editing a calendar require current server authorization. Locked configurations
+remain uneditable; operating-day/intensity data and schedule calculations are
+unchanged.
+These are supported-workflow permissions: browser-resident configuration used
+for scheduling and previously exported backups cannot be secured retroactively.
+No server-side workspace migration or local-data removal is performed.
+
+On Weekly schedules, the Saved schedule register has a six-record scrolling
+viewport and sticky header. Its administrator-only Delete action removes only
+the selected browser-workspace copy after confirmation and successful IndexedDB
+storage. Accepted database copies, BambooHR shifts and existing audit history
+are retained. Deletion requires online administrator authorization and working
+browser storage; shuffle undo is cleared and stale email preparation invalidated.
+Previously exported backups remain unchanged.
+
 Trade publishing removes original single-employee shifts before creating
 replacements, including on retries of older saved plans. Remote operations are
 not transactional; missing replacements after a failure require reconciliation
@@ -292,8 +330,7 @@ Admins create manager and employee accounts in Settings → Manager & employee
 access and share the one-time temporary password (72-hour expiry). Users sign
 in at `/access` with the BambooHR subdomain, email or employee ID and password,
 and must replace the temporary password at first sign-in. Managers must enrol
-an authenticator app (when the temporary `MFA_BYPASS` is enabled, manager
-sign-in needs only the password; remove it before shared use); employees have no
+an authenticator app and provide its verification code at sign-in; employees have no
 MFA and need the Silver tier or above (`employeeScheduleAccess`). Managers see
 attendance only for employees at schedule locations whose manager email matches
 theirs and can mark late shifts absent with a reason; employees see only their

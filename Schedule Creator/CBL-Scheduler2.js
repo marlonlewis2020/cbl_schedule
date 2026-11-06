@@ -626,15 +626,16 @@ function inputTables(){
     }
 
 }
-function downloadInputs(){
+async function downloadInputs(){
+    await authorizeDataSettings('configured-inputs');
     downloadFile('CBL-Scheduling-Configured-Inputs.xlsx',workbookBlob(inputTables()))
 }
 const MENU_GROUPS=[
     {label:'Workspace',pages:[['home','Overview']]},
-    {label:'Plan schedules',pages:[['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['meta','META · operating days'],['schedules','Weekly schedules']]},
+    {label:'Plan schedules',pages:[['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['schedules','Weekly schedules']]},
     {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations'],['attendance','Attendance']]},
     {label:'Integrations',pages:[['publish','Publish to BambooHR'],['links','Workforce Links']]},
-    {label:'Data & settings',pages:[['source','Source & backups']]}
+    {label:'Data & settings',pages:[['source','Source & backups'],['meta','META · operating days']]}
 ];
 const PAGE_OPTIONS=MENU_GROUPS.flatMap(group=>group.pages);
 function appSettings(){
@@ -678,6 +679,7 @@ function businessSettingsPanel(){
     return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs read-only requests to the tenant’s time-off and time-tracking endpoints. Only after both requests succeed can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business membership & administrators',`<p>Manage your business membership and administrators.</p><a class="button" href="/business">Manage membership &amp; administrators</a>`)
 }
 function pageAllowed(p){
+    if(['source','meta'].includes(p)&&!tenantAuthPrimaryAdmin)return false;
     return p==='settings'||['controls','schedules'].includes(p)||PAGE_OPTIONS.some(([id])=>id===p&&appSettings().menus[id]!==false)
 }
 function settingsPage(){
@@ -797,6 +799,14 @@ function applyMenuSettings(){
     );
     document.querySelectorAll('#appMenu .nav-group').forEach(group=>{
         group.hidden=!group.querySelector('[data-page]:not([hidden])')
+    });
+    document.querySelectorAll('#content [data-action="sourcePicker"],#content [data-action="portable"]').forEach(button=>{
+        button.closest('.panel').hidden=!tenantAuthPrimaryAdmin
+    });
+    document.querySelectorAll('[data-menu-setting="source"],[data-menu-setting="meta"]').forEach(preference=>{
+        preference.disabled=!tenantAuthPrimaryAdmin;
+        preference.closest('label').hidden=!tenantAuthPrimaryAdmin;
+        preference.closest('.settingschecks').previousElementSibling.hidden=!tenantAuthPrimaryAdmin;
     });
 }
 function jamaicaDate(now=new Date()){
@@ -1363,6 +1373,69 @@ function bindScheduleFilters(){
         set(e.target.value);render()
     }
     )
+}
+let scheduleRegisterObserver=null,tenantAuthTenantId='',tenantAuthPrimaryAdmin=false;
+async function authorizeDataSettings(operation){
+    try{
+        const result=await directoryRequest('/workspace/data-settings',operation?{
+            method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+            body:JSON.stringify({operation,tenantId:tenantAuthTenantId})
+        }:{cache:'no-store'});
+        if(result.authorized!==true||result.tenantId!==tenantAuthTenantId)throw Error('Primary administrator authorization changed. Reload before continuing.');
+        tenantAuthPrimaryAdmin=true;
+    }
+    catch(error){
+        tenantAuthPrimaryAdmin=false;
+        pendingSourceImport=null;
+        for(const id of ['sourcePickerDialog','sourceImportReviewDialog'])if($(id)?.open)$(id).close();
+        render();
+        throw error
+    }
+}
+function sizeScheduleRegister(){
+    scheduleRegisterObserver?.disconnect();
+    const wrapper=$('savedScheduleRegister');
+    if(!wrapper)return;
+    const table=wrapper.querySelector('table');
+    const resize=()=>{
+        const rows=[...table.tBodies[0].rows];
+        if(rows.length<=6){wrapper.style.maxHeight='none';return;}
+        const bottom=rows[5].getBoundingClientRect().bottom-table.getBoundingClientRect().top;
+        wrapper.style.maxHeight=Math.floor(bottom)+'px';
+    };
+    scheduleRegisterObserver=new ResizeObserver(resize);
+    scheduleRegisterObserver.observe(table);
+    resize()
+}
+async function deleteSavedSchedule(id){
+    const run=model.results.find(item=>item.id===id);
+    if(!run)throw Error('Saved schedule not found. Refresh the register.');
+    if(storageMode!=='persistent')throw Error('Deletion requires working browser storage. Save a backup and restore browser storage before deleting.');
+    if(!confirm(`Delete the browser-saved schedule ${run.start} to ${run.end} · ${run.location} · ${run.role} · revision ${run.revision}?\n\nOnly this workspace copy will be removed. Accepted database copies, BambooHR shifts and existing audit history will NOT be deleted. This cannot be undone through shuffle undo.`))return;
+    const authorization=await directoryRequest('/workspace/schedule-deletions',{
+        method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+        body:JSON.stringify({runId:id,tenantId:tenantAuthTenantId,scope:'browser-workspace'})
+    });
+    if(authorization.authorized!==true)throw Error('Schedule deletion was not authorized.');
+    const results=model.results.filter(item=>item.id!==id);
+    const next={...model,results,previousScheduleSet:null,
+        selectedRun:model.selectedRun===id?(results[0]?.id||''):model.selectedRun,
+        scheduleDeletionHistory:[...(model.scheduleDeletionHistory||[]),{
+            runId:id,deletedAt:new Date().toISOString(),actor:model.user?.email||'',
+            tenantId:tenantAuthTenantId,scope:'browser-workspace'
+        }]};
+    clearTimeout(saveTimer);
+    try{await store('put',next);}
+    catch(error){throw Error('Schedule was not deleted: browser storage failed. '+error.message);}
+    model=next;
+    if(scheduleLocation!=='All'&&!results.some(item=>item.location===scheduleLocation))scheduleLocation='All';
+    if(scheduleRole!=='All'&&!results.some(item=>item.role===scheduleRole))scheduleRole='All';
+    if(scheduleWeek!=='All'&&!results.some(item=>item.start===scheduleWeek))scheduleWeek='All';
+    if(scheduleOrigin!=='All'&&!results.some(item=>(item.imported?'Uploaded':'Generated')===scheduleOrigin))scheduleOrigin='All';
+    if($('emailDialog')?.open)$('emailDialog').close();
+    preparedEmailGeneration++;preparedEmail=null;
+    render();
+    message('Browser-saved schedule deleted. Accepted database copies and BambooHR shifts were not changed.')
 }
 function rebuildScheduleAudit(r){
     let old=new Map((r.audit||[]).map(x=>[x.id+'|'+x.day+'|'+x.start,x]));
@@ -2585,7 +2658,11 @@ function select(options,val,attrs=''){
 function disabled(){
     return model.locked?'disabled':''
 }
-function nav(p){
+async function nav(p){
+    if(['source','meta'].includes(p)){
+        try{await authorizeDataSettings();}
+        catch(error){message(error.message,true);return;}
+    }
     if(!pageAllowed(p)){
         message('This page is disabled. Enable it in Settings.',true);
         return;
@@ -2919,6 +2996,7 @@ function openSourceImportReview(workspace){
     dialog.showModal()
 }
 async function approveSourceImportMappings(){
+    await authorizeDataSettings('source-import');
     let workspace=pendingSourceImport,dialog=$('sourceImportReviewDialog');
     if(!workspace||!dialog)throw Error('The pending source workbook review could not be found.');
     let mappings=sourceReviewRows.map((row,index)=>{
@@ -2930,7 +3008,7 @@ async function approveSourceImportMappings(){
         if(scheduleLocationId&&!scheduleLocations.some(item=>item.id===scheduleLocationId&&item.location===location&&roleFitsScheduleGroup(role,item)))throw Error(`Choose a schedule location that matches ${row.profile.name}'s location and role.`);
         return {id:row.existing?.id||String(row.profile.id),name:row.existing?.name||String(row.profile.name),location,role,scheduleLocationId,addManual}
     });
-    let result=mappings.length?await directoryRequest('/employees/import-review',{method:'PUT',body:JSON.stringify({employees:mappings})}):{addedManual:0,deactivated:0};
+    let result=mappings.length?await directoryRequest('/employees/import-review',{method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({employees:mappings})}):{addedManual:0,deactivated:0};
     let mappedById=new Map(mappings.map(mapping=>[normalizedEmployeeKey(mapping.id),mapping]));
     workspace.roster=workspace.roster.map(profile=>{
         let mapping=mappedById.get(normalizedEmployeeKey(profile.id));
@@ -3119,7 +3197,10 @@ function metaPage(){
 function scheduleViewWithoutAcceptedHistory(){
     let all=model.results,visible=visibleScheduleRuns(),selected=visible.find(r=>r.id===model.selectedRun)||visible[0];
     if(selected)model.selectedRun=selected.id;
-    return heading('OUTPUT / WEEKLY SCHEDULE','Every week, saved by pool.','Review demand coverage, supplemental shifts and employee target shortfalls. Schedule times use the elapsed span configured for that run. Every generation uses fresh randomness. Refresh & shuffle all processes every saved schedule, including earlier revisions and pools outside the current horizon, using each schedule’s saved constraints.')+`<div class="toolbar"><button type="button" class="primary" data-action="generate" ${model.locked?'':'disabled'}>${all.length?'Generate / update selected horizon':'Generate schedules'}</button><button type="button" data-action="refresh" ${model.locked&&all.length?'':'disabled'}>↻ Refresh & shuffle all</button>${model.previousScheduleSet?'<button type="button" data-action="undoShuffle">Undo last shuffle</button>':''}<button type="button" data-action="timeOffs">View time-offs</button><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button>${membershipFeatureEnabled('shiftTrades')?`<button type="button" data-action="trade" ${all.length?'':'disabled'}>Trade shifts</button>`:''}<button type="button" data-action="scheduleUpload">Upload schedules · XLSX</button><button type="button" data-action="scheduleTemplate">Download schedule template</button><button type="button" data-action="downloadVisible" ${visible.length?'':'disabled'}>Download filtered schedules · XLSX</button><button type="button" data-action="download" ${all.length?'':'disabled'}>Download all schedules · XLSX</button><button type="button" data-action="email" ${all.length?'':'disabled'}>Email schedules</button><button type="button" data-action="csv" ${all.length?'':'disabled'}>Combined CSV</button></div>`+scheduleFilters()+(!all.length?panel('No saved schedules',model.locked?'<p>Generate schedules from the locked configuration.</p>':'<p>Complete the settings and lock them in Controls before generating the first schedule.</p>'):`<div class="toolbar"><label>Saved week & pool ${select(visible.map(r=>[r.id,r.start+' to '+r.end+' · '+r.location+' · '+r.role+' · rev '+r.revision]),selected?.id,'id="runSelect"')}</label></div>`+(selected?runView(selected):panel('No matching schedules','<p>Change the filters to view saved schedules.</p>'))+panel('Saved schedule register',`<div class="tablewrap"><table><thead><tr><th>Week period</th><th>Location / role</th><th>Revision</th><th>Demand filled</th><th>Make-up</th><th>Unfilled demand</th><th>Employee shortfall</th></tr></thead><tbody>${visible.map(r=>`<tr><td><button type="button" data-run="${esc(r.id)}">${r.start} → ${r.end}</button></td><td>${esc(r.location)}<small>${esc(r.role)}</small></td><td>${r.revision}</td><td>${r.primary}</td><td>${r.makeup}</td><td>${r.uncovered.length}</td><td>${sum(r.shortages.map(x=>x.missing))}</td></tr>`).join('')}</tbody></table></div>`))
+    return heading('OUTPUT / WEEKLY SCHEDULE','Every week, saved by pool.','Review demand coverage, supplemental shifts and employee target shortfalls. Schedule times use the elapsed span configured for that run. Every generation uses fresh randomness. Refresh & shuffle all processes every saved schedule, including earlier revisions and pools outside the current horizon, using each schedule’s saved constraints.')+`<div class="toolbar"><button type="button" class="primary" data-action="generate" ${model.locked?'':'disabled'}>${all.length?'Generate / update selected horizon':'Generate schedules'}</button><button type="button" data-action="refresh" ${model.locked&&all.length?'':'disabled'}>↻ Refresh & shuffle all</button>${model.previousScheduleSet?'<button type="button" data-action="undoShuffle">Undo last shuffle</button>':''}<button type="button" data-action="timeOffs">View time-offs</button><button type="button" data-action="timeOffWorkbook">Upload time-offs · XLSX</button>${membershipFeatureEnabled('shiftTrades')?`<button type="button" data-action="trade" ${all.length?'':'disabled'}>Trade shifts</button>`:''}<button type="button" data-action="scheduleUpload">Upload schedules · XLSX</button><button type="button" data-action="scheduleTemplate">Download schedule template</button><button type="button" data-action="downloadVisible" ${visible.length?'':'disabled'}>Download filtered schedules · XLSX</button><button type="button" data-action="download" ${all.length?'':'disabled'}>Download all schedules · XLSX</button><button type="button" data-action="email" ${all.length?'':'disabled'}>Email schedules</button><button type="button" data-action="csv" ${all.length?'':'disabled'}>Combined CSV</button></div>`+scheduleFilters()+(!all.length?panel('No saved schedules',model.locked?'<p>Generate schedules from the locked configuration.</p>':'<p>Complete the settings and lock them in Controls before generating the first schedule.</p>'):`<div class="toolbar"><label>Saved week & pool ${select(visible.map(r=>[r.id,r.start+' to '+r.end+' · '+r.location+' · '+r.role+' · rev '+r.revision]),selected?.id,'id="runSelect"')}</label></div>`+(selected?runView(selected):panel('No matching schedules','<p>Change the filters to view saved schedules.</p>'))+savedScheduleRegister(visible))
+}
+function savedScheduleRegister(visible){
+    return panel('Saved schedule register',`<p class="note">Delete removes only the browser-saved workspace copy. Accepted schedules and BambooHR shifts are retained.</p><div id="savedScheduleRegister" class="tablewrap schedule-register" tabindex="0" role="region" aria-label="Saved schedule register"><table><thead><tr><th>Week period</th><th>Location / role</th><th>Revision</th><th>Demand filled</th><th>Make-up</th><th>Unfilled demand</th><th>Employee shortfall</th><th>Actions</th></tr></thead><tbody>${visible.map(r=>`<tr><td><button type="button" data-run="${esc(r.id)}">${esc(r.start)} → ${esc(r.end)}</button></td><td>${esc(r.location)}<small>${esc(r.role)}</small></td><td>${r.revision}</td><td>${r.primary}</td><td>${r.makeup}</td><td>${r.uncovered.length}</td><td>${sum(r.shortages.map(x=>x.missing))}</td><td><div class="actions employee-actions attendance-actions"><button type="button" class="danger" data-action="deleteSavedSchedule" data-id="${esc(r.id)}" ${tenantAuthTenantId?'':'disabled'} aria-label="Delete saved schedule ${esc(r.start+' '+r.location+' '+r.role)}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`)
 }
 function runView(r){
     if(!r)return '';
@@ -3287,6 +3368,7 @@ function render(preserveScroll=false){
     });
     applyMenuSettings();
     bindScheduleFilters();
+    sizeScheduleRegister();
     document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===page));
     $('poolLocation')?.addEventListener('change',e=>{
         filterLoc=e.target.value;render()
@@ -3343,6 +3425,26 @@ function refreshConfigurationIndicators(){
         let replacement=template.content.firstElementChild;
         if(replacement.querySelector('details'))replacement.querySelector('details').open=detailsOpen;
         current.replaceWith(replacement)
+    }
+}
+async function updateMetaSetting(element){
+    const workspace=model,index=Number(element.dataset.meta),day=Number(element.dataset.day),field=element.dataset.field;
+    const value=field==='open'?(element.checked?1:0):element.value===''?null:Number(element.value)/100;
+    try{
+        if(!Number.isInteger(index)||!workspace.locations[index]||!Number.isInteger(day)||day<0||day>6||
+            !['open','intensity'].includes(field)||(field==='intensity'&&value!==null&&(!Number.isFinite(value)||value<0||value>1))){
+            throw Error('Choose a valid location, day and intensity.');
+        }
+        await authorizeDataSettings('meta-update');
+        if(model!==workspace)throw Error('The workspace changed. Reload META before editing.');
+        if(model.locked)throw Error('Unlock settings in Controls before editing.');
+        workspace.locations[index][field][day]=value;
+        queueSave();
+        refreshConfigurationIndicators();
+    }
+    catch(error){
+        render(true);
+        message(error.message,true)
     }
 }
 function editChange(event){
@@ -3462,9 +3564,8 @@ function editChange(event){
         changed=true
     }
     if(e.dataset.meta!==undefined){
-        let l=model.locations[+e.dataset.meta];
-        l[e.dataset.field][+e.dataset.day]=e.dataset.field==='open'?(e.checked?1:0):e.value===''?null:Number(e.value)/100;
-        changed=true
+        void updateMetaSetting(e);
+        return
     }
     if(changed){
         queueSave();
@@ -3563,10 +3664,11 @@ document.addEventListener('click',async e=>{
 async function action(a,element=null){
     if(busy)return;
     if(['backup','restore','sourceInputs','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
-        message('Enable Source & backups in Settings first.',true);
+        message('Source & backups requires the primary business administrator and an enabled page.',true);
         return
     }
     try{
+        if(a.startsWith('sharePoint'))await authorizeDataSettings();
         if(a==='tenantLogout'){
             let stateResponse=await fetch('/api/tenant-auth/state');
             let state=await stateResponse.json();
@@ -3653,6 +3755,10 @@ async function action(a,element=null){
         }
         if(a==='reloadAccessAccounts'){
             await loadAccessAccounts();
+            return
+        }
+        if(a==='deleteSavedSchedule'){
+            await deleteSavedSchedule(element.dataset.id);
             return
         }
         if(a==='createAccessAccount'){
@@ -4098,7 +4204,7 @@ async function action(a,element=null){
             return
         }
         if(a==='sourcePicker'){
-            openSourcePicker();
+            await openSourcePicker();
             return
         }
         if(a==='closeSourcePicker'){
@@ -4323,16 +4429,19 @@ async function action(a,element=null){
         }
         else if(a==='download')downloadSchedules();
         else if(a==='csv')downloadCSV();
-        else if(a==='backup')downloadFile('CBL-Scheduling-Workspace.json',new Blob([JSON.stringify({
-            version:1,model
+        else if(a==='backup'){
+            await authorizeDataSettings('backup');
+            downloadFile('CBL-Scheduling-Workspace.json',new Blob([JSON.stringify({
+                version:1,model
+            }
+            )],{
+                type:'application/json'
+            }
+            ));
         }
-        )],{
-            type:'application/json'
-        }
-        ));
         else if(a==='restore')$('restoreUpload').click();
         else if(a==='portable')await portable();
-        else if(a==='sourceInputs')downloadInputs()
+        else if(a==='sourceInputs')await downloadInputs()
     }
     catch(err){
         if(a.startsWith('sharePoint'))setSharePointStatus(err.message,true);
@@ -4455,9 +4564,11 @@ function updateMicrosoftConfigNotice(){
     if(redirect)redirect.textContent=microsoftRedirectUri();
     return readiness
 }
-function openSourcePicker(){
+async function openSourcePicker(){
+    try{await authorizeDataSettings();}
+    catch(error){message(error.message,true);return;}
     if(!pageAllowed('source')){
-        message('Enable Source & backups in Settings before uploading.',true);
+        message('Source & backups requires the primary business administrator and an enabled page.',true);
         return
     }
     updateMicrosoftConfigNotice();
@@ -4726,7 +4837,7 @@ async function importSource(e){
 }
 async function importSourceFile(file){
     if(!pageAllowed('source')){
-        message('Enable Source & backups in Settings before uploading.',true);
+        message('Source & backups requires the primary business administrator and an enabled page.',true);
         return false
     }
     if(!file)return false;
@@ -4735,6 +4846,7 @@ async function importSourceFile(file){
     }
     busy=true;
     try{
+        await authorizeDataSettings('source-import');
         message('Reading and validating source workbook…');
         let bytes=await file.arrayBuffer();
         if(bytes.byteLength>60e6)throw Error('Workbook exceeds 60 MB');
@@ -4767,12 +4879,13 @@ async function importSourceFile(file){
 async function restoreWorkspace(e){
     if(!pageAllowed('source')){
         e.target.value='';
-        message('Enable Source & backups in Settings before restoring.',true);
+        message('Source & backups requires the primary business administrator and an enabled page.',true);
         return
     }
     let file=e.target.files[0];
     if(!file)return;
     try{
+        await authorizeDataSettings('restore');
         let backup=JSON.parse(await file.text()),m=backup.model;
         if(backup.version!==1||!m||!Array.isArray(m.roster)||!Array.isArray(m.pools)||!m.controls||!Array.isArray(m.results))throw Error('Invalid workspace backup');
         migrateScheduleWeeks(m);
@@ -4815,6 +4928,7 @@ async function portableHtmlBlob(){
     )
 }
 async function portableBundleFiles(){
+    await authorizeDataSettings('portable');
     if(location.protocol==='file:')throw Error('Portable bundle export requires a hosted app. Browsers block access to local CSS and JavaScript files.');
     let names=['CBL-Scheduler2.css','CBL-Scheduler2.js','CBL-Scheduler2.config.js','CBL-MicrosoftAuth.html'],assets=await Promise.all(names.map(async name=>{
         let response=await fetch(new URL(name,document.baseURI));
@@ -4941,6 +5055,8 @@ async function init(){
         let authResponse=await fetch('/api/tenant-auth/state'),authState=await authResponse.json();
         if(!authResponse.ok||!authState.authenticated)throw Error(authState.error||'Your administrator session has expired.');
         tenantAuthCsrfToken=authState.csrfToken;
+        tenantAuthTenantId=authState.tenantId;
+        tenantAuthPrimaryAdmin=authState.isPrimaryAdmin===true;
         tenantMembership=authState.membership;
         model.user={firstName:authState.displayName||'',email:authState.email||''};
         try{
