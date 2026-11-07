@@ -46,6 +46,11 @@
     #panel .foot { margin-top: 8px; text-align: center; }
     table { width: 100%; border-collapse: collapse; font-size: .92rem; }
     .scroll, #scheduleTables { overflow-x: auto; }
+    .historical-report-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
+    .historical-report-form label { display: flex; flex-direction: column; gap: 4px; }
+    .historical-report-form input, .historical-report-form select { padding: 8px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    .historical-report-preview, .historical-report-history { margin-top: 16px; }
+    .historical-report-links { display: flex; gap: 12px; flex-wrap: wrap; }
     th, td { padding: 8px; border-bottom: 1px solid #e0e7ec; text-align: left; vertical-align: top; }
     .status { text-transform: capitalize; font-weight: 600; }
     .status.late { color: #b26a00; } .status.absent { color: #a12121; } .status.attended { color: #2e7d32; }
@@ -53,6 +58,7 @@
   <link rel="stylesheet" href="workforce-ui.css">
   <script src="trade-picker.js"></script>
 <script src="/session-idle.js"></script>
+<script src="/historical-attendance-reports.js" defer></script>
 </head>
 <body>
   <main id="loginView" class="narrow">
@@ -117,6 +123,7 @@
       <p id="teamSummary"></p>
       <p class="notice">Read-only counts for your current location and role, from recorded attendance. Future shifts are excluded; approved leave is excluded from the attendance percentage.</p>
     </section>
+    <section id="historicalAccessReports" class="notice" hidden></section>
     <h2>Attendance</h2>
     <p id="summary"></p>
     <form id="dateFilter" class="filter" hidden>
@@ -458,6 +465,7 @@
       $("#bell").hidden = role !== "manager";
       $("#dateFilter").hidden = role !== "manager";
       $("#teamDashboard").hidden = role !== "employee";
+      $("#historicalAccessReports").hidden = role !== "manager";
       clearInterval(timer);
       if (role === "manager") {
         $("#filterStart").value = $("#filterEnd").value = todayInJamaica();

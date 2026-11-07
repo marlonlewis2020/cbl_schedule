@@ -5,6 +5,28 @@ verification for the approved change requests. It is not a list of unimplemented
 future roadmap features. Run PostgreSQL checks only against a disposable test
 database, and do not use production employee or schedule data.
 
+## Attendance snapshot actions - implemented, awaiting acceptance
+
+- `attendance-snapshot-batch-deletion`: authorized admins select one or multiple
+  snapshots and confirm atomic deletion of payloads/visible history. Preserve
+  attendance/schedules, audit actor and IDs, block running/stale selections, and
+  retain minimal run-key tombstones so scheduled cutoffs cannot regenerate.
+- `attendance-snapshot-email-body`: executive subject, formatted preview and
+  plain-text copy derived only from saved snapshot evidence. Include KPI
+  highlights, location/role tables, follow-up call-outs and source warnings.
+  Manual copying remains available when clipboard support is unavailable.
+  Admins attach downloaded HTML themselves; no automatic sending.
+- Previously downloaded/emailed copies cannot be revoked. Tenant/admin/tier
+  authorization and CSRF are enforced server-side.
+
+## Current walkthrough deferrals
+
+User-directed on 2026-11-06: defer all outstanding PostgreSQL-related TODOs,
+including migrations, imports, row-level security, permission/quota checks and
+deployment acceptance. Keep them outstanding, not completed. Skip them during
+the current one-by-one walkthrough, alongside the previously excluded HTTPS/
+LAN-HTTP and PayPal TODOs. Completed PostgreSQL evidence remains unchanged.
+
 ## Temporary LAN HTTP option (must be removed)
 
 - [ ] **Remove the temporary plain-HTTP option for PostgreSQL.** It is enabled by
@@ -111,9 +133,10 @@ done passed; the notes list what was not covered.
     logins returned 429. After logout the APIs returned 401 again. After a
     restart, the stored MFA secret decrypted and password plus a valid code signed
     in, while a password alone was refused.
-  - **Not covered, still manual:** the mismatched-password prompt of
-    `bootstrap-admin` (it reads the console, so it can't be scripted), and a
-    sign-in and sign-out in a real browser. The checks above used Flask's test client.
+  - **User-confirmed complete on 2026-11-06:** the mismatched-password prompt
+    of `bootstrap-admin` and sign-in/sign-out in a real browser. The earlier
+    automated checks above used Flask's test client; these remaining acceptance
+    checks were confirmed by the user.
 
 ## Business registration and SaaS hub (`business-hub`)
 
@@ -318,7 +341,11 @@ remain for production use:
 
 ## Manager personal shifts (`manager-employee-dual-access`)
 
-Implemented on 2026-11-05; live acceptance remains outstanding. Depends on
+Implemented on 2026-11-05; user-confirmed live acceptance complete on
+2026-11-06 for switching My shifts/Manage teams, personal-shift visibility
+without expanded management access, retained MFA/access restrictions,
+administrator-only self-attendance corrections, and access revocation after
+reassignment or disabling. PostgreSQL verification remains deferred. Depends on
 `manager-employee-access` and `schedule-portal`.
 
 - Link a scheduled manager's account to their verified, same-business employee
@@ -792,7 +819,7 @@ Requests below remain pending unless implementation evidence is explicitly noted
   isolation. Depends on `developer-change-log` and `primary-admin-data-settings`.
 - Recording only; implementation pending.
 
-## Historical attendance trends (`historical-attendance-trend-reports`) - approved, implementation pending
+## Historical attendance trends (`historical-attendance-trend-reports`) - implemented, awaiting acceptance
 
 - Generate historical weekly and previous-month reports in Excel and offline
   interactive HTML. Admins select all/specific DCs; managers are restricted
@@ -815,8 +842,9 @@ Requests below remain pending unless implementation evidence is explicitly noted
 - Missing schedules are not verified days off. Missing history is unavailable,
   not zero. Distinguish observed patterns, insufficient evidence and no incidents;
   normalize comparisons and explicitly label partial periods.
-- Agree week boundaries, comparison/history window, minimum sample size and
-  historical manager-access policy before implementation. Avoid cross-team
+- Confirmed policies: Monday weeks; selected-period-only pattern analysis;
+  minimum three eligible shifts; current authorized manager teams with dated
+  team attribution. Avoid cross-team
   disclosure after transfers, causal claims and automatic disciplinary actions.
 - Reuse saved branding/report infrastructure; show freshness and incomplete
   evidence. Automatic email is outside scope.
@@ -824,7 +852,16 @@ Requests below remain pending unless implementation evidence is explicitly noted
   all pattern categories, insufficient evidence, cross-format parity and offline
   interaction. Depends on `snapshot-email-reports`,
   `interactive-attendance-snapshot` and `manager-employee-access`.
-- Recording only; implementation pending.
+- Implemented scoped generation, separate immutable history and Excel/offline
+  interactive HTML with comparison charts, heatmap, coordinated filters/search/
+  sorting/drill-down and dated overrides. Schedule-continuity gaps remain
+  explicit uncertainty for first-shift-after-day-off/leave analysis.
+- Validation: 45 combined historical/snapshot/action/register tests passed.
+  Browser checks verified employee/pattern incident dates and rates, chart
+  rendering, filtering/sorting/reset, desktop/mobile widths and standalone
+  HTML with no network requests. Snapshot email preview and deletion
+  cancellation/confirmation also passed. User acceptance remains outstanding;
+  PostgreSQL validation is deferred.
 
 ## Workload and headcount planning (`workload-fte-headcount-planning`) - approved, implementation pending
 
@@ -873,6 +910,96 @@ Requests below remain pending unless implementation evidence is explicitly noted
   before implementation. Verify navigation/search, approval/rejection/feedback,
   publication isolation, revisions, scoped access and safe rendering.
 - Separate request; depends on `manager-employee-access`. Recording only.
+
+## Shared HTML report branding (`shared-html-report-branding`) - approved, implementation pending
+
+- Every business may upload up to two supporting images in addition to its
+  logo. Authorized admins can preview, replace and remove images; validate safe
+  types, size and dimensions and enforce tenant/admin permissions server-side.
+- All generated HTML reports use consistent business name, logo, colors, images
+  and business-configured report theme through shared branding logic. Personal
+  browser theme preferences do not determine report styling.
+- Embed assets for offline use and freeze branding at generation. Changes affect
+  new reports only; never rewrite saved reports or borrow current branding for
+  historical captures.
+- Keep charts/tables/warnings readable, retain semantic attendance/warning
+  colors and accessible contrast, and provide responsive/print-friendly layouts
+  and attractive defaults when supporting images are absent.
+- Available to all businesses without changing report-generation entitlements.
+  Reuse existing logo validation/capture and cover every HTML report generator.
+- Agree image limits, placement and theme options before implementation. Verify
+  upload limits/validation, image management, scoped access, report consistency,
+  immutable/offline assets, defaults, contrast and mobile/print output.
+- Depends on `interactive-attendance-snapshot`. Recording only.
+
+## Historical report dashboard redesign (`historical-report-progressive-dashboard`) - implemented, awaiting acceptance
+
+- Match the snapshot's branded style with spacious panels, concise executive
+  KPI cards and clear DC/role attendance, lateness and absence comparisons.
+- Initially hide full employee registers, detailed evidence and pattern tables.
+  Selecting a DC x role reveals its dedicated trend graph and summary table;
+  selecting an employee reveals their graph, score, incident dates and
+  shift/day/post-day-off/approved-time-off patterns.
+- Coordinate filters/chart drill-down, show active scope and restore the
+  uncluttered overview when selections clear. Keep detail hidden until selected.
+- Preserve saved evidence, calculations, source/sample warnings, manager
+  authorization, detailed Excel worksheets and historical capture immutability.
+- Label two-period comparisons accurately; no invented multi-period trend lines.
+  Retain offline use, accessibility and responsive/print-friendly presentation.
+- Verify overview/detail visibility, team/employee selection, reset, metric
+  consistency, unavailable evidence, Excel parity and desktop/mobile/print.
+- Depends on `historical-attendance-trend-reports` and
+  `interactive-attendance-snapshot`. Implemented for newly generated HTML;
+  previously saved reports and detailed Excel sheets remain unchanged.
+
+## Role-scoped roster settings (`role-scoped-roster-settings`) - approved, implementation pending
+
+- Managers see roster settings for their currently authorized teams and may
+  edit roster fields except Random 1-3 and Attendance 0-100, which are read-only.
+  Proximity, daily availability and allowed shift starts remain editable.
+- Employees see only their own record and may edit only Flexible, Reason if no
+  and Preferred start. All other fields are clearly read-only.
+- Preserve administrator permissions. Enforce tenant, current team/employee
+  scope and field-level write allowlists server-side, including tampered requests.
+- Preferred starts use configured location x role choices and existing
+  availability validation; require a reason when Flexible is No and reject
+  incompatible choices with explicit feedback.
+- Preserve MFA, roster locking and existing access/membership restrictions.
+  Revoke stale access after reassignment, disabling or account/link changes.
+- Linked managers use employee permissions for their own record in My shifts;
+  do not expand management scope or bypass administrator-only self-attendance
+  corrections.
+- Audit edits, prevent stale concurrent overwrites and surface save failures.
+  Changes affect future scheduling, not accepted shifts or historical attendance.
+- Verify role/scoped visibility, permitted and forbidden updates, own-record
+  isolation, linked-manager views, start validation, locks, access revocation,
+  concurrent edits, audit history and accepted-schedule preservation.
+- Depends on `manager-employee-access` and `manager-employee-dual-access`.
+  Recording only; no runtime permission changes implemented.
+
+## Manager-scoped META settings (`manager-scoped-meta-settings`) - approved, implementation pending
+
+- Managers view only their currently authorized locations on META. Permit
+  changes only when configuration is unlocked; locked settings are read-only.
+  Managers cannot unlock configuration themselves.
+- Preserve administrator permissions; employees and linked managers in their
+  personal employee view receive no META access.
+- Enforce tenant/location scope, permitted fields and current lock state
+  server-side on reads and writes, including tampered requests and stale pages.
+  Preserve MFA, membership/access restrictions and operating-setting validation.
+- Revoke stale access after reassignment or disabling. Audit edits, reject stale
+  concurrent overwrites and explicitly report validation/save failures.
+- Affect future scheduling only; preserve accepted shifts and saved
+  configuration snapshots.
+- Before implementation, agree whether edits include both operating days and
+  workload intensity percentages or only operating days. META is shared across
+  roles at a physical location: define explicit physical-location authorization
+  rather than giving a single-role manager authority over other teams.
+- Verify scoped visibility, unlocked edits, locked/unlock denials, location and
+  shared-role boundaries, validation, revocation, concurrency, audit history
+  and saved-schedule preservation.
+- Depends on `manager-employee-access`. Recording only; scope agreement required
+  before implementation.
 
 ## Test evidence and handoff
 

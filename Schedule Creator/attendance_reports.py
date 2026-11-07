@@ -11,8 +11,9 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from xml.sax.saxutils import escape
 
-from flask import Response, g, jsonify, request
+from flask import Response, g, jsonify, request, session
 import attendance_snapshot
+import attendance_email
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS attendance_reports (
@@ -218,7 +219,7 @@ def register(app, s):
         with closing(s.database_connect()) as c:
             if not eligible(s, c, s.active_tenant_id()):
                 return jsonify(error="Attendance snapshots require Silver or above."), 403
-        if request.method == "POST" and not s.tenant_auth_csrf_valid():
+        if request.method in {"POST", "DELETE"} and not s.tenant_auth_csrf_valid():
             return jsonify(error="The request token is invalid."), 400
         return None
 
@@ -239,25 +240,57 @@ def register(app, s):
             return jsonify(saved=True)
         if request.method == "POST":
             with closing(s.database_connect()) as c:
-                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND created_at>? LIMIT 1",
+                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND created_at>? LIMIT 1",
                                    (tenant, (now - timedelta(seconds=60)).isoformat())).fetchone()
             if recent:
                 return jsonify(error="Wait one minute between report requests."), 429
             report_id = capture(s, tenant, now, "manual:" + secrets.token_urlsafe(18))
             return jsonify(id=report_id), 201
         with closing(s.database_connect()) as c:
-            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? ORDER BY created_at DESC LIMIT 100", (tenant,)).fetchall()
+            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND state<>'deleted' ORDER BY created_at DESC LIMIT 100", (tenant,)).fetchall()
             setting = c.execute("SELECT enabled,heartbeat FROM attendance_report_settings WHERE tenant_id=?", (tenant,)).fetchone()
         return jsonify(reports=[dict(zip(("id", "cutoff", "createdAt", "state", "error"), row)) for row in rows],
                        enabled=bool(setting and setting[0]), heartbeat=setting[1] if setting else None,
                        emailStatus="Automatic email deferred; downloads only.")
+
+    @app.delete("/api/attendance/reports")
+    def delete_reports():
+        denied = guard()
+        if denied:
+            return denied
+        body = request.get_json(silent=True)
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(not isinstance(value, str) or not value or len(value) > 128 for value in ids) or len(set(ids)) != len(ids):
+            return jsonify(error="Select between 1 and 100 distinct snapshots."), 400
+        if body.get("confirm") is not True:
+            return jsonify(error="Confirm deletion of the selected snapshots."), 400
+        tenant = s.active_tenant_id()
+        placeholders = ",".join("?" for _ in ids)
+        with closing(s.database_connect()) as c, c:
+            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND id IN ({placeholders})", (tenant, *ids)).fetchall()
+            if len(rows) != len(ids):
+                return jsonify(error="One or more snapshots are unavailable. Refresh history before deleting."), 404
+            if any(state in {"running", "deleted"} for _, state in rows):
+                return jsonify(error="Running or already deleted snapshots cannot be deleted. Refresh history."), 409
+            changed = c.execute(
+                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
+                (tenant, *ids),
+            ).rowcount
+            if changed != len(ids):
+                c.rollback()
+                return jsonify(error="Snapshot history changed during deletion. Refresh and retry."), 409
+            # Keep run keys as tombstones so scheduled cutoffs are never regenerated.
+            c.execute("INSERT INTO tenant_audit_events(id,tenant_id,actor_id,actor_email,action,route,response_status) VALUES(?,?,?,?,?,?,?)",
+                      (secrets.token_urlsafe(18), tenant, session.get("tenant_admin_id"), session.get("tenant_admin_email"),
+                       json.dumps({"action": "attendance-snapshots-deleted", "ids": ids}), "delete_reports", 200))
+        return jsonify(deleted=ids)
 
     def saved_report(report_id):
         denied = guard()
         if denied:
             return None, denied
         with closing(s.database_connect()) as c:
-            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=?",
+            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key NOT LIKE 'historical:%'",
                             (s.active_tenant_id(), report_id)).fetchone()
         if not row:
             return None, (jsonify(error="Snapshot not found."), 404)
@@ -289,3 +322,10 @@ def register(app, s):
                                  "Cache-Control": "no-store",
                                  "Referrer-Policy": "no-referrer",
                                  "Content-Security-Policy": "frame-ancestors 'none'"})
+
+    @app.get("/api/attendance/reports/<report_id>/email")
+    def email_body(report_id):
+        payload, denied = saved_report(report_id)
+        if denied:
+            return denied
+        return jsonify(attendance_email.generate(payload))

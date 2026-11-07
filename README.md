@@ -347,6 +347,24 @@ existing worked-time/absence rules, approved-leave exclusion and verified
 overnight carry-in. Both source freshness and actual capture time are recorded.
 There is a one-minute on-demand cooldown.
 
+Administrators can select individual snapshots or select all displayed deletable
+captures and choose **Delete selected**. Confirmation removes HTML/XLSX payloads
+and visible history atomically, without changing attendance or schedules.
+Running captures cannot be deleted. Minimal run-key tombstones and deletion
+audit entries remain so a deleted scheduled cutoff cannot be regenerated.
+Previously downloaded or emailed copies cannot be recalled.
+
+Each table on the administrator Attendance page offers **Download Excel**,
+including attendance, scores, discrepancies and report histories. Exports follow
+the displayed filters and sort order; action/selection/download controls are
+excluded. Empty tables export column headings only.
+
+**Generate email body** opens an executive subject, formatted preview and
+plain-text alternative derived only from that saved snapshot. It includes
+location/role tables, evidence-based call-outs and source warnings. Copy controls
+require browser clipboard support; otherwise select/copy the subject and plain
+text manually. Attach the downloaded HTML yourself; this does not send email.
+
 HTML distinguishes confirmed attendance from clock-in evidence: late records
 without a matching punch or the required worked-time validation are not counted
 as confirmed. Approved leave is excluded; zero expected shifts show N/A.
@@ -360,6 +378,33 @@ is sent by this worker. Staffing-vs-demand interval analytics are not part of
 these attendance downloads and retain their separate Gold/Platinum entitlement.
 SQLite tests and browser checks cover this implementation; the new PostgreSQL
 table policies still require disposable-database deployment acceptance.
+
+Historical attendance reports are available in administrator Attendance and
+manager team attendance. Select a week or previous month; weeks use Monday
+boundaries and dates are interpreted in America/Jamaica. Administrators may
+limit scope using the Distribution Centre and Role dropdowns (or All locations/
+All roles); managers are limited to currently authorized teams
+and dated records attributed to those teams, including role restrictions.
+Saved historical reports provide separate immutable Excel/HTML history.
+They are not deleted through the point-in-time snapshot deletion controls.
+
+Reports compare the selected period with the preceding week/month and show
+employee/DC counts, rates, scores and incident dates. Pattern analysis uses
+only the selected period, with at least three eligible shifts per pattern.
+Missing history/assignment evidence is unavailable, not zero; gaps in recorded
+schedules do not prove days off. Comparisons describe observed associations,
+not causes or disciplinary recommendations. Report copies contain employee
+information and must be shared only with authorized recipients.
+
+New historical HTML reports use a snapshot-style executive overview with four
+KPI cards and DC/role comparisons. Employee registers, pattern analysis and shift
+details stay hidden until an employee or both a DC and role are selected.
+Select chart labels or table rows to drill down, or use the filters; Clear
+filters restores the overview. The active scope is displayed and Print / Save
+PDF respects the selected detail visibility. New reports freeze the business
+name/logo at generation; existing saved HTML and detailed Excel sheets are
+unchanged. Comparisons cover selected/preceding periods, not invented long-term
+trend lines.
 
 Data & settings / Source & backups is restricted to the designated primary
 business administrator. Source import and mapping approval, restore, workspace

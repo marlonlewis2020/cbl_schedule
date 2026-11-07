@@ -50,6 +50,7 @@ import workforce_trades
 import membership_billing
 import session_idle
 import attendance_reports
+import historical_attendance_reports
 import application_shell
 
 
@@ -102,6 +103,7 @@ STATIC_ASSETS = {
     "application-shell.js",
     "application-shell.css",
     "attendance-reports.js",
+    "historical-attendance-reports.js",
 }
 DEVELOPER_REQUESTS = (
     (
@@ -151,6 +153,18 @@ DEVELOPER_REQUESTS = (
         "Manager personal shifts and employee view",
         "Link a scheduled manager's existing account to their verified employee record within the same business. Use one identity and password with separate My shifts and Manage teams views; retain manager MFA in both views. Show personal accepted shifts and own attendance by linked employee ID, even when the manager works at a location they do not manage. Apply the existing employee schedule visibility, assignment, team-code and membership-tier checks when accessing employee team schedules or dashboards. Keep employee-view permissions separate from management permissions: personal assignment must not grant management access to another location. Prevent manager attendance corrections to their own employee record; require an authorised administrator and preserve audit history. Validate active, same-tenant employee links, handle existing employee-account conflicts explicitly without duplicate/ambiguous sign-ins or silent account merging, and revoke stale access after account/link changes. Test a manager scheduled outside their management scope, both views, MFA, tier restrictions, reassignment, disabling and rejection of self-corrections.",
         ("manager-employee-access", "schedule-portal"),
+    ),
+    (
+        "role-scoped-roster-settings",
+        "Manager team roster settings and employee self-service preferences",
+        "Give managers access to the roster settings page for employees in their currently authorized teams. Managers may edit roster settings including proximity, daily availability and allowed shift starts, but Random 1-3 and Attendance 0-100 remain read-only. Employees see only their own roster record and may edit only Flexible, Reason if no and Preferred start; all other settings remain read-only. Preserve existing administrator permissions. Enforce tenant, current team/employee scope and field-level write allowlists server-side, including direct URLs and tampered requests. Preferred starts must come from the employee's configured location x role and comply with existing availability validation; require a reason when Flexible is No and explicitly reject incompatible choices. Preserve MFA, roster locking and existing access and membership restrictions. Reassignment, disabling and account/link changes revoke stale access. Linked managers use employee permissions for their own record in My shifts, without gaining extra management scope or bypassing the administrator-only self-attendance correction rule. Audit changes and prevent stale concurrent updates from silently overwriting newer edits. Changes affect future scheduling only, not accepted shifts or historical attendance. Clearly label read-only values and report validation or save failures. Verify scoped visibility, allowed and forbidden field updates, own-record isolation, linked-manager views, configured starts and validation, locks, transfers/disabling, concurrent edits, audit history and accepted-schedule preservation. Approved for recording only; implementation pending.",
+        ("manager-employee-access", "manager-employee-dual-access"),
+    ),
+    (
+        "manager-scoped-meta-settings",
+        "Manager-scoped META operating days and workload settings",
+        "Allow managers to view the META operating settings page for only their currently authorized locations. When configuration is unlocked, managers may change permitted operating settings for those locations; when locked, settings remain visible and read-only. Managers cannot unlock configuration themselves. Preserve administrator permissions and grant no META access to employees or a linked manager's personal employee view. Enforce tenant/location authorization, permitted fields and the current lock state server-side on every read and write, including direct URLs, tampered requests and pages opened before a configuration lock. Preserve MFA, membership/access restrictions and existing operating-day/intensity validation; revoke stale access after reassignment or disabling. Audit edits, reject stale concurrent overwrites and surface validation/save failures. Changes affect future scheduling only; preserve accepted shifts and saved configuration snapshots. META currently shares open/closed days and daily workload intensity percentages across all roles at a physical location: before implementation, agree whether managers may edit both fields or operating days only, and define explicit physical-location authorization where a manager is assigned to only one location x role. Do not infer authority over other teams from a single role assignment. Verify scoped visibility, unlocked edits, locked and unlock denials, cross-location isolation, shared-location role boundaries, validation, revocation, concurrent edits, audit history and saved-schedule preservation. Approved for recording only; implementation pending scope agreement.",
+        ("manager-employee-access",),
     ),
     (
         "shift-trades",
@@ -250,6 +264,18 @@ DEVELOPER_REQUESTS = (
         ("snapshot-email-reports",),
     ),
     (
+        "attendance-snapshot-batch-deletion",
+        "Administrator batch deletion of saved attendance snapshots",
+        "Allow authorized administrators to select individual or multiple attendance snapshots in history and confirm batch deletion. Remove saved HTML/XLSX payloads and visible history without changing underlying attendance, schedules, employees or provider data. Keep minimal deleted run-key tombstones to prevent scheduled cutoffs regenerating, and audit actor and snapshot IDs. Enforce tenant/admin/tier/CSRF authorization server-side, reject running captures and stale selections, and make batches atomic. Clearly warn that downloaded or emailed copies cannot be recalled. Implemented; awaiting user acceptance.",
+        ("snapshot-email-reports",),
+    ),
+    (
+        "attendance-snapshot-email-body",
+        "Generate executive email bodies accompanying saved attendance snapshots",
+        "Let authorized administrators generate a suggested subject, formatted email body and plain-text alternative from the selected snapshot's saved evidence. Include confirmed attendance, expected shifts, clock-ins, verified late arrivals, absences, missing punches, leave, early departures, overtime, ended missing clock-outs, compact location/role tables and evidence-based highlights. Match HTML snapshot metric definitions and display source warnings, overlap/validation definitions and saved reporting cutoff. Provide preview and copying with manual-copy fallback, without sending email; the administrator attaches the downloaded HTML themselves. Preserve tenant/admin/tier authorization, inert safe rendering and historical branding/evidence. Implemented; awaiting user acceptance.",
+        ("interactive-attendance-snapshot",),
+    ),
+    (
         "workspace-readiness",
         "Workspace readiness loading and recovery experience with environment toggle",
         "Hide the scheduling workspace body behind a clean, branded, theme-aware loading screen with a centered spinner and accessible loading message until essential initialization, authentication, permissions and core scheduling data are verified ready. Prevent interaction with partially loaded controls, respect reduced-motion preferences, and provide bounded waiting with meaningful status and recovery options instead of an indefinite spinner. On application-level loading failures, show an engaging branded error/recovery page with a plain-language explanation, explicitly available and unavailable functions, Retry loading, Continue with limited functionality only when safe, and Contact support/helpdesk with a non-sensitive reference or timestamp. Essential authentication, permission or core-data failures must block workspace access; optional integration failures may allow explicitly described degraded operation without presenting missing data as empty or stale evidence as current. Preserve saved/local workspace data and avoid duplicate writes on retry. Do not require every optional background integration to respond before essential workspace readiness. Provide a documented server-side environment-file flag SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED, default enabled, allowing operators to disable only this loading/recovery presentation and retain the existing startup experience; disabling must never bypass authentication, authorization, validation or other safety guards. Validate flag values using repository configuration conventions and document restart requirements. Complete network/server outages may still use browser errors unless separately supported by an offline fallback. Verify successful and slow loading, essential and optional failures, safe continuation, retry, accessibility, desktop/mobile themes, disabled behavior and preservation of saved records. Approved for recording only; implementation pending.",
@@ -280,6 +306,18 @@ DEVELOPER_REQUESTS = (
         ("manager-employee-access",),
     ),
     (
+        "shared-html-report-branding",
+        "Shared business branding and supporting images for all generated HTML reports",
+        "Allow every business to upload up to two supporting images in addition to its logo, managed by authorized business administrators with preview, replacement and removal. Apply business name, logo, configured colors, supporting images and business-configured report theme consistently to all generated HTML report types through a shared report-branding mechanism. Supporting images enhance headers or decorative sections without obscuring charts, tables, warnings or employee information. Validate upload type, size and dimensions using documented limits and safe supported image formats; enforce tenant/admin permissions server-side and retain CSRF/audit protections. Embed validated assets and branding in downloaded HTML for offline operation without external URLs. Freeze branding when each report is generated; later edits affect new reports only and must not rewrite saved reports or retrospectively attach current branding to historical captures. Preserve accessible contrast, meaningful absence/lateness/warning colors, responsive layouts and print-friendly output, with attractive defaults when images or custom branding are absent. The business's configured report theme, not the generating user's personal light/dark preference, determines report styling. Branding availability is for all businesses while existing report-generation entitlements remain unchanged. Reuse existing logo validation and snapshot branding capture where suitable; wire every current HTML report generator and provide the same mechanism for future report types. Agree image limits, placement and report-theme options before implementation. Verify two-image limit, invalid/oversized uploads, preview/replacement/removal, tenant/admin isolation, all HTML report surfaces, saved-branding immutability, offline assets, default styling, contrast/status semantics and mobile/print layouts. Approved for recording only; implementation pending.",
+        ("interactive-attendance-snapshot",),
+    ),
+    (
+        "historical-report-progressive-dashboard",
+        "Snapshot-style historical attendance dashboard with selection-driven trend detail",
+        "Redesign the weekly/monthly interactive HTML report to match the attendance snapshot's attractive branded visual style: spacious panels, concise executive KPI cards and clear charts rather than crowded tables. Initially show only general attendance, lateness and absence trends/comparisons by distribution centre (DC) and role. Hide full employee registers, detailed shift evidence and employee pattern tables from the initial overview. Selecting a location x role reveals a dedicated trend graph and summary table for that team; selecting an employee reveals their dedicated trend graph and table, attendance score, late/absence dates and shift-time/day/post-day-off/approved-time-off patterns. Keep detailed panels hidden until a relevant selection is made, coordinate filters and chart drill-down across the view, show an explicit scope label and let clearing selections restore the uncluttered overview. Preserve all underlying saved evidence and detailed Excel worksheets, existing calculations, source warnings, insufficient-evidence/minimum-sample safeguards, tenant/tier authorization and manager team restrictions. Distinguish selected-versus-previous-period comparisons from genuine multi-period trends; do not fabricate longer trend lines when only two periods exist. Retain offline interaction, accessibility, responsive layouts and print-friendly output. Preserve historical capture immutability; do not silently rewrite previously generated reports. Verify initial overview visibility, team and employee selection/drill-down, reset, coordinated metrics, unavailable evidence, Excel parity and desktop/mobile/print presentation. Approved for recording only; implementation pending.",
+        ("historical-attendance-trend-reports", "interactive-attendance-snapshot"),
+    ),
+    (
         "session-idle-expiry",
         "Fifteen-minute idle session expiry",
         "Expire authenticated business administrator, manager, employee, platform-owner and developer sessions after 15 minutes without genuine user activity. Enforce the deadline server-side across browser tabs and direct API requests; automatic attendance/notification polling, background refresh, worker jobs and passive open tabs must not extend the idle deadline. Retain the existing eight-hour session lifetime as an absolute maximum that user activity cannot extend. Provide a warning before expiry, preserve unsaved-work warnings where applicable, stop authenticated polling on expiry, clear protected displays, and require normal sign-in/MFA again. Define a bounded, validated user-activity reporting mechanism rather than treating every HTTP request as activity. Test the exact 900-second boundary, activity renewal before expiry, expiry despite continuous polling, cross-tab behavior, absolute maximum, all account types and rejection of stale sessions. Planned work only.",
@@ -287,6 +325,8 @@ DEVELOPER_REQUESTS = (
     ),
 )
 WORKFORCE_IMPLEMENTATION_NOTES = {
+    "historical-report-progressive-dashboard": "Implemented: new historical HTML uses snapshot-style cards and DC/role overview charts/tables, with employee/team comparisons, patterns and shift evidence hidden until employee or DC plus role selection. Coordinated keyboard/chart/table drill-down, scope labels, reset and print layouts; new reports capture business name/logo. Excel detail and previously saved HTML remain unchanged. Awaiting user acceptance; PostgreSQL checks deferred.",
+    "historical-attendance-trend-reports": "Implemented: scoped historical weekly/monthly Excel and offline interactive HTML, saved history, employee/DC comparisons, charts and coordinated filters, incident dates, dated score overrides and conservative shift/day/post-day-off/leave pattern analysis. Confirmed policies: Monday weeks, selected-period patterns, minimum three eligible shifts, managers' current authorized teams with dated record attribution. Missing schedule continuity and history remain explicitly unavailable. Awaiting user acceptance; PostgreSQL validation deferred.",
     "unified-application-shell": "Implemented: shared /signin account/business selection and role-aware Access/Trades/Business/owner navigation, branding/themes, scoped alerts and preserved legacy/deep links. Administrator browser workspace remains at /. Existing MFA, role, tenant, team and idle-session guards are retained. Awaiting acceptance; prerequisite statuses are unchanged.",
     "employee-trade-location-lock": "Implemented: personal trade location/team and Employee 1 are preselected and locked, including linked-manager personal mode. Choices/options/submission recheck current verified assignments; management choices retain authorized scope. Awaiting acceptance; prerequisite statuses are unchanged.",
     "snapshot-email-reports": "Implemented download-only scope: immutable Silver+ attendance XLSX/history, on-demand capture, opt-in 07:00/15:00/23:00 Jamaica worker captures, exact cutoff/verified overnight context, source freshness and explicit stale/failed/missed states with deduplication. Run report_worker.py independently with the app database/environment. Automatic email/recipient/delivery work is deferred by agreement; no email is sent. Staffing-vs-demand interval analytics are separate Gold/Platinum work. Awaiting acceptance and disposable PostgreSQL policy verification; prerequisite statuses are unchanged.",
@@ -9658,6 +9698,7 @@ def publish_bamboohr_schedules():
 trade_workflow = workforce_trades.register(app, sys.modules[__name__])
 billing_provider = membership_billing.register(app, sys.modules[__name__])
 attendance_reports.register(app, sys.modules[__name__])
+historical_attendance_reports.register(app, sys.modules[__name__])
 application_shell.register(app, sys.modules[__name__])
 
 

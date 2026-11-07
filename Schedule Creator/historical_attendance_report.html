@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none';">
+<title>Historical attendance trends</title>
+<style>
+:root{font:16px/1.45 "Segoe UI",Arial,sans-serif;color:#17364a;background:#f3f6f8}
+body{margin:0;padding:24px}main{max-width:1200px;margin:auto;background:#fff;padding:24px;border-radius:12px;box-shadow:0 6px 26px #17364a18}
+h1,h2,h3{line-height:1.2}h1{margin-top:0}.subtle,.note{color:#536b7d}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi,section{border:1px solid #d5e0e7;border-radius:8px;padding:14px;margin:14px 0}
+.kpi b{display:block;font-size:1.3rem}.filters{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font-weight:600}select,input{font:inherit;padding:8px;border:1px solid #9fb3c1;border-radius:5px}
+.scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left;padding:8px;border-bottom:1px solid #dce5eb;vertical-align:top}th{background:#086fa0;color:#fff}
+.warning{border-left:4px solid #bd7b00;background:#fff7e2;padding:10px}
+.filters label{min-width:170px}.filters input[type=search]{min-width:220px}
+svg{display:block;width:100%;height:auto;min-height:180px}.chart-caption{font-size:13px;fill:#17364a}
+.chart-legend{display:flex;gap:16px;flex-wrap:wrap}.chart-legend span:before{content:"";display:inline-block;width:12px;height:12px;margin-right:5px;background:#086fa0}
+.chart-legend .previous:before{background:#9eafbb}.chart-legend .negative:before{background:#c96c54}
+.risk-legend{display:flex;gap:16px;flex-wrap:wrap}.risk-legend .late:before,.risk-legend .absent:before{content:"";display:inline-block;width:12px;height:12px;margin-right:5px}.risk-legend .late:before{background:#c96c54}.risk-legend .absent:before{background:#d89533}
+tr[data-drill]{cursor:pointer}tr[data-drill]:hover{background:#e8f4fa}.override{font-weight:700;color:#805500}
+@media(max-width:600px){body{padding:10px}main{padding:14px}}
+:root{color:#16344d;background:#edf6fb;font:14px/1.5 "Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}body{background:radial-gradient(ellipse at top left,#d8efff,transparent 65%),#edf6fb;padding:28px}
+main{max-width:1450px;background:transparent;padding:0;box-shadow:none}
+header{padding:10px 0 20px}header h1{font-size:clamp(25px,3vw,34px);letter-spacing:-.7px;margin:6px 0}
+section{background:white;border:1px solid #dce9f2;border-radius:16px;padding:22px;margin:18px 0;box-shadow:0 6px 22px #1f638009}
+h2{font-size:18px;margin:0 0 14px}h3{font-size:15px}.kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.kpi{border:1px solid #dce9f2;border-left:4px solid #176bd5;border-radius:12px;padding:18px;margin:0;color:#526c80}
+.kpi b{font-size:28px;color:#16344d;margin-top:8px}.kpi:nth-child(3n){border-left-color:#079998}
+th{background:#f4f9fd;color:#526c80;font-size:12px}th,td{padding:12px;border-color:#dce9f2}
+button,select,input{font:inherit;border:1px solid #dce9f2;border-radius:9px;padding:9px 12px;background:white;color:#16344d}
+button{cursor:pointer}button:hover{background:#eaf3ff}button:focus-visible,select:focus-visible,input:focus-visible,tr[data-drill]:focus-visible{outline:3px solid #176bd5;outline-offset:3px}
+.overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}.overview-grid>section{min-width:0;margin:0}
+#companyLogo{max-width:130px;max-height:76px;object-fit:contain;float:right}
+.scroll{max-height:450px}#scope{color:#526c80;font-weight:600}.warning{border-radius:10px;font-size:12px}
+[hidden]{display:none!important}.detail-heading{color:#176bd5}
+@media(max-width:900px){.overview-grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){body{padding:14px}main{padding:0}section{padding:16px}.kpi{padding:12px}.kpi b{font-size:24px}}
+@media print{body{background:white;padding:0}section{box-shadow:none;break-inside:avoid}.filters,#printReport{display:none}.overview-grid{display:block}.scroll{max-height:none;overflow:visible}thead{display:table-header-group}}
+</style>
+</head>
+<body>
+<main>
+<header><img id="companyLogo" hidden alt=""><p class="subtle" id="business">Attendance insights · America/Jamaica</p><h1>Historical attendance trends</h1><p id="period"></p><p id="generated" class="subtle"></p></header>
+<p class="warning">This report contains only saved attendance evidence for the selected period. Missing records are not treated as verified shifts, days off, assignments, or approved leave.</p>
+<section><h2>Report filters and controls</h2><p class="note">Selections update summary counts, comparisons, charts, patterns, and shift details. Select a distribution-center or employee row to drill down; clear filters to restore full scope.</p><div class="filters">
+<label>Distribution center<select id="locationFilter"><option value="">All in this report</option></select></label>
+<label>Role<select id="roleFilter"><option value="">All in this report</option></select></label>
+<label>Employee<select id="employeeFilter"><option value="">All employees</option></select></label>
+<label>Search employee / ID<input id="employeeSearch" type="search" autocomplete="off"></label>
+<label>Sort<select id="sortFilter"><option value="name">Name</option><option value="score-desc">Attendance: high to low</option><option value="score-asc">Attendance: low to high</option><option value="change-desc">Change: high to low</option><option value="change-asc">Change: low to high</option><option value="late-desc">Late dates</option><option value="absent-desc">Absent dates</option></select></label>
+<button id="clearFilters" type="button">Clear filters</button></div></section>
+<section><h2>Selected period</h2><div id="kpis" class="kpis"></div><div id="comparison"></div></section>
+<section><h2>Distribution-center score comparison</h2><p class="chart-legend"><span>Selected period</span><span class="previous">Preceding period</span></p><svg id="centerChart" role="img" aria-label="Distribution center attendance score comparison chart"></svg><div class="scroll"><table><thead><tr><th>Distribution center</th><th>Eligible shifts</th><th>Present</th><th>Score</th><th>Late shifts</th><th>Late dates</th><th>Absent shifts</th><th>Absent dates</th><th>Previous score</th><th>Change</th><th>Evidence</th></tr></thead><tbody id="centers"></tbody></table></div></section>
+<section><h2>Employee score comparison</h2><p class="chart-legend"><span>Selected period</span><span class="previous">Preceding period</span></p><svg id="employeeChart" role="img" aria-label="Employee attendance score comparison chart"></svg><div class="scroll"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Center(s)</th><th>Role(s)</th><th>Eligible shifts</th><th>Present</th><th>Formula score</th><th>Effective score</th><th>Override evidence</th><th>Late shifts</th><th>Late date count</th><th>Late date values</th><th>Absent shifts</th><th>Absent date count</th><th>Absent date values</th><th>Previous formula score</th><th>Formula change</th><th>Previous effective score</th><th>Effective change</th><th>Evidence</th></tr></thead><tbody id="employees"></tbody></table></div></section>
+<section><h2>Selected-period patterns</h2><p id="patternEvidence" class="note"></p><h3>Late and absence rates: shift time × day of week</h3><p class="risk-legend"><span class="late">Late-shift rate</span><span class="absent">Absent-shift rate</span></p><p class="note">Each cell shows late and absent shifts as percentages of eligible recorded shifts for that weekday and shift time. Cells require at least three eligible shifts; hover or focus a cell for incident counts and actual date values.</p><svg id="heatmap" role="img" aria-label="Late and absence shift rates by shift time and weekday"></svg><h3>Shift time</h3><div class="scroll"><table><thead><tr><th>Employee</th><th>Center</th><th>Role</th><th>Pattern</th><th>Eligible shifts</th><th>Attendance score</th><th>Late shifts</th><th>Late date count</th><th>Late date values</th><th>Late-shift rate</th><th>Absent shifts</th><th>Absent date count</th><th>Absent date values</th><th>Absence rate</th><th>Analysis</th></tr></thead><tbody id="times"></tbody></table></div><h3>Day of week</h3><div class="scroll"><table><thead><tr><th>Employee</th><th>Center</th><th>Role</th><th>Pattern</th><th>Eligible shifts</th><th>Attendance score</th><th>Late shifts</th><th>Late date count</th><th>Late date values</th><th>Late-shift rate</th><th>Absent shifts</th><th>Absent date count</th><th>Absent date values</th><th>Absence rate</th><th>Analysis</th></tr></thead><tbody id="days"></tbody></table></div><h3>Post-day-off</h3><p id="dayOff"></p><div class="scroll"><table><thead><tr><th>Employee</th><th>Center</th><th>Role</th><th>Next-recorded-shift sample</th><th>Attendance score</th><th>Late shifts</th><th>Late date count</th><th>Late date values</th><th>Late-shift rate</th><th>Absent shifts</th><th>Absent date count</th><th>Absent date values</th><th>Absence rate</th><th>Certainty evidence</th></tr></thead><tbody id="dayOffRows"></tbody></table></div><h3>Post-approved time off</h3><p id="leave"></p><div class="scroll"><table><thead><tr><th>Employee</th><th>Center</th><th>Role</th><th>Next-recorded-shift sample</th><th>Attendance score</th><th>Late shifts</th><th>Late date count</th><th>Late date values</th><th>Late-shift rate</th><th>Absent shifts</th><th>Absent date count</th><th>Absent date values</th><th>Absence rate</th><th>Certainty evidence</th></tr></thead><tbody id="leaveRows"></tbody></table></div></section>
+<section><h2>Recorded shifts</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Shift</th><th>Employee</th><th>Center</th><th>Role</th><th>Status</th><th>Clock in</th><th>Clock out</th><th>Worked minutes</th><th>Late / absence reason</th><th>Evidence status</th></tr></thead><tbody id="records"></tbody></table></div></section>
+<section><h2>Evidence limitations</h2><ul id="evidence"></ul></section>
+</main>
+<script type="application/json" id="report-data">__REPORT_JSON__</script>
+<script>
+(()=>{"use strict";
+const data=JSON.parse(document.getElementById("report-data").textContent);
+const $=id=>document.getElementById(id);
+if(data.businessName)$("business").textContent=data.businessName+" · Attendance insights · America/Jamaica";
+if(data.logoDataUrl&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(data.logoDataUrl)){
+ $("companyLogo").src=data.logoDataUrl;$("companyLogo").alt=(data.businessName||"Business")+" logo";$("companyLogo").hidden=false;
+}
+const detailSections=[$("employees").closest("section"),$("times").closest("section"),$("records").closest("section")];
+detailSections.forEach(section=>{section.hidden=true;section.dataset.selectionDetail="true";});
+const scope=document.createElement("p");scope.id="scope";scope.setAttribute("role","status");$("kpis").closest("section").before(scope);
+const detailTitle=document.createElement("h2");detailTitle.className="detail-heading";detailTitle.hidden=true;detailSections[0].before(detailTitle);
+const overviewGrid=document.createElement("div");overviewGrid.className="overview-grid";
+const centersSection=$("centers").closest("section");centersSection.before(overviewGrid);overviewGrid.append(centersSection);
+const rolesSection=document.createElement("section");
+rolesSection.innerHTML='<h2>Role overview</h2><p class="note">Select a DC and role to reveal team detail. Charts compare attendance scores; tables show incident rates.</p><svg id="roleChart" role="img" aria-label="Role attendance comparison"></svg><div class="scroll"><table><thead><tr><th>Role</th><th>Eligible</th><th>Score</th><th>Late rate</th><th>Absence rate</th><th>Previous score</th></tr></thead><tbody id="roleOverview"></tbody></table></div>';
+overviewGrid.append(rolesSection);
+centersSection.querySelector("h2").textContent="Distribution Centre overview";
+centersSection.querySelector("thead tr").replaceChildren(...["DC","Eligible","Score","Late rate","Absence rate","Previous score"].map(value=>{const th=document.createElement("th");th.textContent=value;return th;}));
+const evidenceSection=$("evidence").closest("section"),evidenceDetails=document.createElement("details"),evidenceSummary=document.createElement("summary");
+evidenceSummary.textContent="Definitions and evidence limitations";evidenceDetails.append(evidenceSummary,$("evidence"));evidenceSection.replaceChildren(evidenceDetails);
+const printButton=document.createElement("button");printButton.id="printReport";printButton.textContent="Print / Save PDF";printButton.onclick=()=>window.print();document.querySelector("header").append(printButton);
+const text=(value,empty="N/A")=>value===null||value===undefined||value===""?empty:String(value);
+const rate=value=>value===null||value===undefined?"Insufficient evidence":`${Number(value).toFixed(2)}%`;
+const delta=value=>value===null||value===undefined?"Insufficient evidence":`${value>0?"+":""}${Number(value).toFixed(2)} pp`;
+const cell=(row,value)=>{const td=document.createElement("td");td.textContent=text(value);row.append(td);return td;};
+const row=(body,values,drill)=>{const tr=document.createElement("tr");values.forEach(value=>cell(tr,value));if(drill){tr.dataset.drill="";tr.tabIndex=0;tr.setAttribute("aria-label","Filter: "+values[0]);tr.dataset.location=drill.location||"";tr.dataset.role=drill.role||"";tr.dataset.employee=drill.employee||"";}body.append(tr);};
+const fillSelect=(select,values)=>[...new Set(values.filter(Boolean))].sort().forEach(value=>{const option=document.createElement("option");option.value=value;option.textContent=value;select.append(option);});
+const eligible=items=>items.filter(item=>!["approved_leave","sick","vacation","day_off","off"].includes(item.status));
+const counts=items=>{const shifts=eligible(items),present=shifts.filter(item=>["attended","late"].includes(item.status)).length,confirmed=shifts.filter(item=>item.status==="attended").length,lateDateValues=[...new Set(items.filter(item=>item.status==="late").map(item=>item.date))].sort(),absentDateValues=[...new Set(items.filter(item=>item.status==="absent").map(item=>item.date))].sort();return {expected:shifts.length,present,score:shifts.length?Math.round(present*10000/shifts.length)/100:null,confirmed,confirmedAttendancePercent:shifts.length?Math.round(confirmed*1000/shifts.length)/10:null,late:items.filter(item=>item.status==="late").length,lateDates:lateDateValues.length,lateDateValues,absent:items.filter(item=>item.status==="absent").length,absentDates:absentDateValues.length,absentDateValues,leave:items.filter(item=>["approved_leave","sick","vacation"].includes(item.status)).length};};
+$("period").textContent=`${data.periodLabel}: ${data.start} to ${data.end} · ${data.timezone}`;
+$("generated").textContent=`Generated ${data.generatedAt}. Rates use attended/late shift records divided by recorded eligible shifts; approved leave is excluded.`;
+const allRecords=[...data.records,...data.previousRecords];
+fillSelect($("locationFilter"),allRecords.map(item=>item.location));
+fillSelect($("roleFilter"),allRecords.map(item=>item.role));
+const employeeOptions=new Map();allRecords.forEach(item=>{if(item.employeeId&&!employeeOptions.has(item.employeeId))employeeOptions.set(item.employeeId,item.name||item.employeeId);});
+for(const [employeeId,name] of [...employeeOptions].sort((a,b)=>a[1].localeCompare(b[1]))){const option=document.createElement("option");option.value=employeeId;option.textContent=`${name} · ${employeeId}`;$("employeeFilter").append(option);}
+function selectedEmployeeId(){return $("employeeFilter").value;}
+function filtered(items,source="record"){
+ const location=$("locationFilter").value,role=$("roleFilter").value,employee=selectedEmployeeId(),query=$("employeeSearch").value.trim().toLocaleLowerCase();
+ return items.filter(item=>{
+  const locations=source==="record"?[item.location]:item.distributionCenters||[item.distributionCenter];
+  const roles=source==="record"?[item.role]:item.roles||[item.role];
+  const matchesEmployee=!employee||(source==="record"?item.employeeId===employee:item.employeeId===employee);
+  const searchable=`${item.name||item.employee||""} ${item.employeeId||""}`.toLocaleLowerCase();
+  return (!location||locations.includes(location))&&(!role||roles.includes(role))&&matchesEmployee&&(!query||searchable.includes(query));
+ });
+}
+function compareRows(current,previous,keyName,metricName,employeeMode=false){
+ const currentGroups=new Map(),previousGroups=new Map();
+ const makeKey=item=>keyName==="location"?item.location||"Unassigned":keyName==="role"?item.role||"Unassigned":item.employeeId;
+ for(const [items,map] of [[current,currentGroups],[previous,previousGroups]])for(const item of items){const key=makeKey(item);if(!map.has(key))map.set(key,[]);map.get(key).push(item);}
+ const overrides=new Map(data.comparison.byEmployee.map(item=>[item.employeeId,item]));
+ const results=[...new Set([...currentGroups.keys(),...previousGroups.keys()])].map(key=>{
+  const now=counts(currentGroups.get(key)||[]),before=counts(previousGroups.get(key)||[]);
+  const old=overrides.get(key), scopeIsWhole=!$("locationFilter").value&&!$("roleFilter").value;
+  const effectiveNow=employeeMode&&scopeIsWhole&&old?old.currentEffective:now.score;
+  const effectiveBefore=employeeMode&&scopeIsWhole&&old?old.previousEffective:before.score;
+  const change=effectiveNow!==null&&effectiveNow!==undefined&&effectiveBefore!==null&&effectiveBefore!==undefined?Math.round((effectiveNow-effectiveBefore)*100)/100:null;
+  const sample=(currentGroups.get(key)||previousGroups.get(key)||[])[0]||{};
+  return {key,now,before,change,effectiveNow,effectiveBefore,old,sample};
+ });
+ return results;
+}
+function svgElement(name,attrs={},label){const node=document.createElementNS("http://www.w3.org/2000/svg",name);Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,String(value)));if(label)node.setAttribute("aria-label",label);return node;}
+function drawBars(id,items,previousKey,currentKey,nameKey){
+ const svg=$(id);svg.replaceChildren();const width=1000,rowHeight=30,height=Math.max(180,items.length*rowHeight+45);svg.setAttribute("viewBox",`0 0 ${width} ${height}`);
+ if(!items.length){const empty=svgElement("text",{x:12,y:28,class:"chart-caption"});empty.textContent="No comparison data for these filters.";svg.append(empty);return;}
+ items.forEach((item,index)=>{const y=24+index*rowHeight,label=text(item[nameKey]);const title=svgElement("text",{x:0,y:y+11,class:"chart-caption"});title.textContent=label.length>24?`${label.slice(0,21)}…`:label;svg.append(title);
+  for(const [value,offset,color] of [[item[currentKey],255,"#086fa0"],[item[previousKey],width-510,"#9eafbb"]]){if(value===null||value===undefined)continue;const barWidth=Math.max(1,Math.min(100,Number(value))*(width-570)/100);const rect=svgElement("rect",{x:offset,y:y-1,width:barWidth,height:9,rx:2,fill:color});const barTitle=svgElement("title");barTitle.textContent=`${label}: ${rate(value)}`;rect.append(barTitle);svg.append(rect);}
+  const value=svgElement("text",{x:width-245,y:y+10,class:"chart-caption"});value.textContent=`${rate(item[currentKey])} / ${rate(item[previousKey])}`;svg.append(value);
+ });
+}
+function drawHeatmap(items){
+ const svg=$("heatmap");svg.replaceChildren();const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],groups=new Map();
+ for(const item of items){const key=`${item.shiftStartTime}|${new Date(`${item.date}T12:00:00Z`).getUTCDay()}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item);}
+ const cells=[];for(const [key,group] of groups){const c=counts(group);if(c.expected<3)continue;const [shiftTime,dayIndexText]=key.split("|"),dayIndex=Number(dayIndexText);cells.push({shiftTime,day:days[(dayIndex+6)%7],expected:c.expected,late:c.late,lateDateValues:c.lateDateValues,lateRate:Math.round(c.late*10000/c.expected)/100,absent:c.absent,absentDateValues:c.absentDateValues,absentRate:Math.round(c.absent*10000/c.expected)/100});}
+ cells.sort((a,b)=>a.shiftTime.localeCompare(b.shiftTime)||days.indexOf(a.day)-days.indexOf(b.day));
+ const times=[...new Set(cells.map(item=>item.shiftTime))].sort((a,b)=>a.localeCompare(b)),width=850,height=Math.max(150,45+times.length*36);svg.setAttribute("viewBox",`0 0 ${width} ${height}`);
+ days.forEach((day,index)=>{const label=svgElement("text",{x:140+index*95,y:22,class:"chart-caption"});label.textContent=day.slice(0,3);svg.append(label);});
+ times.forEach((time,index)=>{const y=34+index*36,label=svgElement("text",{x:0,y:y+22,class:"chart-caption"});label.textContent=time;svg.append(label);for(let d=0;d<7;d++){const item=cells.find(entry=>entry.shiftTime===time&&days.indexOf(entry.day)===d),x=140+d*95;const frame=svgElement("rect",{x,y,width:86,height:30,rx:4,fill:"#f4f6f7",stroke:"#b8c5cc"});const tip=svgElement("title");tip.textContent=item?`${days[d]} ${time}; ${item.expected} eligible shifts; late ${item.late}/${item.expected} shifts (${rate(item.lateRate)}), dates: ${item.lateDateValues.join(", ")||"none"}; absent ${item.absent}/${item.expected} shifts (${rate(item.absentRate)}), dates: ${item.absentDateValues.join(", ")||"none"}.`:`${days[d]} ${time}: fewer than three eligible shifts`;frame.append(tip);svg.append(frame);if(item){for(const [rowIndex,labelText,value,color] of [[0,"L",item.lateRate,"#c96c54"],[1,"A",item.absentRate,"#d89533"]]){const trackY=y+2+rowIndex*14,track=svgElement("rect",{x:x+2,y:trackY,width:82,height:12,rx:2,fill:"#e2e7ea"}),bar=svgElement("rect",{x:x+2,y:trackY,width:Math.max(value?2:0,80*value/100),height:12,rx:2,fill:color}),valueText=svgElement("text",{x:x+5,y:trackY+10,class:"chart-caption"});valueText.textContent=`${labelText} ${value.toFixed(2)}%`;svg.append(track,bar,valueText);}}}});
+}
+function render(){
+const current=filtered(data.records),previous=filtered(data.previousRecords),summary=counts(current),comparison=data.comparison;
+const employeeSelected=Boolean($("employeeFilter").value),teamSelected=Boolean($("locationFilter").value&&$("roleFilter").value),showDetail=employeeSelected||teamSelected;
+detailSections.forEach(section=>{section.hidden=!showDetail;});
+detailTitle.hidden=!showDetail;detailTitle.textContent=employeeSelected?"Employee trend detail":"Location × role trend detail";
+detailSections[0].querySelector("h2").textContent=employeeSelected?"Selected employee comparison":"Selected team employee comparisons";
+scope.textContent=["Scope: "+($("locationFilter").value||"All Distribution Centres"),$("roleFilter").value||"All roles",employeeSelected?$("employeeFilter").selectedOptions[0].textContent:"All employees"].join(" / ");
+const roleRows=compareRows(current,previous,"role","score");
+$("roleOverview").replaceChildren();
+for(const item of roleRows)row($("roleOverview"),[item.key,item.now.expected,rate(item.now.score),rate(item.now.expected?item.now.late*100/item.now.expected:null),rate(item.now.expected?item.now.absent*100/item.now.expected:null),rate(item.before.score)],{role:item.key});
+drawBars("roleChart",roleRows.map(item=>({name:item.key,score:item.now.score,previous:item.before.score})),"previous","score","name");
+$("kpis").replaceChildren();
+for(const [label,value] of [["Eligible shifts",summary.expected],["Attendance score",rate(summary.score)],["Late shift records",summary.late],["Absent shift records",summary.absent]]){
+const card=document.createElement("div");card.className="kpi";const title=document.createElement("span");title.textContent=label;const number=document.createElement("b");number.textContent=text(value);card.append(title,number);$("kpis").append(card);}
+$("comparison").textContent=`Compared with ${comparison.start} to ${comparison.end}: ${rate(counts(previous).score)} → ${rate(summary.score)} (${delta(summary.score!==null&&counts(previous).score!==null?summary.score-counts(previous).score:null)}). Rates and counts reflect the active filters; no zero baseline is inferred.`;
+const sortMode=$("sortFilter").value,sortResults=items=>items.sort((a,b)=>{if(sortMode==="score-desc")return (b.effectiveNow??-1)-(a.effectiveNow??-1);if(sortMode==="score-asc")return (a.effectiveNow??101)-(b.effectiveNow??101);if(sortMode==="change-desc")return (b.change??-999)-(a.change??-999);if(sortMode==="change-asc")return (a.change??999)-(b.change??999);if(sortMode==="late-desc")return b.now.late-a.now.late;if(sortMode==="absent-desc")return b.now.absent-a.now.absent;return String(a.sample.name||a.sample.employeeId||a.key).localeCompare(String(b.sample.name||b.sample.employeeId||b.key));});
+const centerRows=sortResults(compareRows(current,previous,"location","score"));
+$("centers").replaceChildren();centerRows.forEach(item=>row($("centers"),[item.key,item.now.expected,rate(item.now.score),rate(item.now.expected?item.now.late*100/item.now.expected:null),rate(item.now.expected?item.now.absent*100/item.now.expected:null),rate(item.before.score)],{location:item.key}));
+drawBars("centerChart",centerRows.map(item=>({name:item.key,score:item.now.score,previous:item.before.score})),"previous","score","name");
+const employeeRows=sortResults(compareRows(current,previous,"employeeId","score",true));
+$("employees").replaceChildren();employeeRows.forEach(item=>{const old=item.old||{};row($("employees"),[item.sample.name||item.key,item.key,[...new Set((current.filter(r=>r.employeeId===item.key).map(r=>r.location||"Unassigned")))].join(", "),[...new Set(current.filter(r=>r.employeeId===item.key).map(r=>r.role||"Unassigned"))].join(", "),item.now.expected,item.now.present,rate(item.now.score),rate(item.effectiveNow),$("locationFilter").value||$("roleFilter").value?"Override not applied to partial team filter":old.overrideEvidence||"No override recorded",item.now.late,item.now.lateDates,item.now.lateDateValues.join(", ")||"None",item.now.absent,item.now.absentDates,item.now.absentDateValues.join(", ")||"None",rate(item.before.score),delta(item.now.score!==null&&item.before.score!==null?item.now.score-item.before.score:null),rate(item.effectiveBefore),delta(item.change),item.change===null?"Insufficient evidence":"Compared"],{employee:item.key});const tr=$("employees").lastElementChild;if(old.scoreOverride!==null&&old.scoreOverride!==undefined)tr.cells[8].classList.add("override");});
+drawBars("employeeChart",employeeRows.map(item=>({name:item.sample.name||item.key,score:item.effectiveNow,previous:item.effectiveBefore})),"previous","score","name");
+for(const [id,items,filter] of [["centerChart",centerRows,"locationFilter"],["roleChart",roleRows,"roleFilter"],["employeeChart",employeeRows,"employeeFilter"]]){
+ const labels=[...$(id).querySelectorAll("text")].filter(node=>Number(node.getAttribute("x"))===0);
+ labels.forEach((label,index)=>{label.setAttribute("tabindex","0");label.setAttribute("role","button");label.setAttribute("aria-label","Filter "+items[index].key);label.style.cursor="pointer";
+ const activate=()=>{$(filter).value=items[index].key;render();};label.onclick=activate;label.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();activate();}};});
+}
+const patterns=data.patterns;
+$("patternEvidence").textContent=`Patterns use records from ${data.start} through ${data.end} only. Each shift-time/day group needs at least ${patterns.minimumEligibleShifts} eligible shifts.`;
+for(const [id,items] of [["times",patterns.shiftTimes],["days",patterns.daysOfWeek]]){
+$(id).replaceChildren();filtered(items,"pattern").forEach(item=>row($(id),[item.employee,item.distributionCenter,item.role,item.pattern,item.eligibleShifts,rate(item.score),item.lateShifts,item.lateDates,item.lateDateValues.join(", ")||"None",rate(item.lateShiftRate),item.absentShifts,item.absentDates,item.absentDateValues.join(", ")||"None",rate(item.absentShiftRate),item.analysis],{employee:item.employeeId,location:item.distributionCenter,role:item.role}));}
+drawHeatmap(current);
+const dayOffRecords=filtered(patterns.postDayOff.records,"pattern"),leaveRecords=filtered(patterns.postApprovedTimeOff.records,"pattern");
+$("dayOff").textContent=`Analysis: ${patterns.postDayOff.analysis}. ${patterns.postDayOff.message} ${dayOffRecords.length?`${dayOffRecords.length} explicit event group(s) found.`:"No verified day-off event was found."}`;
+$("leave").textContent=`Analysis: ${patterns.postApprovedTimeOff.analysis}. ${patterns.postApprovedTimeOff.message} ${leaveRecords.length?`${leaveRecords.length} next-shift event group(s) found.`:"No eligible in-period event was found."}`;
+for(const [id,items] of [["dayOffRows",dayOffRecords],["leaveRows",leaveRecords]]){$(id).replaceChildren();items.forEach(item=>row($(id),[item.employee,item.distributionCenter,item.role,item.eligibleShifts,rate(item.score),item.lateShifts,item.lateDates,item.lateDateValues.join(", ")||"None",rate(item.lateShiftRate),item.absentShifts,item.absentDates,item.absentDateValues.join(", ")||"None",rate(item.absentShiftRate),`${item.analysis}; ${item.evidence||"first scheduled shift not verified"}`],{employee:item.employeeId,location:item.distributionCenter,role:item.role}));}
+$("records").replaceChildren();current.forEach(item=>row($("records"),[item.date,item.shiftStartTime,item.name||item.employeeId,item.location||"Unassigned",item.role||"Unassigned",item.status,item.clockIn,item.clockOut,item.workedMinutes,item.reason,`${item.assignmentEvidence}; duration ${item.durationEvidence}; ${item.leaveEvidence}`],{employee:item.employeeId,location:item.location,role:item.role}));
+$("evidence").replaceChildren();Object.values(data.evidence).forEach(value=>{const li=document.createElement("li");li.textContent=text(value);$("evidence").append(li);});
+}
+["locationFilter","roleFilter","employeeFilter","employeeSearch","sortFilter"].forEach(id=>$(id).addEventListener(id==="employeeSearch"?"input":"change",render));
+$("clearFilters").addEventListener("click",()=>{$("locationFilter").value="";$("roleFilter").value="";$("employeeFilter").value="";$("employeeSearch").value="";$("sortFilter").value="name";render();});
+document.addEventListener("click",event=>{const tr=event.target.closest("tr[data-drill]");if(!tr)return;if(tr.dataset.location)$("locationFilter").value=tr.dataset.location;if(tr.dataset.role)$("roleFilter").value=tr.dataset.role;if(tr.dataset.employee)$("employeeFilter").value=tr.dataset.employee;render();});
+document.addEventListener("keydown",event=>{if((event.key==="Enter"||event.key===" ")&&event.target.matches("tr[data-drill]")){event.preventDefault();event.target.click();}});
+render();
+})();
+</script>
+</body>
+</html>
