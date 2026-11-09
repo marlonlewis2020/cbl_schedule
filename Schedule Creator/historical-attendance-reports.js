@@ -81,7 +81,7 @@
         if(mounted.has(container))return;
         mounted.add(container);
         const endpoint=endpointFor(mode);
-        const heading=element("h2","Historical attendance trend reports");
+        const heading=element("h3","Historical attendance trend reports");
         const intro=element("p","Generate immutable weekly (Monday–Sunday) or calendar-month Excel and offline interactive HTML reports. Comparisons use the immediately preceding matching period; pattern analysis uses only the selected period and requires at least three eligible shifts.");
         const form=element("form",undefined,"historical-report-form");
         const periodLabel=element("label","Period");
@@ -112,7 +112,10 @@
         const status=element("p","", "note");status.setAttribute("role","status");status.setAttribute("aria-live","polite");
         const preview=element("section",undefined,"historical-report-preview");
         const history=element("section",undefined,"historical-report-history");
-        container.replaceChildren(heading,intro,form,status,preview,history);
+        const details=element("details"),summary=element("summary"),body=element("div",undefined,"panel-body");
+        container.classList.add("collapsible");
+        summary.append(heading);body.append(intro,form,status,preview,history);
+        details.append(summary,body);container.replaceChildren(details);
         async function loadHistory(){
             const result=await fetchJson(endpoint);
             renderHistory(history,result.reports||[],endpoint);

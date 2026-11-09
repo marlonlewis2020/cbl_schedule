@@ -317,6 +317,9 @@ Authorized management users retain their scoped location choices.
 
 Attendance snapshots are Silver+ and download-only for now. Attendance has
 Capture now, Refresh history, View HTML, Download HTML and Download XLSX.
+The Attendance snapshots and Historical attendance trend reports sections
+start collapsed; select either heading to expand or collapse its controls and
+saved report history. Historical reports also start collapsed in the manager view.
 The interactive HTML dashboard shows executive KPI cards, location/role/
 shift charts and summaries, then employee exceptions and evidence-based risks.
 Location, role, shift, status and search filters coordinate the entire dashboard;

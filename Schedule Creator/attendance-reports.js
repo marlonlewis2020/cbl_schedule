@@ -45,7 +45,7 @@
     }
     async function mount(node){
         active=node;
-        const heading=document.createElement('h2');heading.textContent='Attendance snapshots';
+        const heading=document.createElement('h3');heading.textContent='Attendance snapshots';
         const intro=document.createElement('p');intro.textContent='Interactive HTML dashboards and immutable XLSX downloads at 7 AM, 3 PM and 11 PM Jamaica time, or on demand. HTML includes executive KPIs, charts, filters and employee exceptions, and works offline. A separately running report worker is required. Automatic email is deferred.';
         const actions=document.createElement('div');actions.className='actions';
         const capture=document.createElement('button'),refresh=document.createElement('button'),toggle=document.createElement('button'),remove=document.createElement('button');
@@ -53,7 +53,11 @@
         const status=document.createElement('p');status.setAttribute('role','status');
         const list=document.createElement('div');list.className='tablewrap';
         const emailPanel=document.createElement('section');emailPanel.hidden=true;
-        actions.append(capture,refresh,toggle,remove);node.replaceChildren(heading,intro,actions,status,list,emailPanel);
+        const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('div');
+        node.classList.add('collapsible');body.className='panel-body';
+        summary.append(heading);body.append(intro,actions,status,list,emailPanel);
+        details.append(summary,body);
+        actions.append(capture,refresh,toggle,remove);node.replaceChildren(details);
         const selected=new Set();
         const updateSelection=()=>{remove.disabled=busy||!selected.size;remove.textContent=`Delete selected (${selected.size})`;};
         async function showEmail(id){
