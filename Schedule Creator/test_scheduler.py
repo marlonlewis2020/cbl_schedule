@@ -4101,10 +4101,11 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         self.csrf = {"X-CSRF-Token": client.get("/api/access/state").get_json()["csrfToken"]}
         return client
 
-    def sign_in_manager(self):
-        created = self.create_account(
-            role="manager", displayName="Mary Manager", email="mgr@acme.example"
-        ).get_json()
+    def sign_in_manager(self, employee_id=None):
+        fields = {"role": "manager", "displayName": "Mary Manager", "email": "mgr@acme.example"}
+        if employee_id:
+            fields["employeeId"] = employee_id
+        created = self.create_account(**fields).get_json()
         client = self.new_client()
         credentials = {
             "bamboohrSubdomain": "acme", "identifier": "MGR@acme.example",
@@ -4125,6 +4126,475 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         self.assertEqual(done.status_code, 200)
         self.csrf = {"X-CSRF-Token": done.get_json()["csrfToken"]}
         return client, enrolling["secret"], created
+
+    def shared_roster_import_payload(self):
+        tenant = scheduler.DEFAULT_TENANT_ID
+        with closing(scheduler.database_connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT employee_id, location, role
+                FROM employees WHERE tenant_id = ? AND active = 1
+                ORDER BY employee_id
+                """,
+                (tenant,),
+            ).fetchall()
+        pools = [
+            {"location": location, "role": role, "starts": [8]}
+            for location, role in sorted({(row[1], row[2]) for row in rows})
+        ]
+        employees = [
+            {
+                "employeeId": employee_id,
+                "settings": {
+                    "flex": "", "reason": "", "preferred": None,
+                    "proximity": None, "random": None, "attendance": None,
+                    "days": [None] * 7, "shiftAvailability": {"8": 0},
+                },
+            }
+            for employee_id, _, _ in rows
+        ]
+        return {
+            "tenantId": tenant, "locked": False, "pools": pools, "employees": employees,
+        }
+
+    def initialize_shared_roster(self):
+        payload = self.shared_roster_import_payload()
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        preview = self.admin.post(
+            "/api/roster-settings/import/preview", headers=headers, json=payload
+        )
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        imported = self.admin.post(
+            "/api/roster-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(imported.status_code, 201, imported.get_json())
+
+    def shared_meta_import_payload(self, locked=False):
+        open_days = [1, 1, 1, 1, 1, 0, 0]
+        intensity = [0.2, 0.2, 0.2, 0.2, 0.2, 0, 0]
+        return {
+            "tenantId": scheduler.DEFAULT_TENANT_ID,
+            "locked": locked,
+            "locations": [
+                {"name": "Kingston", "open": open_days, "intensity": intensity},
+                {"name": "Montego Bay", "open": open_days, "intensity": intensity},
+            ],
+        }
+
+    def initialize_shared_meta(self, locked=False):
+        payload = self.shared_meta_import_payload(locked)
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        preview = self.admin.post(
+            "/api/meta-settings/import/preview", headers=headers, json=payload
+        )
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        imported = self.admin.post(
+            "/api/meta-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(imported.status_code, 201, imported.get_json())
+
+    def test_shared_roster_settings_enforce_manager_scope_and_field_permissions(self):
+        self.initialize_shared_roster()
+        manager, _, _ = self.sign_in_manager()
+        response = manager.get("/api/access/roster-settings")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        records = response.get_json()["employees"]
+        self.assertEqual([record["employeeId"] for record in records], ["emp-a"])
+        record = records[0]
+        forbidden = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": "emp-a", "revision": record["revision"],
+                "changes": {"random": 2},
+            },
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        allowed = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": "emp-a", "revision": record["revision"],
+                "changes": {"proximity": 2},
+            },
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        stale = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": "emp-a", "revision": record["revision"],
+                "changes": {"proximity": 1},
+            },
+        )
+        self.assertEqual(stale.status_code, 409)
+        outside_scope = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": "emp-b", "revision": 1,
+                "changes": {"proximity": 2},
+            },
+        )
+        self.assertEqual(outside_scope.status_code, 403)
+        with closing(scheduler.database_connect()) as connection:
+            audit = connection.execute(
+                """
+                SELECT 1 FROM tenant_audit_events
+                WHERE tenant_id = ? AND action = ?
+                """,
+                (scheduler.DEFAULT_TENANT_ID, "roster-settings-updated:emp-a:proximity"),
+            ).fetchone()
+        self.assertIsNotNone(audit)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE schedule_locations SET manager_email = 'other@acme.example' WHERE id = 'loc1'"
+            )
+        self.assertEqual(manager.get("/api/access/roster-settings").get_json()["employees"], [])
+        revoked = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": "emp-a", "revision": allowed.get_json()["revision"],
+                "changes": {"proximity": 3},
+            },
+        )
+        self.assertEqual(revoked.status_code, 403)
+
+    def test_initial_shared_roster_import_is_primary_only_and_never_overwrites(self):
+        payload = self.shared_roster_import_payload()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO tenant_admins
+                    (id, tenant_id, email, display_name, password_hash,
+                     mfa_secret, mfa_enabled, active, auth_version, is_primary)
+                SELECT 'secondary-admin', tenant_id, 'secondary@example.test',
+                       display_name, password_hash, mfa_secret, 1, 1, 1, 0
+                FROM tenant_admins WHERE id = 'test-admin'
+                """
+            )
+        secondary = scheduler.app.test_client()
+        with self.admin.session_transaction() as current:
+            state = dict(current)
+        state["tenant_admin_id"] = "secondary-admin"
+        with secondary.session_transaction() as current:
+            current.update(state)
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        self.assertEqual(
+            secondary.post(
+                "/api/roster-settings/import/preview", headers=headers, json=payload
+            ).status_code,
+            403,
+        )
+        preview = self.admin.post(
+            "/api/roster-settings/import/preview", headers=headers, json=payload
+        )
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        imported = self.admin.post(
+            "/api/roster-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(imported.status_code, 201, imported.get_json())
+        repeated = self.admin.post(
+            "/api/roster-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(repeated.status_code, 409)
+
+    def test_locking_shared_roster_rejects_manager_profile_updates(self):
+        self.initialize_shared_roster()
+        settings = self.admin.get("/api/roster-settings").get_json()
+        locked = self.admin.put(
+            "/api/roster-settings/configuration",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={
+                "revision": settings["revision"], "locked": True,
+                "pools": settings["pools"],
+            },
+        )
+        self.assertEqual(locked.status_code, 200, locked.get_json())
+        manager, _, _ = self.sign_in_manager()
+        roster = manager.get("/api/access/roster-settings").get_json()
+        self.assertTrue(roster["locked"])
+        employee = roster["employees"][0]
+        rejected = manager.put(
+            "/api/access/roster-settings",
+            headers=self.csrf,
+            json={
+                "employeeId": employee["employeeId"], "revision": employee["revision"],
+                "changes": {"proximity": 2},
+            },
+        )
+        self.assertEqual(rejected.status_code, 409)
+
+    def test_manager_meta_is_location_wide_scoped_validated_audited_and_revisioned(self):
+        self.initialize_shared_meta()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_locations
+                    (id, tenant_id, name, bamboo_schedule_id, location, role_group, manager_email)
+                VALUES ('loc1-other-role', ?, 'Kingston Other Role', 'sched-loc1-other',
+                        'Kingston', 'Other role', 'other@acme.example')
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+            connection.execute(
+                """
+                INSERT INTO accepted_schedules
+                    (run_id, tenant_id, week_start, location, role, payload)
+                VALUES ('meta-preserved-run', ?, '2026-11-02', 'Kingston', 'Cashier', '{}')
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        manager, _, _ = self.sign_in_manager()
+        response = manager.get("/api/access/meta-settings")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([location["name"] for location in response.get_json()["locations"]], ["Kingston"])
+        revision = response.get_json()["revision"]
+        updated = manager.put(
+            "/api/access/meta-settings",
+            headers=self.csrf,
+            json={
+                "revision": revision,
+                "location": "Kingston",
+                "changes": [
+                    {"field": "open", "day": 0, "value": 0},
+                    {"field": "intensity", "day": 1, "value": 0.35},
+                ],
+            },
+        )
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertEqual(updated.get_json()["location"]["open"][0], 0)
+        self.assertEqual(updated.get_json()["location"]["intensity"][1], 0.35)
+        stale = manager.put(
+            "/api/access/meta-settings",
+            headers=self.csrf,
+            json={
+                "revision": revision, "location": "Kingston",
+                "changes": [{"field": "open", "day": 0, "value": 1}],
+            },
+        )
+        self.assertEqual(stale.status_code, 409)
+        outside = manager.put(
+            "/api/access/meta-settings",
+            headers=self.csrf,
+            json={
+                "revision": updated.get_json()["revision"], "location": "Montego Bay",
+                "changes": [{"field": "open", "day": 0, "value": 1}],
+            },
+        )
+        self.assertEqual(outside.status_code, 403)
+        invalid = manager.put(
+            "/api/access/meta-settings",
+            headers=self.csrf,
+            json={
+                "revision": updated.get_json()["revision"], "location": "Kingston",
+                "changes": [{"field": "intensity", "day": 2, "value": 1.5}],
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        with closing(scheduler.database_connect()) as connection:
+            audit = connection.execute(
+                """
+                SELECT 1 FROM tenant_audit_events
+                WHERE tenant_id = ? AND action LIKE 'meta-settings-updated:Kingston:%'
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            ).fetchone()
+            accepted = connection.execute(
+                "SELECT payload FROM accepted_schedules WHERE run_id = 'meta-preserved-run'"
+            ).fetchone()
+        self.assertIsNotNone(audit)
+        self.assertEqual(accepted[0], "{}")
+
+    def test_meta_import_is_primary_only_and_one_time(self):
+        payload = self.shared_meta_import_payload()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO tenant_admins
+                    (id, tenant_id, email, display_name, password_hash,
+                     mfa_secret, mfa_enabled, active, auth_version, is_primary)
+                SELECT 'secondary-admin', tenant_id, 'secondary@example.test',
+                       display_name, password_hash, mfa_secret, 1, 1, 1, 0
+                FROM tenant_admins WHERE id = 'test-admin'
+                """
+            )
+        secondary = scheduler.app.test_client()
+        with self.admin.session_transaction() as current:
+            state = dict(current)
+        state["tenant_admin_id"] = "secondary-admin"
+        with secondary.session_transaction() as current:
+            current.update(state)
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        self.assertEqual(
+            secondary.post("/api/meta-settings/import/preview", headers=headers, json=payload).status_code,
+            403,
+        )
+        preview = self.admin.post(
+            "/api/meta-settings/import/preview", headers=headers, json=payload
+        )
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        imported = self.admin.post(
+            "/api/meta-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(imported.status_code, 201, imported.get_json())
+        settings = self.admin.get("/api/meta-settings").get_json()
+        edited = self.admin.put(
+            "/api/meta-settings/Kingston",
+            headers=headers,
+            json={
+                "revision": settings["revision"],
+                "changes": [{"field": "intensity", "day": 0, "value": 0.3}],
+            },
+        )
+        self.assertEqual(edited.status_code, 200, edited.get_json())
+        self.assertEqual(edited.get_json()["location"]["intensity"][0], 0.3)
+        self.assertEqual(secondary.get("/api/meta-settings").status_code, 403)
+        repeated = self.admin.post(
+            "/api/meta-settings/import",
+            headers=headers,
+            json=payload | {"confirmed": True},
+        )
+        self.assertEqual(repeated.status_code, 409)
+
+    def test_meta_lock_tracks_shared_roster_and_blocks_managers(self):
+        self.initialize_shared_roster()
+        self.initialize_shared_meta()
+        roster = self.admin.get("/api/roster-settings").get_json()
+        locked = self.admin.put(
+            "/api/roster-settings/configuration",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={
+                "revision": roster["revision"], "locked": True, "pools": roster["pools"],
+            },
+        )
+        self.assertEqual(locked.status_code, 200, locked.get_json())
+        self.assertTrue(self.admin.get("/api/meta-settings").get_json()["locked"])
+        manager, _, _ = self.sign_in_manager()
+        meta = manager.get("/api/access/meta-settings").get_json()
+        self.assertTrue(meta["locked"])
+        rejected = manager.put(
+            "/api/access/meta-settings",
+            headers=self.csrf,
+            json={
+                "revision": meta["revision"], "location": "Kingston",
+                "changes": [{"field": "open", "day": 0, "value": 0}],
+            },
+        )
+        self.assertEqual(rejected.status_code, 409)
+
+    def test_employee_and_linked_manager_personal_views_cannot_access_meta(self):
+        self.initialize_shared_meta()
+        employee = self.portal_employee_client()
+        self.assertEqual(employee.get("/api/access/meta-settings").status_code, 403)
+        manager, _, _ = self.sign_in_manager(employee_id="emp-b")
+        self.assertEqual(manager.get("/api/access/meta-settings?view=employee").status_code, 403)
+
+    def test_employee_shared_roster_settings_are_self_only_and_field_scoped(self):
+        self.initialize_shared_roster()
+        employee = self.portal_employee_client()
+        response = employee.get("/api/access/my/roster-settings")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        record = response.get_json()["employee"]
+        self.assertEqual(record["employeeId"], "emp-a")
+        saved = employee.put(
+            "/api/access/my/roster-settings",
+            headers=self.csrf,
+            json={
+                "revision": record["revision"],
+                "changes": {"flex": "No", "reason": "School schedule"},
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        forbidden = employee.put(
+            "/api/access/my/roster-settings",
+            headers=self.csrf,
+            json={
+                "revision": saved.get_json()["revision"],
+                "changes": {"proximity": 2},
+            },
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_linked_manager_uses_employee_permissions_in_personal_roster_view(self):
+        self.initialize_shared_roster()
+        manager, _, _ = self.sign_in_manager(employee_id="emp-a")
+        response = manager.get("/api/access/my/roster-settings")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["employee"]["employeeId"], "emp-a")
+        forbidden = manager.put(
+            "/api/access/my/roster-settings",
+            headers=self.csrf,
+            json={
+                "revision": response.get_json()["employee"]["revision"],
+                "changes": {"random": 1},
+            },
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(
+            manager.get("/api/access/roster-settings?view=employee").status_code,
+            403,
+        )
+
+    def test_new_shared_shift_start_is_unavailable_by_default(self):
+        self.initialize_shared_roster()
+        settings = self.admin.get("/api/roster-settings").get_json()
+        pools = settings["pools"]
+        target = next(pool for pool in pools if pool["location"] == "Kingston" and pool["role"] == "Cashier")
+        target["starts"].append(9)
+        updated = self.admin.put(
+            "/api/roster-settings/configuration",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"revision": settings["revision"], "locked": False, "pools": pools},
+        )
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        records = self.admin.get("/api/roster-settings").get_json()["employees"]
+        employee = next(record for record in records if record["employeeId"] == "emp-a")
+        self.assertEqual(employee["settings"]["shiftAvailability"]["9"], 0)
+
+    def test_shift_start_sync_conflict_rolls_back_configuration_and_profiles(self):
+        self.initialize_shared_roster()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                CREATE TRIGGER ignore_roster_profile_update
+                BEFORE UPDATE ON roster_employee_settings
+                WHEN NEW.employee_id = 'emp-a'
+                BEGIN
+                    SELECT RAISE(IGNORE);
+                END
+                """
+            )
+        settings = self.admin.get("/api/roster-settings").get_json()
+        pools = settings["pools"]
+        target = next(pool for pool in pools if pool["location"] == "Kingston" and pool["role"] == "Cashier")
+        target["starts"].append(9)
+        updated = self.admin.put(
+            "/api/roster-settings/configuration",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            json={"revision": settings["revision"], "locked": False, "pools": pools},
+        )
+        self.assertEqual(updated.status_code, 409, updated.get_json())
+        current = self.admin.get("/api/roster-settings").get_json()
+        self.assertEqual(current["revision"], settings["revision"])
+        self.assertEqual(
+            next(pool for pool in current["pools"] if pool["location"] == "Kingston" and pool["role"] == "Cashier")["starts"],
+            [8],
+        )
+        employee = next(record for record in current["employees"] if record["employeeId"] == "emp-a")
+        self.assertEqual(employee["revision"], 1)
+        self.assertEqual(employee["settings"]["shiftAvailability"], {"8": 0})
 
     def test_manager_sees_only_their_locations_and_cannot_use_admin_api(self):
         client, _, _ = self.sign_in_manager()

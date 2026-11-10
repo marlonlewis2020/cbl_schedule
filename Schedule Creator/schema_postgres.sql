@@ -78,6 +78,31 @@ ALTER TABLE employees
     FOREIGN KEY (tenant_id, schedule_location_id)
     REFERENCES schedule_locations (tenant_id, id);
 
+CREATE TABLE IF NOT EXISTS roster_configurations (
+    tenant_id TEXT PRIMARY KEY DEFAULT current_setting('app.tenant_id', true),
+    revision INTEGER NOT NULL DEFAULT 1,
+    locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+    pools_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS roster_employee_settings (
+    tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
+    employee_id TEXT NOT NULL,
+    settings_json TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS meta_configurations (
+    tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true) PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1,
+    locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+    locations_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS application_settings (
     setting_key TEXT NOT NULL,
     tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
@@ -208,6 +233,27 @@ ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON employees;
 CREATE POLICY tenant_isolation ON employees
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE roster_configurations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roster_configurations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON roster_configurations;
+CREATE POLICY tenant_isolation ON roster_configurations
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE roster_employee_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roster_employee_settings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON roster_employee_settings;
+CREATE POLICY tenant_isolation ON roster_employee_settings
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE meta_configurations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meta_configurations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON meta_configurations;
+CREATE POLICY tenant_isolation ON meta_configurations
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 

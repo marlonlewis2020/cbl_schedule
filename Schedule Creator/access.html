@@ -14,7 +14,7 @@
     main.narrow { max-width: 430px; margin-top: 6vh; }
     h1 { margin: 0 0 8px; font-size: 1.5rem; }
     label { display: block; margin: 14px 0 6px; font-weight: 600; }
-    input, textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
+    input, textarea, select { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
     button { padding: 10px 14px; border: 0; border-radius: 6px; color: white; background: #167da8; font: inherit; font-weight: 700; cursor: pointer; }
     button.secondary { background: #51667a; }
     form button[type=submit] { width: 100%; margin-top: 18px; }
@@ -51,6 +51,10 @@
     .historical-report-form input, .historical-report-form select { padding: 8px; border: 1px solid #aebcc6; border-radius: 6px; font: inherit; }
     .historical-report-preview, .historical-report-history { margin-top: 16px; }
     .historical-report-links { display: flex; gap: 12px; flex-wrap: wrap; }
+    #rosterSettingsPanel, #metaSettingsPanel { margin-top: 18px; padding: 16px; border: 1px solid #cfdbe3; border-radius: 8px; background: #f8fbfc; }
+    #rosterSettingsTable input, #rosterSettingsTable select { min-width: 100px; }
+    #rosterSettingsTable .roster-boolean { min-width: 82px; }
+    #metaSettingsTable input[type=number] { min-width: 90px; }
     th, td { padding: 8px; border-bottom: 1px solid #e0e7ec; text-align: left; vertical-align: top; }
     .status { text-transform: capitalize; font-weight: 600; }
     .status.late { color: #b26a00; } .status.absent { color: #a12121; } .status.attended { color: #2e7d32; }
@@ -124,6 +128,18 @@
       <p class="notice">Read-only counts for your current location and role, from recorded attendance. Future shifts are excluded; approved leave is excluded from the attendance percentage.</p>
     </section>
     <section id="historicalAccessReports" class="notice" hidden></section>
+    <section id="rosterSettingsPanel" hidden aria-labelledby="rosterSettingsTitle">
+      <h2 id="rosterSettingsTitle">Roster settings</h2>
+      <p id="rosterSettingsNote"></p>
+      <div id="rosterSettingsTable" class="scroll"></div>
+      <p id="rosterSettingsMessage" class="error" role="status" aria-live="polite"></p>
+    </section>
+    <section id="metaSettingsPanel" hidden aria-labelledby="metaSettingsTitle">
+      <h2 id="metaSettingsTitle">Location settings (META)</h2>
+      <p id="metaSettingsNote"></p>
+      <div id="metaSettingsTable" class="scroll"></div>
+      <p id="metaSettingsMessage" class="error" role="status" aria-live="polite"></p>
+    </section>
     <h2>Attendance</h2>
     <p id="summary"></p>
     <form id="dateFilter" class="filter" hidden>
@@ -138,6 +154,8 @@
     </table></div>
     <p id="appMessage" class="error" role="alert" aria-live="polite"></p>
     <button id="personalView" type="button" class="secondary" hidden>My shifts / employee view</button>
+    <button id="openRosterSettings" type="button" class="secondary" hidden>Roster settings</button>
+    <button id="openMetaSettings" type="button" class="secondary" hidden>Location settings (META)</button>
     <button id="openTrade" type="button">Shift trade</button>
     <p><a id="tradeInboxLink" href="/trades">Open shift trade inbox</a></p>
   </main>
@@ -225,6 +243,249 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The request failed.");
       return result;
+    }
+
+    let rosterSettingsRecords = [];
+    let rosterSettingsLocked = false;
+    function rosterStartLabel(start) {
+      const minutes = Math.round(Number(start) * 60);
+      const hour = Math.floor(minutes / 60), minute = minutes % 60;
+      return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`;
+    }
+
+    function rosterControl(record, field, label, kind, value, canEdit) {
+      const control = document.createElement(kind === "text" || kind === "number" ? "input" : "select");
+      control.setAttribute("aria-label", `${record.name} · ${label}`);
+      control.dataset.rosterField = field;
+      control.disabled = rosterSettingsLocked || !canEdit;
+      if (kind === "text") {
+        control.type = "text";
+        control.maxLength = 240;
+        control.value = value ?? "";
+      } else if (kind === "number") {
+        control.type = "number";
+        control.value = value ?? "";
+        control.min = kind === "number" && field === "attendance" ? "0" : "1";
+        control.max = field === "attendance" ? "100" : "3";
+        control.step = field === "attendance" ? "any" : "1";
+      } else {
+        control.className = "roster-boolean";
+        const options = kind === "flex"
+          ? [["", "Missing"], ["Yes", "Yes"], ["No", "No"]]
+          : kind === "start"
+            ? [["", "Missing"], ...record.starts.map(start => [String(start), rosterStartLabel(start)])]
+            : kind === "rank"
+              ? [["", "Missing"], ["1", "1"], ["2", "2"], ["3", "3"]]
+              : [["", "Missing"], ["1", "Yes"], ["0", "No"]];
+        if (kind === "start" && value !== null && value !== undefined &&
+            !record.starts.some(start => Number(start) === Number(value))) {
+          options.push([String(value), `${rosterStartLabel(value)} · no longer configured`]);
+        }
+        for (const [optionValue, text] of options) {
+          const option = document.createElement("option");
+          option.value = optionValue;
+          option.textContent = text;
+          control.append(option);
+        }
+        control.value = value === null || value === undefined ? "" : String(value);
+      }
+      control.dataset.original = JSON.stringify(value ?? null);
+      return control;
+    }
+
+    function renderRosterSettings() {
+      const container = $("#rosterSettingsTable");
+      container.replaceChildren();
+      const table = document.createElement("table"), head = table.createTHead().insertRow();
+      const headings = ["Employee", "Location / role", "Flexible", "Reason if no", "Preferred start", "Proximity 1–3", "Random 1–3", "Attendance 0–100"];
+      const starts = [...new Set(rosterSettingsRecords.flatMap(record => record.starts))].sort((a, b) => a - b);
+      for (const start of starts) headings.push(`Allow ${rosterStartLabel(start)}`);
+      for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) headings.push(day);
+      headings.push("Save");
+      for (const heading of headings) { const th = document.createElement("th"); th.textContent = heading; head.append(th); }
+      const body = table.createTBody(), personal = role === "employee" || personalMode;
+      for (const record of rosterSettingsRecords) {
+        const row = body.insertRow(), profile = record.settings;
+        cell(row, `${record.name} (${record.employeeId})`);
+        cell(row, `${record.location} · ${record.role}`);
+        const editable = field => !rosterSettingsLocked &&
+          (personal ? ["flex", "reason", "preferred"].includes(field) :
+            !(field === "random" || field === "attendance"));
+        const controls = [];
+        const appendControl = (field, label, kind, value) => {
+          const td = row.insertCell();
+          const control = rosterControl(record, field, label, kind, value, editable(field));
+          td.append(control); controls.push(control);
+        };
+        appendControl("flex", "Flexible", "flex", profile.flex);
+        appendControl("reason", "Reason if no", "text", profile.reason);
+        appendControl("preferred", "Preferred start", "start", profile.preferred);
+        appendControl("proximity", "Proximity 1–3", "rank", profile.proximity);
+        appendControl("random", "Random 1–3", "rank", profile.random);
+        appendControl("attendance", "Attendance 0–100", "number", profile.attendance);
+        for (const start of starts) {
+          if (!record.starts.some(value => Number(value) === Number(start))) { cell(row, "—"); continue; }
+          appendControl(`start:${start}`, `Allow ${rosterStartLabel(start)}`, "binary",
+            profile.shiftAvailability?.[String(start)] ?? null);
+        }
+        for (let day = 0; day < 7; day++)
+          appendControl(`day${day}`, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day], "binary", profile.days?.[day]);
+        const saveCell = row.insertCell(), save = document.createElement("button");
+        save.type = "button"; save.textContent = "Save";
+        save.disabled = rosterSettingsLocked || !controls.some(control => !control.disabled);
+        save.addEventListener("click", async () => {
+          const changes = {};
+          for (const control of controls) {
+            if (control.disabled) continue;
+            const field = control.dataset.rosterField;
+            const next = control.value === "" ? (["flex", "reason"].includes(field) ? "" : null) :
+              control.type === "number" ? Number(control.value) :
+                ["preferred", "proximity", "random", "attendance"].includes(field) || field.startsWith("day") || field.startsWith("start:")
+                  ? Number(control.value) : control.value;
+            if (JSON.stringify(next) !== control.dataset.original) changes[field] = next;
+          }
+          if (!Object.keys(changes).length) { $("#rosterSettingsMessage").textContent = "No changes to save."; return; }
+          save.disabled = true; $("#rosterSettingsMessage").textContent = "Saving roster settings…";
+          const endpoint = personal ? "/api/access/my/roster-settings" : "/api/access/roster-settings";
+          try {
+            const result = await api(endpoint, "PUT", {
+              ...(personal ? {} : {employeeId: record.employeeId}),
+              revision: record.revision, changes
+            });
+            record.settings = result.settings; record.revision = result.revision;
+            $("#rosterSettingsMessage").textContent = "Roster settings saved.";
+            renderRosterSettings();
+          } catch (error) {
+            save.disabled = false;
+            $("#rosterSettingsMessage").textContent = error.message;
+          }
+        });
+        saveCell.append(save);
+      }
+      container.append(table);
+      $("#rosterSettingsNote").textContent = rosterSettingsLocked
+        ? "Configuration is locked. Your roster settings are visible but read-only."
+        : personal
+          ? "Only Flexible, Reason if no and Preferred start can be changed. All other values are read-only."
+          : "Only employees in your authorized teams are shown. Random 1–3 and Attendance 0–100 are read-only.";
+    }
+
+    async function openRosterSettings() {
+      const panel = $("#rosterSettingsPanel");
+      panel.hidden = false;
+      $("#rosterSettingsMessage").textContent = "Loading your authorized roster settings…";
+      try {
+        const endpoint = accountRole === "manager" && !personalMode
+          ? "/api/access/roster-settings" : "/api/access/my/roster-settings";
+        const result = await api(endpoint);
+        rosterSettingsLocked = result.locked;
+        rosterSettingsRecords = result.employees || (result.employee ? [result.employee] : []);
+        if (rosterSettingsRecords.some(record => !record.settings))
+          throw new Error("Some employee profiles are not initialized. Ask the administrator to synchronize the shared roster.");
+        $("#rosterSettingsMessage").textContent = "";
+        renderRosterSettings();
+        panel.scrollIntoView({block: "start", behavior: "smooth"});
+      } catch (error) {
+        $("#rosterSettingsTable").replaceChildren();
+        $("#rosterSettingsMessage").textContent = error.message;
+      }
+    }
+
+    let metaSettingsRecords = [];
+    let metaSettingsRevision = 0;
+    let metaSettingsLocked = false;
+
+    function renderMetaSettings() {
+      const container = $("#metaSettingsTable");
+      container.replaceChildren();
+      const table = document.createElement("table"), head = table.createTHead().insertRow();
+      const headings = ["Physical location"];
+      for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+        headings.push(`${day} intensity %`, `${day} operating day`);
+      headings.push("Save");
+      for (const heading of headings) { const th = document.createElement("th"); th.textContent = heading; head.append(th); }
+      const body = table.createTBody();
+      for (const record of metaSettingsRecords) {
+        const row = body.insertRow(), controls = [];
+        cell(row, record.name);
+        for (let day = 0; day < 7; day++) {
+          const intensityCell = row.insertCell();
+          const intensity = document.createElement("input");
+          intensity.type = "number"; intensity.min = "0"; intensity.max = "100"; intensity.step = "any";
+          intensity.value = record.intensity[day] == null ? "" : String(Number(record.intensity[day]) * 100);
+          intensity.disabled = metaSettingsLocked;
+          intensity.dataset.metaField = "intensity"; intensity.dataset.metaDay = String(day);
+          intensity.setAttribute("aria-label", `${record.name} ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]} intensity percent`);
+          intensityCell.append(intensity); controls.push(intensity);
+
+          const openCell = row.insertCell(), openLabel = document.createElement("label");
+          const opened = document.createElement("input");
+          opened.type = "checkbox"; opened.checked = record.open[day] === 1;
+          opened.disabled = metaSettingsLocked;
+          opened.dataset.metaField = "open"; opened.dataset.metaDay = String(day);
+          opened.setAttribute("aria-label", `${record.name} ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]} operating day`);
+          openLabel.append(opened, document.createTextNode(" Open"));
+          openCell.append(openLabel); controls.push(opened);
+        }
+        const saveCell = row.insertCell(), save = document.createElement("button");
+        save.type = "button"; save.textContent = "Save";
+        save.disabled = true;
+        const updateSaveState = () => { save.disabled = metaSettingsLocked || !controls.some(control => control.dataset.dirty === "true"); };
+        controls.forEach(control => control.addEventListener("change", () => {
+          control.dataset.dirty = "true";
+          updateSaveState();
+        }));
+        save.addEventListener("click", async () => {
+          const changes = controls.filter(control => control.dataset.dirty === "true").map(control => ({
+            field: control.dataset.metaField,
+            day: Number(control.dataset.metaDay),
+            value: control.dataset.metaField === "open"
+              ? (control.checked ? 1 : 0)
+              : control.value === "" ? null : Number(control.value) / 100
+          }));
+          if (!changes.length) { $("#metaSettingsMessage").textContent = "No changes to save."; return; }
+          save.disabled = true; $("#metaSettingsMessage").textContent = "Saving location settings…";
+          try {
+            const result = await api("/api/access/meta-settings", "PUT", {
+              location: record.name, revision: metaSettingsRevision, changes
+            });
+            record.intensity = result.location.intensity;
+            record.open = result.location.open;
+            metaSettingsRevision = result.revision;
+            $("#metaSettingsMessage").textContent = "Location settings saved.";
+            renderMetaSettings();
+          } catch (error) {
+            save.disabled = false;
+            $("#metaSettingsMessage").textContent = error.message;
+          }
+        });
+        saveCell.append(save);
+      }
+      container.append(table);
+      $("#metaSettingsNote").textContent = metaSettingsLocked
+        ? "Configuration is locked. Your authorized physical locations are visible but read-only."
+        : "A team assignment at a physical location grants location-wide META access across its roles. Only operating days and intensity percentages can be changed.";
+    }
+
+    async function openMetaSettings() {
+      const panel = $("#metaSettingsPanel");
+      panel.hidden = false;
+      $("#metaSettingsMessage").textContent = "Loading your authorized physical locations…";
+      try {
+        const result = await api("/api/access/meta-settings");
+        metaSettingsRevision = result.revision;
+        metaSettingsLocked = result.locked;
+        metaSettingsRecords = result.locations;
+        renderMetaSettings();
+        const missing = result.unconfiguredLocations || [];
+        $("#metaSettingsMessage").textContent = missing.length
+          ? `Shared META is not configured for: ${missing.join(", ")}. Ask the primary administrator to synchronize locations.`
+          : metaSettingsRecords.length ? "" : "No META locations are assigned to your teams.";
+        panel.scrollIntoView({block: "start", behavior: "smooth"});
+      } catch (error) {
+        $("#metaSettingsTable").replaceChildren();
+        $("#metaSettingsMessage").textContent = error.message;
+      }
     }
 
     function cell(row, text, className) {
@@ -466,6 +727,11 @@
       $("#dateFilter").hidden = role !== "manager";
       $("#teamDashboard").hidden = role !== "employee";
       $("#historicalAccessReports").hidden = role !== "manager";
+      $("#openRosterSettings").hidden = !["manager", "employee"].includes(role);
+      $("#openRosterSettings").textContent = personalMode ? "My roster settings" : role === "manager" ? "Team roster settings" : "My roster settings";
+      $("#rosterSettingsPanel").hidden = true;
+      $("#openMetaSettings").hidden = accountRole !== "manager" || personalMode;
+      $("#metaSettingsPanel").hidden = true;
       clearInterval(timer);
       if (role === "manager") {
         $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
@@ -489,6 +755,16 @@
     });
     $("#personalView").addEventListener("click", async () => {
       location.assign(personalMode ? "/app/access" : "/app/access?view=employee");
+    });
+    $("#openRosterSettings").addEventListener("click", async () => {
+      if (!$("#rosterSettingsPanel").hidden) { $("#rosterSettingsPanel").hidden = true; return; }
+      $("#metaSettingsPanel").hidden = true;
+      await openRosterSettings();
+    });
+    $("#openMetaSettings").addEventListener("click", async () => {
+      if (!$("#metaSettingsPanel").hidden) { $("#metaSettingsPanel").hidden = true; return; }
+      $("#rosterSettingsPanel").hidden = true;
+      await openMetaSettings();
     });
     $("#refreshSchedules").addEventListener("click", async () => {
       try {

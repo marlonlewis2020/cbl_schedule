@@ -2268,7 +2268,7 @@ document.addEventListener('click',async e=>{
 );
 let storageMode='unknown',storageReason='';
 let expandedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
-let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0;
+let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0,sharedRoster=null,sharedRosterError='',sharedMeta=null,sharedMetaError='';
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }
@@ -2294,6 +2294,207 @@ async function directoryRequest(path,options={}){
     }),body=await response.json().catch(()=>({}));
     if(!response.ok)throw Error(body.error||'Request to '+path+' failed with HTTP '+response.status+'.');
     return body
+}
+function applySharedRosterSettings(result){
+    sharedRoster=result;sharedRosterError='';
+    if(!result.configured||!model)return;
+    model.locked=result.locked;
+    for(const remotePool of result.pools){
+        const pool=model.pools.find(item=>item.location===remotePool.location&&item.role===remotePool.role);
+        if(!pool)continue;
+        const shares=new Map(poolStarts(pool).map((start,index)=>[Number(start),pool.shares[index]]));
+        pool.shiftStarts=remotePool.starts.map(Number);
+        pool.shares=pool.shiftStarts.map(start=>shares.has(start)?shares.get(start):null);
+    }
+    for(const remote of result.employees){
+        if(!remote.settings)continue;
+        const employee=model.roster.find(item=>String(item.id)===String(remote.employeeId));
+        if(!employee)continue;
+        Object.assign(employee,remote.settings);
+        employee.shiftAvailability={...remote.settings.shiftAvailability};
+        employee.allow=STARTS.map(start=>employee.shiftAvailability[String(start)]??null);
+    }
+}
+async function loadSharedRosterSettings(){
+    try{
+        applySharedRosterSettings(await directoryRequest('/roster-settings'))
+    }
+    catch(error){
+        sharedRoster=null;
+        sharedRosterError=error.message
+    }
+}
+function applySharedMetaSettings(result){
+    sharedMeta=result;sharedMetaError='';
+    if(!result.configured||!model)return;
+    if(!sharedRoster?.configured)model.locked=result.locked;
+    for(const remote of result.locations){
+        const location=model.locations.find(item=>item.name.toLowerCase()===remote.name.toLowerCase());
+        if(!location)continue;
+        location.intensity=remote.intensity.slice();
+        location.open=remote.open.slice();
+    }
+}
+async function loadSharedMetaSettings(){
+    if(!tenantAuthPrimaryAdmin){
+        sharedMeta=null;sharedMetaError='';
+        return
+    }
+    try{
+        applySharedMetaSettings(await directoryRequest('/meta-settings'))
+    }
+    catch(error){
+        sharedMeta=null;
+        sharedMetaError=error.message
+    }
+}
+function sharedRosterImportPayload(){
+    if(!model||!tenantAuthTenantId)throw Error('The workspace or business identity is not ready.');
+    const employees=employeeDirectory.map(employee=>{
+        const profile=model.roster.find(item=>String(item.id)===String(employee.id));
+        if(!profile)throw Error('The local workspace is missing '+employee.name+'’s roster profile. Reload the roster and retry.');
+        const starts=poolStarts(model.pools.find(pool=>pool.location===profile.location&&pool.role===profile.role));
+        return {
+            employeeId:String(employee.id),
+            settings:{
+                flex:profile.flex??'',reason:profile.reason??'',preferred:profile.preferred??null,
+                proximity:profile.proximity??null,random:profile.random??null,attendance:profile.attendance??null,
+                days:Array.isArray(profile.days)?profile.days.slice(0,7):Array(7).fill(null),
+                shiftAvailability:Object.fromEntries(starts.map(start=>[String(start),employeeStartPermission(profile,start)??null]))
+            }
+        }
+    });
+    return {
+        tenantId:tenantAuthTenantId,locked:!!model.locked,
+        pools:model.pools.map(pool=>({location:pool.location,role:pool.role,starts:poolStarts(pool).map(Number)})),
+        employees
+    }
+}
+function sharedRosterEmployeePayload(employee){
+    const profile=model.roster.find(item=>String(item.id)===String(employee.id));
+    if(!profile)throw Error('The local workspace is missing '+employee.name+'’s roster profile. Reload the roster and retry.');
+    const starts=poolStarts(model.pools.find(pool=>pool.location===employee.location&&pool.role===employee.role));
+    return {
+        employeeId:String(employee.id),
+        settings:{
+            flex:profile.flex??'',reason:profile.reason??'',preferred:profile.preferred??null,
+            proximity:profile.proximity??null,random:profile.random??null,attendance:profile.attendance??null,
+            days:Array.isArray(profile.days)?profile.days.slice(0,7):Array(7).fill(null),
+            shiftAvailability:Object.fromEntries(starts.map(start=>[String(start),employeeStartPermission(profile,start)??null]))
+        }
+    }
+}
+async function initializeSharedRoster(){
+    if(!tenantAuthPrimaryAdmin)throw Error('Only the primary administrator can initialize the shared roster.');
+    const payload=sharedRosterImportPayload(),headers={'X-CSRF-Token':tenantAuthCsrfToken};
+    const preview=await directoryRequest('/roster-settings/import/preview',{
+        method:'POST',headers,body:JSON.stringify(payload)
+    });
+    const warningText=preview.warnings.length?'\n\nReview warnings:\n• '+preview.warnings.join('\n• '):'';
+    const summary=`Import ${preview.employeeCount} employee profiles and ${preview.poolCount} location-role pools to the business server? This is one-time setup and will not overwrite existing server data.${warningText}`;
+    if(!confirm(summary))return;
+    await directoryRequest('/roster-settings/import',{
+        method:'POST',headers,body:JSON.stringify({...payload,confirmed:true})
+    });
+    await loadSharedRosterSettings();
+    await saveState();
+    render(true);
+    message('Shared roster initialized from the reviewed browser workspace.')
+}
+async function syncMissingSharedRosterEmployees(){
+    if(!sharedRoster?.configured)throw Error('Initialize the shared roster first.');
+    const existing=new Set(sharedRoster.employees.filter(employee=>employee.settings).map(employee=>String(employee.employeeId)));
+    const missing=employeeDirectory.filter(employee=>!existing.has(String(employee.id)));
+    if(!missing.length)throw Error('There are no new employees to synchronize.');
+    const employees=missing.map(sharedRosterEmployeePayload);
+    if(!confirm(`Add ${employees.length} new employee profile(s) to the shared roster? Existing employee settings will not be overwritten.`))return;
+    const result=await directoryRequest('/roster-settings/employees',{
+        method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+        body:JSON.stringify({revision:sharedRoster.revision,confirmed:true,employees})
+    });
+    await loadSharedRosterSettings();
+    await saveState();
+    render(true);
+    message(`${result.added} new employee profile(s) added to the shared roster.`)
+}
+async function syncSharedRosterPools(){
+    if(!sharedRoster?.configured)throw Error('Initialize the shared roster first.');
+    const pools=model.pools.map(pool=>({location:pool.location,role:pool.role,starts:poolStarts(pool).map(Number)}));
+    if(!confirm(`Update shared possible shift starts to match ${pools.length} location-role pool(s)? Employee settings will be preserved; preferred starts currently in use cannot be removed.`))return;
+    await saveSharedRosterConfiguration(model.locked,pools);
+    await loadSharedRosterSettings();
+    render(true);
+    message('Shared possible shift starts synchronized.')
+}
+async function saveSharedRosterConfiguration(locked,pools){
+    if(!sharedRoster?.configured)return;
+    const result=await directoryRequest('/roster-settings/configuration',{
+        method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+        body:JSON.stringify({revision:sharedRoster.revision,locked,pools})
+    });
+    sharedRoster={...sharedRoster,revision:result.revision,locked:result.locked,pools:result.pools};
+}
+function sharedMetaImportPayload(){
+    if(!model||!tenantAuthTenantId)throw Error('The workspace or business identity is not ready.');
+    return {
+        tenantId:tenantAuthTenantId,locked:!!model.locked,
+        locations:model.locations.map(location=>({
+            name:location.name,intensity:location.intensity.slice(),open:location.open.slice()
+        }))
+    }
+}
+async function initializeSharedMeta(){
+    if(!tenantAuthPrimaryAdmin)throw Error('Only the primary administrator can initialize shared META settings.');
+    const payload=sharedMetaImportPayload(),headers={'X-CSRF-Token':tenantAuthCsrfToken};
+    const preview=await directoryRequest('/meta-settings/import/preview',{
+        method:'POST',headers,body:JSON.stringify(payload)
+    });
+    if(!confirm(`Import operating days and intensity for ${preview.locationCount} physical location(s) to the business server? This is one-time setup and will not overwrite existing server data.`))return;
+    await directoryRequest('/meta-settings/import',{
+        method:'POST',headers,body:JSON.stringify({...payload,confirmed:true})
+    });
+    await loadSharedMetaSettings();
+    await saveState();
+    render(true);
+    message('Shared META settings initialized from the reviewed browser workspace.')
+}
+async function syncSharedMetaLocations(){
+    if(!sharedMeta?.configured)throw Error('Initialize shared META settings first.');
+    if(sharedMeta.locked)throw Error('Unlock settings in Controls before synchronizing META locations.');
+    const known=new Set(sharedMeta.locations.map(location=>location.name.toLowerCase()));
+    const additions=model.locations.filter(location=>!known.has(location.name.toLowerCase()));
+    if(!additions.length)throw Error('There are no new META locations to synchronize.');
+    const locations=[...sharedMeta.locations,...additions.map(location=>({
+        name:location.name,intensity:location.intensity.slice(),open:location.open.slice()
+    }))];
+    if(!confirm(`Add ${additions.length} new physical location(s) to shared META settings? Existing server settings will be preserved.`))return;
+    await saveSharedMetaConfiguration(sharedMeta.locked,locations);
+    applySharedMetaSettings(sharedMeta);
+    await saveState();
+    render(true);
+    message('New META locations synchronized without changing existing settings.')
+}
+async function saveSharedMetaConfiguration(locked,locations){
+    if(!sharedMeta?.configured)return;
+    const result=await directoryRequest('/meta-settings/configuration',{
+        method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+        body:JSON.stringify({revision:sharedMeta.revision,locked,locations})
+    });
+    sharedMeta={...sharedMeta,revision:result.revision,locked:result.locked,locations:result.locations};
+}
+async function syncSharedRosterEmployeeField(employee,field,value){
+    if(!sharedRoster?.configured)return;
+    const record=sharedRoster.employees.find(item=>String(item.employeeId)===String(employee.id));
+    if(!record||!record.settings||!Number.isInteger(record.revision)){
+        throw Error('This employee has no shared profile yet. Synchronize new employees first.')
+    }
+    const next=field==='flex'||field==='reason'?value:value===''?null:Number(value);
+    const result=await directoryRequest('/roster-settings/'+encodeURIComponent(employee.id),{
+        method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+        body:JSON.stringify({revision:record.revision,changes:{[field]:next}})
+    });
+    record.settings=result.settings;record.revision=result.revision;
+    await saveState()
 }
 let accessAccounts=[],accessAccountsError='',accessTemporaryPassword=null,attendanceNotificationTimer=null,portalVisibilityWeeks=4;
 async function loadAccessAccounts(){
@@ -2511,6 +2712,8 @@ async function loadDirectoryData(){
         }
         model.roster.forEach((employee,index)=>employee.index=index);
         migrateScheduleWeeks(model);
+        await loadSharedRosterSettings();
+        await loadSharedMetaSettings();
         directoryError=''
     }
     catch(error){
@@ -2801,6 +3004,17 @@ function rosterInput(e,i,k,type){
     let employeePool=model.pools.find(p=>p.id===key(e.location,e.role)),opts=type==='list'?[['','Missing'],['Yes','Yes'],['No','No']]:type==='start'?[['','Missing'],...poolStarts(employeePool).map(s=>[s,timeLabel(s)])]:type==='rank'?[['','Missing'],[1,'1'],[2,'2'],[3,'3']]:[['','Missing'],[1,'1 · Yes'],[0,'0 · No']];
     return select(opts,val,at)
 }
+function sharedRosterPanel(){
+    if(sharedRosterError)return panel('Shared roster unavailable',`<p class="badtext">${esc(sharedRosterError)}</p><button type="button" data-action="reloadSharedRoster">Retry</button>`);
+    if(!sharedRoster?.configured)return panel('Shared roster setup',`<p>Manager and employee roster settings are stored centrally for this business. The current browser workspace must be previewed and explicitly imported once before they can use the page.</p>${tenantAuthPrimaryAdmin?'<button type="button" class="primary" data-action="initializeSharedRoster">Preview and initialize shared roster</button>':'<p class="note">Ask the primary administrator to initialize shared roster settings.</p>'}`);
+    const missing=sharedRoster.employees.filter(employee=>!employee.settings);
+    const localPools=sharedRoster.pools.map(remote=>{
+        const local=model.pools.find(pool=>pool.location===remote.location&&pool.role===remote.role);
+        return !local||JSON.stringify(poolStarts(local).map(Number))!==JSON.stringify(remote.starts.map(Number))
+    });
+    const mismatch=localPools.some(Boolean);
+    return panel('Shared roster',`<p>Shared settings are active · revision ${sharedRoster.revision} · ${sharedRoster.employees.filter(employee=>employee.settings).length} employee profiles.</p>${missing.length?`<p class="note">${missing.length} newly registered employee profile(s) need to be added without overwriting existing settings.</p><button type="button" data-action="syncSharedRosterEmployees">Preview and add ${missing.length} new employee profile(s)</button>`:''}${mismatch?`<p class="note">Possible shift starts in this browser differ from the shared settings. ${sharedRoster.locked?'Unlock configuration before synchronizing them.':'Review and synchronize the current pool starts.'}</p><button type="button" data-action="syncSharedRosterPools" ${sharedRoster.locked?'disabled':''}>Preview and synchronize possible starts</button>`:''}${sharedRoster.locked?'<p class="note">Roster settings are locked and read-only.</p>':''}`)
+}
 function roster(){
     let shown=model.roster.map((e,i)=>({
         e,i
@@ -2810,7 +3024,7 @@ function roster(){
     }
     )=>(filterLoc==='All'||e.location===filterLoc)&&(filterRole==='All'||e.role===filterRole)&&(!search||(e.name+' '+e.id).toLowerCase().includes(search.toLowerCase())));
     let groups=model.pools.map(pool=>({pool,entries:shown.filter(({e})=>key(e.location,e.role)===pool.id)}    )).filter(group=>group.entries.length);
-    return heading('PEOPLE / ROSTER','Respect employee constraints.','Set each employee’s availability for every configured shift start in their location-role pool. Inactive employees remain visible here but are excluded from schedules.')+`<div class="toolbar"><label>Location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="rosterLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(model.roster.map(e=>e.role))].sort().map(x=>[x,x])],filterRole,'id="rosterRole"')}</label><label>Find employee<input id="rosterSearch" placeholder="Name or ID" value="${esc(search)}"></label><span>${shown.length} employees</span></div>`+panel('Employee settings',groups.map(({pool,entries})=>`<h3>${esc(pool.location)} · ${esc(pool.role)}</h3><div class="tablewrap rostergrid"><table><thead><tr><th>ID / Employee</th><th>Location / Role</th>${rosterFields(pool).map(([k,l])=>'<th>'+esc(l)+'</th>').join('')}<th>Validation</th></tr></thead><tbody>${entries.map(({e,i})=>`<tr data-roster-employee="${esc(e.id)}"><td class="sticky"><b>${esc(e.name)}</b><small>${esc(e.id)} · ${e.active===false?'Inactive':'Active'}</small></td><td>${esc(e.location)}<small>${esc(e.role)}</small></td>${rosterFields(pool).map(([k,l,t])=>'<td>'+rosterInput(e,i,k,t)+'</td>').join('')}<td>${rosterErrors(e).length?'<span class="badtext">'+esc(rosterErrors(e).join('; '))+'</span>':badge('Ready','good')}</td></tr>`).join('')}</tbody></table></div>`).join(''),'Source random scores remain editable. Attendance scores are editable snapshots; blank scores receive no top-three preference bonus. Availability is per shift start and employee, in addition to the daily availability fields.')
+    return heading('PEOPLE / ROSTER','Respect employee constraints.','Set each employee’s availability for every configured shift start in their location-role pool. Inactive employees remain visible here but are excluded from schedules.')+sharedRosterPanel()+`<div class="toolbar"><label>Location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="rosterLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(model.roster.map(e=>e.role))].sort().map(x=>[x,x])],filterRole,'id="rosterRole"')}</label><label>Find employee<input id="rosterSearch" placeholder="Name or ID" value="${esc(search)}"></label><span>${shown.length} employees</span></div>`+panel('Employee settings',groups.map(({pool,entries})=>`<h3>${esc(pool.location)} · ${esc(pool.role)}</h3><div class="tablewrap rostergrid"><table><thead><tr><th>ID / Employee</th><th>Location / Role</th>${rosterFields(pool).map(([k,l])=>'<th>'+esc(l)+'</th>').join('')}<th>Validation</th></tr></thead><tbody>${entries.map(({e,i})=>`<tr data-roster-employee="${esc(e.id)}"><td class="sticky"><b>${esc(e.name)}</b><small>${esc(e.id)} · ${e.active===false?'Inactive':'Active'}</small></td><td>${esc(e.location)}<small>${esc(e.role)}</small></td>${rosterFields(pool).map(([k,l,t])=>'<td>'+rosterInput(e,i,k,t)+'</td>').join('')}<td>${rosterErrors(e).length?'<span class="badtext">'+esc(rosterErrors(e).join('; '))+'</span>':badge('Ready','good')}</td></tr>`).join('')}</tbody></table></div>`).join(''),'Source random scores remain editable. Attendance scores are editable snapshots; blank scores receive no top-three preference bonus. Availability is per shift start and employee, in addition to the daily availability fields.')
 }
 function allEmployeeRecords(){
     let records=employeeDirectory.map(employee=>({...employee,roster:model.roster.find(entry=>String(entry.id)===employee.id)||null}));
@@ -3192,7 +3406,15 @@ function controls(){
     return heading('ENGINE / CONTROLS','One locked snapshot. Many weeks.','The first week starts on the selected Monday. Generation advances it by seven days and selects Location and Role automatically for each enabled pool.')+panel('Generation controls',`<div class="formgrid"><label>Week commencing · Monday<input type="date" value="${esc(c.week)}" data-control="week" ${disabled()}></label><label>Weeks · all enabled location × roles<input type="number" min="1" max="52" step="1" value="${scheduleWeeks(model)}" data-control="weeks" ${disabled()}></label>${CONTROL_FIELDS.map(([k,t,min,max,step])=>`<label>${t}<input type="number" min="${min}" max="${max}" step="${step}" value="${c[k]}" data-control="${k}" ${disabled()}></label>`).join('')}<label>Attendance priority ${select([[1,'Enabled · top 3 by pool'],[0,'Disabled']],c.attendanceEnabled,`data-control="attendanceEnabled" ${disabled()}`)}</label><label>Make-up pass ${select([[1,'Enabled'],[0,'Disabled']],c.makeup,`data-control="makeup" ${disabled()}`)}</label></div><div class="callout">Paid hours feed weekly hours. Elapsed shift span feeds displayed end times and rest checks; end times are calculated from each start and this setting.</div>`)+panel('Resolved Controls preview',`<div class="toolbar"><label>Preview location / role ${select(model.pools.map(x=>[x.id,x.location+' · '+x.role]),p.id,'id="previewPool"')}</label><span>Control Location: ${esc(p.location)} · Role: ${esc(p.role)} · HC: ${rs.length}</span></div>${dem?`<div class="tablewrap"><table><thead><tr><th>Day</th><th>Open</th><th>Daily total</th>${starts.map(s=>'<th>'+timeLabel(s)+'</th>').join('')}</tr></thead><tbody>${dem.map((r,i)=>`<tr><td>${DAYS[i]}</td><td>${l.open[i]}</td><td>${sum(r)}</td>${r.map(x=>'<td>'+x+'</td>').join('')}</tr>`).join('')}</tbody></table></div>`:'<p>Supply valid shift shares and META intensities to see demand.</p>'}`)+errorsPanel()+panel('Lock configuration',`<p>Locking fixes the roster, operating patterns, controls and enabled pool settings for generation. Unlocking creates a new revision; earlier saved schedules retain their own configuration snapshots.</p><div class="actions"><button type="button" class="primary" data-action="${model.locked?'unlock':'lock'}">${model.locked?'Unlock & revise settings':'Validate & lock settings'}</button><button type="button" data-action="generate" ${model.locked?'':'disabled'}>Generate schedules</button></div>`)
 }
 function metaPage(){
-    return heading('OPERATIONS / META','Define how each location works.','Daily intensities are normalized across open days. A closed day receives no demand or make-up shifts.')+panel('Location calendars & workload intensity',`<div class="tablewrap"><table class="metagrid"><thead><tr><th>Location</th>${DAYS.map(d=>'<th>'+d+' intensity % / open</th>').join('')}<th>Total intensity</th></tr></thead><tbody>${model.locations.map((l,i)=>`<tr><td>${esc(l.name)}</td>${DAYS.map((d,j)=>`<td><input type="number" min="0" max="100" step="any" value="${percent(l.intensity[j])}" data-meta="${i}" data-day="${j}" data-field="intensity" ${disabled()} aria-label="${esc(l.name+' '+d)} intensity"><label class="check"><input type="checkbox" data-meta="${i}" data-day="${j}" data-field="open" ${l.open[j]===1?'checked':''} ${disabled()}> Open</label></td>`).join('')}<td>${f(sum(l.intensity.map(x=>x||0))*100,2)}%</td></tr>`).join('')}</tbody></table></div>`,'Missing intensity cells are not converted to zero. Set all seven values for any enabled location. For closed days you may explicitly enter 0.')+errorsPanel()
+    const remoteNames=new Set(sharedMeta?.locations?.map(location=>location.name.toLowerCase())||[]);
+    const missing=model.locations.filter(location=>!remoteNames.has(location.name.toLowerCase()));
+    const unused=sharedMeta?.configured?sharedMeta.locations.filter(location=>!model.locations.some(item=>item.name.toLowerCase()===location.name.toLowerCase())).length:0;
+    const metaPanel=sharedMetaError
+        ?panel('Shared META unavailable',`<p class="badtext">${esc(sharedMetaError)}</p><button type="button" data-action="reloadSharedMeta">Retry</button>`)
+        :!sharedMeta?.configured
+            ?panel('Shared META setup',`<p>Manager location settings are stored centrally. Preview and explicitly import the current browser META settings once before managers can use them.</p><button type="button" class="primary" data-action="initializeSharedMeta">Preview and initialize shared META</button>`)
+            :panel('Shared META',`<p>Shared settings are active · revision ${sharedMeta.revision} · ${sharedMeta.locations.length} physical locations.${sharedMeta.locked?' Configuration is locked and read-only.':''}</p>${missing.length?`<p class="note">${missing.length} workspace location(s) are not shared yet. Existing server values will be retained.</p><button type="button" data-action="syncSharedMetaLocations" ${sharedMeta.locked?'disabled':''}>Preview and add locations</button>`:''}${unused?`<p class="note">${unused} server location(s) are not in this browser workspace; their saved values have been retained.</p>`:''}`);
+    return heading('OPERATIONS / META','Define how each location works.','Daily intensities are normalized across open days. A closed day receives no demand or make-up shifts.')+metaPanel+panel('Location calendars & workload intensity',`<div class="tablewrap"><table class="metagrid"><thead><tr><th>Location</th>${DAYS.map(d=>'<th>'+d+' intensity % / open</th>').join('')}<th>Total intensity</th></tr></thead><tbody>${model.locations.map((l,i)=>`<tr><td>${esc(l.name)}</td>${DAYS.map((d,j)=>`<td><input type="number" min="0" max="100" step="any" value="${percent(l.intensity[j])}" data-meta="${i}" data-day="${j}" data-field="intensity" ${disabled()} aria-label="${esc(l.name+' '+d)} intensity"><label class="check"><input type="checkbox" data-meta="${i}" data-day="${j}" data-field="open" ${l.open[j]===1?'checked':''} ${disabled()}> Open</label></td>`).join('')}<td>${f(sum(l.intensity.map(x=>x||0))*100,2)}%</td></tr>`).join('')}</tbody></table></div>`,'Missing intensity cells are not converted to zero. Set all seven values for any enabled location. For closed days you may explicitly enter 0.')+errorsPanel()
 }
 function scheduleViewWithoutAcceptedHistory(){
     let all=model.results,visible=visibleScheduleRuns(),selected=visible.find(r=>r.id===model.selectedRun)||visible[0];
@@ -3439,8 +3661,21 @@ async function updateMetaSetting(element){
         }
         await authorizeDataSettings('meta-update');
         if(model!==workspace)throw Error('The workspace changed. Reload META before editing.');
-        if(model.locked)throw Error('Unlock settings in Controls before editing.');
-        workspace.locations[index][field][day]=value;
+        if(model.locked||sharedMeta?.locked)throw Error('Unlock settings in Controls before editing.');
+        if(sharedMeta?.configured){
+            const location=workspace.locations[index];
+            const result=await directoryRequest('/meta-settings/'+encodeURIComponent(location.name),{
+                method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
+                body:JSON.stringify({revision:sharedMeta.revision,changes:[{field,day,value}]})
+            });
+            if(model!==workspace)throw Error('The workspace changed. Reload META before editing.');
+            location[field][day]=value;
+            const remoteIndex=sharedMeta.locations.findIndex(item=>item.name.toLowerCase()===location.name.toLowerCase());
+            if(remoteIndex<0)throw Error('The location is not in the shared META settings. Synchronize locations and retry.');
+            sharedMeta.locations[remoteIndex]=result.location;
+            sharedMeta.revision=result.revision;
+        }
+        else workspace.locations[index][field][day]=value;
         queueSave();
         refreshConfigurationIndicators();
     }
@@ -3538,7 +3773,7 @@ function editChange(event){
         render(true);
         return
     }
-    let changed=false;
+    let changed=false,sharedRosterEdit=null;
     if(e.dataset.pool!==undefined){
         let p=model.pools[+e.dataset.pool];
         if(e.dataset.share!==undefined)p.shares[+e.dataset.share]=e.value===''?null:Number(e.value)/100;
@@ -3559,6 +3794,7 @@ function editChange(event){
         }
         else if(k.startsWith('day'))r.days[+k.slice(3)]=v===''?null:Number(v);
         else r[k]=v===''?null:Number(v);
+        sharedRosterEdit={employee:r,field:k,value:v};
         changed=true
     }
     if(e.dataset.control){
@@ -3570,7 +3806,17 @@ function editChange(event){
         return
     }
     if(changed){
-        queueSave();
+        if(sharedRosterEdit&&sharedRoster?.configured){
+            void syncSharedRosterEmployeeField(sharedRosterEdit.employee,sharedRosterEdit.field,sharedRosterEdit.value)
+                .then(()=>{message('Roster setting saved to the shared business roster.');refreshConfigurationIndicators()})
+                .catch(async error=>{
+                    message('Roster setting was not synchronized: '+error.message,true);
+                    await loadSharedRosterSettings();
+                    await saveState();
+                    render(true)
+                })
+        }
+        else queueSave();
         refreshConfigurationIndicators()
     }
 
@@ -4262,6 +4508,36 @@ async function action(a,element=null){
             openTimeOffs();
             return
         }
+        if(a==='initializeSharedRoster'){
+            await initializeSharedRoster();
+            return
+        }
+        if(a==='syncSharedRosterEmployees'){
+            await syncMissingSharedRosterEmployees();
+            return
+        }
+        if(a==='syncSharedRosterPools'){
+            await syncSharedRosterPools();
+            return
+        }
+        if(a==='initializeSharedMeta'){
+            await initializeSharedMeta();
+            return
+        }
+        if(a==='syncSharedMetaLocations'){
+            await syncSharedMetaLocations();
+            return
+        }
+        if(a==='reloadSharedMeta'){
+            await loadSharedMetaSettings();
+            render(true);
+            return
+        }
+        if(a==='reloadSharedRoster'){
+            await loadSharedRosterSettings();
+            render(true);
+            return
+        }
         if(a==='refreshTimeOffs'){
             await refreshTimeOffFromServer();
             return
@@ -4280,6 +4556,7 @@ async function action(a,element=null){
         }
         if(a==='addShiftStart'){
             if(model.locked)throw Error('Unlock settings in Controls before adding a shift start.');
+            const previous=clone(model);
             let pool=model.pools[Number(element.dataset.poolIndex)],field=document.querySelector(`[data-new-shift-start="${element.dataset.poolIndex}"]`),start=parseStartTime(field?.value);
             if(!pool)throw Error('The selected location-role pool could not be found.');
             if(start===null)throw Error('Enter a valid start time in 15-minute increments.');
@@ -4290,12 +4567,22 @@ async function action(a,element=null){
             for(let employee of poolRoster(model,p))employee.shiftAvailability[String(start)]=0;
             field.value='';
             await saveState();
+            try{
+                await saveSharedRosterConfiguration(model.locked,model.pools.map(item=>({location:item.location,role:item.role,starts:poolStarts(item).map(Number)})));
+                await loadSharedRosterSettings()
+            }
+            catch(error){
+                model=previous;
+                await saveState();
+                throw error
+            }
             render(true);
             message(timeLabel(start)+' added to '+pool.location+' · '+pool.role+'. Set the share and employee availability before locking.');
             return
         }
         if(a==='removeShiftStart'){
             if(model.locked)throw Error('Unlock settings in Controls before removing a shift start.');
+            const previous=clone(model);
             let pool=model.pools[Number(element.dataset.poolIndex)],start=Number(element.dataset.shiftStart);
             if(!pool||!poolStarts(pool).includes(start))throw Error('The selected shift start could not be found.');
             if(poolStarts(pool).length<=1)throw Error('Each location-role pool must keep at least one shift start.');
@@ -4308,6 +4595,15 @@ async function action(a,element=null){
             pool.shares=sharesValid?remainingShares.map(share=>remainingTotal>0?Number(share)+removedShare*Number(share)/remainingTotal:1/remainingShares.length):remainingShares;
             for(let employee of poolRoster(model,pool))delete employee.shiftAvailability[String(start)];
             await saveState();
+            try{
+                await saveSharedRosterConfiguration(model.locked,model.pools.map(item=>({location:item.location,role:item.role,starts:poolStarts(item).map(Number)})));
+                await loadSharedRosterSettings()
+            }
+            catch(error){
+                model=previous;
+                await saveState();
+                throw error
+            }
             render(true);
             message(timeLabel(start)+' removed from '+pool.location+' · '+pool.role+'.'+(sharesValid?' The existing allocation was redistributed across remaining starts.':' Review and allocate the remaining shares before locking.'));
             return
@@ -4362,11 +4658,15 @@ async function action(a,element=null){
             model.locked=true;
             model.lockedAt=new Date().toISOString();
             try{
-                await saveState()
+                await saveState();
+                await saveSharedRosterConfiguration(true,model.pools.map(item=>({location:item.location,role:item.role,starts:poolStarts(item).map(Number)})));
+                if(!sharedRoster?.configured&&sharedMeta?.configured)await saveSharedMetaConfiguration(true,sharedMeta.locations);
+                await loadSharedMetaSettings()
             }
             catch(e){
                 model.locked=oldLocked;
                 model.lockedAt=oldTime;
+                await saveState();
                 throw e
             }
             message('Configuration locked. Generate schedules when ready.');
@@ -4377,11 +4677,15 @@ async function action(a,element=null){
             model.locked=false;
             model.revision++;
             try{
-                await saveState()
+                await saveState();
+                await saveSharedRosterConfiguration(false,sharedRoster?.configured?sharedRoster.pools:model.pools.map(item=>({location:item.location,role:item.role,starts:poolStarts(item).map(Number)})));
+                if(!sharedRoster?.configured&&sharedMeta?.configured)await saveSharedMetaConfiguration(false,sharedMeta.locations);
+                await loadSharedMetaSettings()
             }
             catch(e){
                 model.locked=true;
                 model.revision--;
+                await saveState();
                 throw e
             }
             message('Settings unlocked. Existing schedules retain their saved snapshots.');

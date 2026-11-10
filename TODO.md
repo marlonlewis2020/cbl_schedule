@@ -456,9 +456,9 @@ shifts or live payment endpoints were used.
 - [x] Final targeted workflow run: 17 tests passed, including unknown remote
   results, safe reconciliation, partial-failure retries and import persistence.
   Repeated initialization preserved request statuses and disabled sandbox billing.
-- Tracker: dual access, trades and billing remain `in_progress` for live
-  acceptance; trade publishing is `blocked` only by the unaccepted shift-trade
-  prerequisite, not by missing application code.
+- Tracker: shift trades and trade publishing are now `done`; roster/META
+  acceptance and recurring billing remain `in_progress` pending
+  browser/PostgreSQL and provider/worker checks respectively.
 - [x] Verify linked managers and both trade roles in real authenticated browser
   sessions; verify team restrictions, link disable/reassignment and own
   attendance correction rejection with MFA enabled.
@@ -472,8 +472,10 @@ shifts or live payment endpoints were used.
   repeat application. Export and email schedule/preview reflected the applied
   swap. Initiator withdrawal persisted for both users with its reason,
   prevented recipient acceptance and left the schedule unchanged.
-  Manual override verification deferred by the user; this combined TODO
-  remains unchecked until that verification is completed.
+  The previously deferred manual-override check was authorized on 2026-11-06.
+  Two isolated authenticated Flask tests passed: manual day-off application
+  and audit, plus explicit constraint-override gating. No live browser session
+  was used for this check.
 - [x] In a test BambooHR environment, verify read permissions, single-employee
   writes, partial failures, unknown results, duplicates and reconciliation.
   Production writes require separate authorization.
@@ -521,7 +523,11 @@ shifts or live payment endpoints were used.
   service or scheduled task by worker script/name. The configured local SQLite
   database had no billing worker heartbeat. No processes/settings were changed;
   another machine or a generically named wrapper was not ruled out.
-  PayPal sandbox checkout/webhook verification was deferred by the user.
+  Verification was authorized on 2026-11-06, but the current environment has
+  no PayPal sandbox client ID, client secret or webhook ID, billing is disabled,
+  no plans are configured, and no worker heartbeat exists. The sandbox denied
+  Windows process/service/task inspection. No external provider calls or
+  service installation were made.
 - [x] Apply/verify PostgreSQL startup or reference-schema migrations and forced
   tenant RLS for trade/billing tables in a disposable schema. The VS Code
   database connection was unavailable during this batch; no live migration
@@ -952,7 +958,7 @@ Requests below remain pending unless implementation evidence is explicitly noted
   `interactive-attendance-snapshot`. Implemented for newly generated HTML;
   previously saved reports and detailed Excel sheets remain unchanged.
 
-## Role-scoped roster settings (`role-scoped-roster-settings`) - approved, implementation pending
+## Role-scoped roster settings (`role-scoped-roster-settings`) - implemented, acceptance verification pending
 
 - Managers see roster settings for their currently authorized teams and may
   edit roster fields except Random 1-3 and Attendance 0-100, which are read-only.
@@ -975,9 +981,19 @@ Requests below remain pending unless implementation evidence is explicitly noted
   isolation, linked-manager views, start validation, locks, access revocation,
   concurrent edits, audit history and accepted-schedule preservation.
 - Depends on `manager-employee-access` and `manager-employee-dual-access`.
-  Recording only; no runtime permission changes implemented.
+- Implementation adds tenant-scoped shared configuration and employee settings,
+  an explicit primary-admin preview/import flow, incremental employee and shift
+  start synchronization, manager and personal roster views, field-level server
+  validation, audit events and revision conflict handling.
+- SQLite verification: all 34 combined manager/access tests passed, including
+  roster scope, field permissions, locking, import safeguards, new-start
+  availability, audit, reassignment and transaction rollback. The linked-manager
+  personal-roster test is included.
+- Browser verification and PostgreSQL execution remain outstanding. PostgreSQL
+  validation stays deferred under the existing user instruction; do not mark
+  production acceptance complete based on SQLite results.
 
-## Manager-scoped META settings (`manager-scoped-meta-settings`) - approved, implementation pending
+## Manager-scoped META settings (`manager-scoped-meta-settings`) - implemented, acceptance verification pending
 
 - Managers view only their currently authorized locations on META. Permit
   changes only when configuration is unlocked; locked settings are read-only.
@@ -991,15 +1007,25 @@ Requests below remain pending unless implementation evidence is explicitly noted
   concurrent overwrites and explicitly report validation/save failures.
 - Affect future scheduling only; preserve accepted shifts and saved
   configuration snapshots.
-- Before implementation, agree whether edits include both operating days and
-  workload intensity percentages or only operating days. META is shared across
-  roles at a physical location: define explicit physical-location authorization
-  rather than giving a single-role manager authority over other teams.
+- **Scope confirmed:** managers may edit both operating days and workload
+  intensity percentages. Any assignment to a team at a physical location grants
+  location-wide META access across roles at that location.
+- META values were browser-local. The primary administrator now previews and
+  explicitly imports the current browser values once into tenant-scoped server
+  storage; existing server settings are never overwritten by another import.
+  New workspace locations can be explicitly added without replacing saved
+  location values.
 - Verify scoped visibility, unlocked edits, locked/unlock denials, location and
   shared-role boundaries, validation, revocation, concurrency, audit history
-  and saved-schedule preservation.
-- Depends on `manager-employee-access`. Recording only; scope agreement required
-  before implementation.
+  and saved-schedule preservation. SQLite verification passed for the combined
+  34-test manager/access suite, including shared-role location scope, read/write
+  permissions, lock synchronization, revision conflicts, audit and preservation
+  of an accepted schedule.
+- Browser verification and PostgreSQL execution remain outstanding. PostgreSQL
+  validation remains deferred under the existing user instruction.
+- Depends on `manager-employee-access`. Scope is confirmed and the feature is
+  implemented; browser verification and deferred PostgreSQL validation remain
+  outstanding.
 
 ## Test evidence and handoff
 

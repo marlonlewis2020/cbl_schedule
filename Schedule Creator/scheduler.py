@@ -52,6 +52,8 @@ import session_idle
 import attendance_reports
 import historical_attendance_reports
 import application_shell
+import meta_settings
+import roster_settings
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -157,7 +159,7 @@ DEVELOPER_REQUESTS = (
     (
         "role-scoped-roster-settings",
         "Manager team roster settings and employee self-service preferences",
-        "Give managers access to the roster settings page for employees in their currently authorized teams. Managers may edit roster settings including proximity, daily availability and allowed shift starts, but Random 1-3 and Attendance 0-100 remain read-only. Employees see only their own roster record and may edit only Flexible, Reason if no and Preferred start; all other settings remain read-only. Preserve existing administrator permissions. Enforce tenant, current team/employee scope and field-level write allowlists server-side, including direct URLs and tampered requests. Preferred starts must come from the employee's configured location x role and comply with existing availability validation; require a reason when Flexible is No and explicitly reject incompatible choices. Preserve MFA, roster locking and existing access and membership restrictions. Reassignment, disabling and account/link changes revoke stale access. Linked managers use employee permissions for their own record in My shifts, without gaining extra management scope or bypassing the administrator-only self-attendance correction rule. Audit changes and prevent stale concurrent updates from silently overwriting newer edits. Changes affect future scheduling only, not accepted shifts or historical attendance. Clearly label read-only values and report validation or save failures. Verify scoped visibility, allowed and forbidden field updates, own-record isolation, linked-manager views, configured starts and validation, locks, transfers/disabling, concurrent edits, audit history and accepted-schedule preservation. Approved for recording only; implementation pending.",
+        "Give managers access to the roster settings page for employees in their currently authorized teams. Managers may edit roster settings including proximity, daily availability and allowed shift starts, but Random 1-3 and Attendance 0-100 remain read-only. Employees see only their own roster record and may edit only Flexible, Reason if no and Preferred start; all other settings remain read-only. Preserve existing administrator permissions. Use a tenant-scoped shared server source, initialized only through a primary-admin preview and explicitly confirmed one-time import; never silently overwrite existing shared settings. Enforce tenant, current team/employee scope and field-level write allowlists server-side, including direct URLs and tampered requests. Preferred starts must come from the employee's configured location x role and comply with existing availability validation; require a reason when Flexible is No and explicitly reject incompatible choices. Preserve MFA, roster locking and existing access and membership restrictions. Reassignment, disabling and account/link changes revoke stale access. Linked managers use employee permissions for their own record in My shifts, without gaining extra management scope or bypassing the administrator-only self-attendance correction rule. Audit changes and prevent stale concurrent updates from silently overwriting newer edits. Changes affect future scheduling only, not accepted shifts or historical attendance. Clearly label read-only values and report validation or save failures. Verify scoped visibility, allowed and forbidden field updates, own-record isolation, linked-manager views, configured starts and validation, locks, transfers/disabling, concurrent edits, audit history and accepted-schedule preservation. Implemented; browser and deferred PostgreSQL acceptance remain outstanding.",
         ("manager-employee-access", "manager-employee-dual-access"),
     ),
     (
@@ -459,6 +461,9 @@ class PostgresConnection:
     def close(self):
         self.connection.close()
 
+    def rollback(self):
+        self.connection.rollback()
+
     def execute(self, query, parameters=()):
         normalized = query.strip()
         if normalized.casefold().startswith("pragma foreign_keys"):
@@ -736,6 +741,8 @@ def initialize_database() -> None:
                 connection.execute(f"ALTER TABLE shift_trades ADD COLUMN {column} {definition}")
         connection.executescript(membership_billing.SCHEMA)
         connection.executescript(attendance_reports.SCHEMA)
+        connection.executescript(roster_settings.SCHEMA)
+        connection.executescript(meta_settings.SCHEMA)
         if "plan_id" not in {row[1] for row in connection.execute("PRAGMA table_info(billing_accounts)")}:
             connection.execute("ALTER TABLE billing_accounts ADD COLUMN plan_id TEXT NOT NULL DEFAULT ''")
         tenant_default = (
@@ -815,6 +822,21 @@ def initialize_database() -> None:
                 bamboohr_active INTEGER NOT NULL DEFAULT 1 CHECK (bamboohr_active IN (0, 1)),
                 {employee_keys},
                 {employee_location_reference}
+            );
+            CREATE TABLE IF NOT EXISTS roster_configurations (
+                tenant_id TEXT PRIMARY KEY,
+                revision INTEGER NOT NULL DEFAULT 1,
+                locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+                pools_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS roster_employee_settings (
+                tenant_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                settings_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, employee_id)
             );
             CREATE TABLE IF NOT EXISTS app_migrations (
                 migration_id TEXT PRIMARY KEY
@@ -1320,6 +1342,9 @@ def initialize_database() -> None:
             "accepted_schedules",
             "schedule_locations",
             "employees",
+            "roster_configurations",
+            "roster_employee_settings",
+            "meta_configurations",
             "application_settings",
             "tenant_audit_events",
             "attendance_time_entries",
@@ -1487,6 +1512,9 @@ def initialize_database() -> None:
                 "accepted_schedules",
                 "schedule_locations",
                 "employees",
+                "roster_configurations",
+                "roster_employee_settings",
+                "meta_configurations",
                 "application_settings",
                 "tenant_audit_events",
                 "attendance_time_entries",
@@ -4258,6 +4286,868 @@ def access_personal_guard():
     if not employee:
         return None, (jsonify(error="Your account needs an active linked employee record."), 403)
     return user, None
+
+
+def roster_config_row(connection: DatabaseConnection, tenant_id: str):
+    return connection.execute(
+        """
+        SELECT revision, locked, pools_json
+        FROM roster_configurations WHERE tenant_id = ?
+        """,
+        (tenant_id,),
+    ).fetchone()
+
+
+def roster_pool_starts(pools: list[dict], location: str, role: str) -> list[float] | None:
+    for pool in pools:
+        if pool["location"].casefold() == location.casefold() and pool["role"].casefold() == role.casefold():
+            return pool["starts"]
+    return None
+
+
+def roster_employee_record(connection, tenant_id: str, employee_row, pools: list[dict]) -> dict:
+    employee_id, name, location, role, active, schedule_location_id = employee_row[:6]
+    profile_row = connection.execute(
+        """
+        SELECT settings_json, revision FROM roster_employee_settings
+        WHERE tenant_id = ? AND employee_id = ?
+        """,
+        (tenant_id, employee_id),
+    ).fetchone()
+    starts = roster_pool_starts(pools, location, role)
+    if not profile_row or starts is None:
+        return {
+            "employeeId": employee_id, "name": name, "location": location,
+            "role": role, "active": bool(active), "scheduleLocationId": schedule_location_id,
+            "settings": None, "revision": None, "starts": starts or [],
+        }
+    return {
+        "employeeId": employee_id, "name": name, "location": location,
+        "role": role, "active": bool(active), "scheduleLocationId": schedule_location_id,
+        "settings": json.loads(profile_row[0]), "revision": profile_row[1], "starts": starts,
+    }
+
+
+def meta_configuration_row(connection: DatabaseConnection, tenant_id: str):
+    return connection.execute(
+        """
+        SELECT revision, locked, locations_json
+        FROM meta_configurations WHERE tenant_id = ?
+        """,
+        (tenant_id,),
+    ).fetchone()
+
+
+def manager_location_names(
+    connection: DatabaseConnection, tenant_id: str, email: str | None
+) -> set[str]:
+    if not email:
+        return set()
+    rows = connection.execute(
+        """
+        SELECT DISTINCT location FROM schedule_locations
+        WHERE tenant_id = ? AND LOWER(manager_email) = ? AND location <> ''
+        """,
+        (tenant_id, email.casefold()),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def update_meta_location(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    location_name: str,
+    changes: object,
+    version: object,
+    role: str,
+    allowed_locations: set[str] | None = None,
+):
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        return jsonify(error="Reload META before saving changes."), 400
+    config = meta_configuration_row(connection, tenant_id)
+    if not config:
+        return jsonify(error="The primary administrator has not initialized shared META settings."), 409
+    if config[1]:
+        return jsonify(error="META settings are locked. Ask an administrator to unlock them."), 409
+    if config[0] != version:
+        return jsonify(error="META settings changed elsewhere. Reload before saving."), 409
+    locations = json.loads(config[2])
+    location = next(
+        (item for item in locations if item["name"].casefold() == location_name.casefold()),
+        None,
+    )
+    if not location:
+        return jsonify(error="That physical location has no shared META settings. Ask the administrator to synchronize it."), 409
+    if allowed_locations is not None and location["name"].casefold() not in {
+        name.casefold() for name in allowed_locations
+    }:
+        return jsonify(error="That physical location is outside your currently authorized teams."), 403
+    try:
+        updated = meta_settings.apply_changes(location, changes)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    location_index = locations.index(location)
+    locations[location_index] = updated
+    result = connection.execute(
+        """
+        UPDATE meta_configurations
+        SET locations_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND revision = ? AND locked = 0
+        """,
+        (json.dumps(locations, separators=(",", ":")), tenant_id, version),
+    )
+    if result.rowcount != 1:
+        return jsonify(error="META settings changed or were locked elsewhere. Reload before saving."), 409
+    if role == "manager":
+        actor = access_user()
+        access_audit(
+            connection,
+            actor,
+            "meta-settings-updated:" + location["name"] + ":" + ",".join(
+                f"{item['field']}:{item['day']}" for item in changes
+            ),
+        )
+    else:
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"),
+                "meta-settings-updated:" + location["name"] + ":" + ",".join(
+                    f"{item['field']}:{item['day']}" for item in changes
+                ),
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(location=updated, revision=version + 1)
+
+
+def validate_roster_import(connection, tenant_id: str, payload: object) -> tuple[dict, list[str]]:
+    if not isinstance(payload, dict) or payload.get("tenantId") != tenant_id:
+        raise ValueError("The business changed. Reload the workspace and retry.")
+    pools = roster_settings.normalize_pools(payload.get("pools"))
+    raw_employees = payload.get("employees")
+    if not isinstance(raw_employees, list) or not raw_employees or len(raw_employees) > 500:
+        raise ValueError("Provide the current employee roster.")
+    locked = payload.get("locked")
+    if not isinstance(locked, bool):
+        raise ValueError("The workspace lock state is invalid.")
+    employee_ids, employees, warnings = set(), [], []
+    for item in raw_employees:
+        if not isinstance(item, dict):
+            raise ValueError("Each employee roster entry must be an object.")
+        employee_id = item.get("employeeId")
+        if not isinstance(employee_id, str) or not employee_id.strip() or employee_id in employee_ids:
+            raise ValueError("Employee IDs must be unique non-empty strings.")
+        employee_ids.add(employee_id)
+        row = connection.execute(
+            """
+            SELECT employee_id, name, location, role, active, schedule_location_id
+            FROM employees WHERE tenant_id = ? AND employee_id = ?
+            """,
+            (tenant_id, employee_id),
+        ).fetchone()
+        if not row:
+            raise ValueError("An employee in the workspace is not registered to this business.")
+        starts = roster_pool_starts(pools, row[2], row[3])
+        if starts is None:
+            raise ValueError(f"No configured shift starts were supplied for {row[2]} · {row[3]}.")
+        profile = roster_settings.normalize_profile_for_starts(item.get("settings"), starts)
+        if profile["preferred"] is not None and profile["preferred"] not in starts:
+            warnings.append(f"{row[1]} has a preferred start outside the configured pool.")
+        if profile["flex"] == "No" and not profile["reason"].strip():
+            warnings.append(f"{row[1]} is not flexible but has no reason.")
+        employees.append({"employeeId": employee_id, "settings": profile})
+    active_ids = {
+        row[0] for row in connection.execute(
+            "SELECT employee_id FROM employees WHERE tenant_id = ? AND active = 1",
+            (tenant_id,),
+        ).fetchall()
+    }
+    if not active_ids.issubset(employee_ids):
+        raise ValueError("The import must include every active business employee.")
+    return {"pools": pools, "employees": employees, "locked": locked}, warnings
+
+
+def update_roster_employee(connection, tenant_id: str, employee_id: str, changes: object, version: object, role: str):
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        return jsonify(error="Reload the roster before saving changes."), 400
+    config = roster_config_row(connection, tenant_id)
+    if not config:
+        return jsonify(error="The shared roster has not been initialized by the primary administrator."), 409
+    if config[1]:
+        return jsonify(error="Roster settings are locked. Ask an administrator to unlock them."), 409
+    employee = connection.execute(
+        """
+        SELECT employee_id, name, location, role, active, schedule_location_id
+        FROM employees WHERE tenant_id = ? AND employee_id = ?
+        """,
+        (tenant_id, employee_id),
+    ).fetchone()
+    if not employee or (role == "employee" and not employee[4]):
+        return jsonify(error="The employee record is unavailable."), 404
+    pools = json.loads(config[2])
+    starts = roster_pool_starts(pools, employee[2], employee[3])
+    if starts is None:
+        return jsonify(error="No shared shift starts are configured for this employee's current location and role."), 409
+    current = connection.execute(
+        """
+        SELECT settings_json, revision FROM roster_employee_settings
+        WHERE tenant_id = ? AND employee_id = ?
+        """,
+        (tenant_id, employee_id),
+    ).fetchone()
+    if not current:
+        return jsonify(error="The employee is not in the shared roster yet. Ask an administrator to synchronize it."), 409
+    if current[1] != version:
+        return jsonify(error="These roster settings changed elsewhere. Reload before saving."), 409
+    try:
+        updated = roster_settings.validate_edit(json.loads(current[0]), changes, starts, role)
+    except PermissionError as error:
+        return jsonify(error=str(error)), 403
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    changed_fields = ",".join(sorted(changes))
+    result = connection.execute(
+        """
+        UPDATE roster_employee_settings
+        SET settings_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND employee_id = ? AND revision = ?
+        """,
+        (json.dumps(updated, separators=(",", ":")), tenant_id, employee_id, version),
+    )
+    if result.rowcount != 1:
+        return jsonify(error="These roster settings changed elsewhere. Reload before saving."), 409
+    actor = access_user() if role in {"manager", "employee"} else None
+    if actor:
+        access_audit(connection, actor, f"roster-settings-updated:{employee_id}:{changed_fields}")
+    else:
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"),
+                f"roster-settings-updated:{employee_id}:{changed_fields}",
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(settings=updated, revision=version + 1)
+
+
+@app.get("/api/roster-settings")
+def get_admin_roster_settings():
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection:
+        config = roster_config_row(connection, tenant_id)
+        if not config:
+            return jsonify(configured=False, revision=None, locked=False, pools=[], employees=[])
+        pools = json.loads(config[2])
+        rows = connection.execute(
+            """
+            SELECT employee_id, name, location, role, active, schedule_location_id
+            FROM employees WHERE tenant_id = ? ORDER BY name COLLATE NOCASE
+            """,
+            (tenant_id,),
+        ).fetchall()
+        employees = [roster_employee_record(connection, tenant_id, row, pools) for row in rows]
+    return jsonify(
+        configured=True, revision=config[0], locked=bool(config[1]),
+        pools=pools, employees=employees,
+    )
+
+
+@app.post("/api/roster-settings/import/preview")
+def preview_admin_roster_import():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    tenant_id = active_tenant_id()
+    payload = request.get_json(silent=True)
+    with closing(database_connect()) as connection:
+        if roster_config_row(connection, tenant_id):
+            return jsonify(error="Shared roster data already exists. Import will not overwrite it."), 409
+        try:
+            normalized, warnings = validate_roster_import(connection, tenant_id, payload)
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+    return jsonify(
+        configured=False, employeeCount=len(normalized["employees"]),
+        poolCount=len(normalized["pools"]), locked=normalized["locked"],
+        warnings=warnings,
+    )
+
+
+@app.post("/api/roster-settings/import")
+def import_admin_roster_settings():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+        return jsonify(error="Preview the shared roster and explicitly confirm the import."), 400
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        if roster_config_row(connection, tenant_id):
+            return jsonify(error="Shared roster data already exists. Import will not overwrite it."), 409
+        try:
+            normalized, warnings = validate_roster_import(connection, tenant_id, payload)
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        connection.execute(
+            """
+            INSERT INTO roster_configurations (tenant_id, revision, locked, pools_json)
+            VALUES (?, 1, ?, ?)
+            """,
+            (tenant_id, int(normalized["locked"]), json.dumps(normalized["pools"], separators=(",", ":"))),
+        )
+        connection.execute(
+            """
+            UPDATE meta_configurations
+            SET locked = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND locked != ?
+            """,
+            (int(normalized["locked"]), tenant_id, int(normalized["locked"])),
+        )
+        connection.executemany(
+            """
+            INSERT INTO roster_employee_settings
+                (tenant_id, employee_id, settings_json, revision)
+            VALUES (?, ?, ?, 1)
+            """,
+            [
+                (tenant_id, item["employeeId"], json.dumps(item["settings"], separators=(",", ":")))
+                for item in normalized["employees"]
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"), "shared-roster-initialized",
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(
+        configured=True, revision=1, locked=normalized["locked"],
+        employeeCount=len(normalized["employees"]), warnings=warnings,
+    ), 201
+
+
+@app.put("/api/roster-settings/configuration")
+def update_admin_roster_configuration():
+    tenant_id = active_tenant_id()
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("revision"), int) or isinstance(payload.get("revision"), bool):
+        return jsonify(error="Reload the shared roster before changing configuration."), 400
+    try:
+        pools = roster_settings.normalize_pools(payload.get("pools"))
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    if not isinstance(payload.get("locked"), bool):
+        return jsonify(error="The workspace lock state is invalid."), 400
+    with closing(database_connect()) as connection, connection:
+        current = roster_config_row(connection, tenant_id)
+        if not current:
+            return jsonify(error="Initialize the shared roster before syncing settings."), 409
+        if current[0] != payload["revision"]:
+            return jsonify(error="Shared roster configuration changed elsewhere. Reload before saving."), 409
+        old_pools = json.loads(current[2])
+        if current[1] and pools != old_pools:
+            return jsonify(error="Unlock configuration before changing possible shift starts."), 409
+        if not current[1] and payload["locked"] and pools != old_pools:
+            return jsonify(error="Save possible shift starts before locking configuration."), 409
+        profile_updates = []
+        rows = connection.execute(
+            """
+            SELECT s.employee_id, s.settings_json, s.revision,
+                   e.location, e.role
+            FROM roster_employee_settings s
+            JOIN employees e
+              ON e.tenant_id = s.tenant_id AND e.employee_id = s.employee_id
+            WHERE s.tenant_id = ?
+            """,
+            (tenant_id,),
+        ).fetchall()
+        for employee_id, settings_json, profile_revision, location, role in rows:
+            previous_starts = roster_pool_starts(old_pools, location, role) or []
+            next_starts = roster_pool_starts(pools, location, role)
+            if next_starts is None:
+                return jsonify(error=f"Keep a configured location-role pool for {employee_id}."), 409
+            profile = json.loads(settings_json)
+            if profile["preferred"] is not None and profile["preferred"] not in next_starts:
+                return jsonify(error=f"Change {employee_id}'s preferred start before removing it."), 409
+            availability = profile["shiftAvailability"]
+            changed = False
+            for start in previous_starts:
+                if start not in next_starts:
+                    key = format(start, ".15g")
+                    if key in availability:
+                        del availability[key]
+                        changed = True
+            for start in next_starts:
+                key = format(start, ".15g")
+                if start not in previous_starts and key not in availability:
+                    availability[key] = 0
+                    changed = True
+            if changed:
+                profile_updates.append(
+                    (json.dumps(profile, separators=(",", ":")), tenant_id, employee_id, profile_revision)
+                )
+        result = connection.execute(
+            """
+            UPDATE roster_configurations
+            SET pools_json = ?, locked = ?, revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND revision = ?
+            """,
+            (
+                json.dumps(pools, separators=(",", ":")), int(payload["locked"]),
+                tenant_id, payload["revision"],
+            ),
+        )
+        if result.rowcount != 1:
+            return jsonify(error="Shared roster configuration changed elsewhere. Reload before saving."), 409
+        connection.execute(
+            """
+            UPDATE meta_configurations
+            SET locked = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND locked != ?
+            """,
+            (int(payload["locked"]), tenant_id, int(payload["locked"])),
+        )
+        for settings_json, profile_tenant, employee_id, profile_revision in profile_updates:
+            changed_profile = connection.execute(
+                """
+                UPDATE roster_employee_settings
+                SET settings_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = ? AND employee_id = ? AND revision = ?
+                """,
+                (settings_json, profile_tenant, employee_id, profile_revision),
+            )
+            if changed_profile.rowcount != 1:
+                connection.rollback()
+                return jsonify(error="An employee roster profile changed while shift starts were being synchronized. No changes were saved; reload and retry."), 409
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"), "shared-roster-configuration-updated",
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(revision=payload["revision"] + 1, locked=payload["locked"], pools=pools)
+
+
+def validate_meta_import(tenant_id: str, payload: object) -> dict:
+    if not isinstance(payload, dict) or payload.get("tenantId") != tenant_id:
+        raise ValueError("The business changed. Reload the workspace and retry.")
+    if not isinstance(payload.get("locked"), bool):
+        raise ValueError("The workspace lock state is invalid.")
+    return {
+        "locked": payload["locked"],
+        "locations": meta_settings.normalize_locations(payload.get("locations")),
+    }
+
+
+@app.get("/api/meta-settings")
+def get_admin_meta_settings():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection:
+        config = meta_configuration_row(connection, tenant_id)
+    if not config:
+        return jsonify(configured=False, revision=None, locked=False, locations=[])
+    return jsonify(
+        configured=True, revision=config[0], locked=bool(config[1]),
+        locations=json.loads(config[2]),
+    )
+
+
+@app.post("/api/meta-settings/import/preview")
+def preview_admin_meta_import():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection:
+        if meta_configuration_row(connection, tenant_id):
+            return jsonify(error="Shared META settings already exist. Import will not overwrite them."), 409
+    try:
+        normalized = validate_meta_import(tenant_id, request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    return jsonify(
+        configured=False, locationCount=len(normalized["locations"]),
+        locked=normalized["locked"],
+    )
+
+
+@app.post("/api/meta-settings/import")
+def import_admin_meta_settings():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+        return jsonify(error="Preview the shared META settings and explicitly confirm the import."), 400
+    tenant_id = active_tenant_id()
+    try:
+        normalized = validate_meta_import(tenant_id, payload)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    with closing(database_connect()) as connection, connection:
+        if meta_configuration_row(connection, tenant_id):
+            return jsonify(error="Shared META settings already exist. Import will not overwrite them."), 409
+        roster_config = roster_config_row(connection, tenant_id)
+        if roster_config and bool(roster_config[1]) != normalized["locked"]:
+            return jsonify(error="The workspace lock state differs from the shared roster configuration. Reload and retry."), 409
+        result = connection.execute(
+            """
+            INSERT OR IGNORE INTO meta_configurations
+                (tenant_id, revision, locked, locations_json)
+            VALUES (?, 1, ?, ?)
+            """,
+            (
+                tenant_id, int(normalized["locked"]),
+                json.dumps(normalized["locations"], separators=(",", ":")),
+            ),
+        )
+        if result.rowcount != 1:
+            return jsonify(error="Shared META settings were initialized elsewhere. Reload before continuing."), 409
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"), "shared-meta-initialized",
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(
+        configured=True, revision=1, locked=normalized["locked"],
+        locationCount=len(normalized["locations"]),
+    ), 201
+
+
+@app.put("/api/meta-settings/configuration")
+def update_admin_meta_configuration():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("revision"), int)
+        or isinstance(payload.get("revision"), bool)
+        or not isinstance(payload.get("locked"), bool)
+    ):
+        return jsonify(error="Reload the shared META settings before changing configuration."), 400
+    try:
+        locations = meta_settings.normalize_locations(payload.get("locations"))
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        config = meta_configuration_row(connection, tenant_id)
+        if not config:
+            return jsonify(error="Initialize shared META settings before synchronizing locations."), 409
+        if config[0] != payload["revision"]:
+            return jsonify(error="Shared META configuration changed elsewhere. Reload before saving."), 409
+        old_locations = json.loads(config[2])
+        roster_config = roster_config_row(connection, tenant_id)
+        if roster_config and bool(roster_config[1]) != payload["locked"]:
+            return jsonify(error="Use Controls & lock to change the shared workspace lock state."), 409
+        if config[1] and locations != old_locations:
+            return jsonify(error="Unlock configuration before synchronizing META locations."), 409
+        if not config[1] and payload["locked"] and locations != old_locations:
+            return jsonify(error="Synchronize META locations before locking configuration."), 409
+        result = connection.execute(
+            """
+            UPDATE meta_configurations
+            SET locations_json = ?, locked = ?, revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND revision = ?
+            """,
+            (
+                json.dumps(locations, separators=(",", ":")), int(payload["locked"]),
+                tenant_id, payload["revision"],
+            ),
+        )
+        if result.rowcount != 1:
+            return jsonify(error="Shared META configuration changed elsewhere. Reload before saving."), 409
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"), "shared-meta-configuration-updated",
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(
+        revision=payload["revision"] + 1, locked=payload["locked"], locations=locations,
+    )
+
+
+@app.put("/api/meta-settings/<path:location_name>")
+def update_admin_meta_location(location_name: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="META changes must be an object."), 400
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        return update_meta_location(
+            connection, tenant_id, location_name, payload.get("changes"),
+            payload.get("revision"), "admin",
+        )
+
+
+@app.route("/api/access/meta-settings", methods=["GET", "PUT"])
+def manager_meta_settings():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    if request.args.get("view") == "employee":
+        return jsonify(error="META settings are not available in the personal employee view."), 403
+    tenant_id = user["tenantId"]
+    with closing(database_connect()) as connection:
+        config = meta_configuration_row(connection, tenant_id)
+        if not config:
+            return jsonify(error="The primary administrator has not initialized shared META settings."), 409
+        locations = json.loads(config[2])
+        authorized_names = manager_location_names(connection, tenant_id, user["email"])
+        authorized_keys = {name.casefold() for name in authorized_names}
+        records = [item for item in locations if item["name"].casefold() in authorized_keys]
+        unconfigured = sorted(
+            (name for name in authorized_names if name.casefold() not in {
+                item["name"].casefold() for item in locations
+            }),
+            key=str.casefold,
+        )
+        if request.method == "GET":
+            return jsonify(
+                revision=config[0], locked=bool(config[1]),
+                locations=records, unconfiguredLocations=unconfigured,
+            )
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("location"), str):
+            return jsonify(error="Choose one of your currently authorized physical locations."), 400
+        with connection:
+            return update_meta_location(
+                connection, tenant_id, payload["location"], payload.get("changes"),
+                payload.get("revision"), "manager", authorized_names,
+            )
+
+
+@app.post("/api/roster-settings/employees")
+def add_admin_roster_employees():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if (
+        not isinstance(payload, dict) or payload.get("confirmed") is not True
+        or not isinstance(payload.get("revision"), int)
+        or isinstance(payload.get("revision"), bool)
+        or not isinstance(payload.get("employees"), list)
+        or not payload["employees"] or len(payload["employees"]) > 500
+    ):
+        return jsonify(error="Preview the new employee profiles and confirm synchronization."), 400
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        config = roster_config_row(connection, tenant_id)
+        if not config:
+            return jsonify(error="Initialize the shared roster before adding employees."), 409
+        if config[0] != payload["revision"]:
+            return jsonify(error="Shared roster configuration changed elsewhere. Reload before synchronizing."), 409
+        pools = json.loads(config[2])
+        additions = []
+        seen = set()
+        try:
+            for item in payload["employees"]:
+                if not isinstance(item, dict):
+                    raise ValueError("Each employee profile must be an object.")
+                employee_id = item.get("employeeId")
+                if not isinstance(employee_id, str) or not employee_id.strip() or employee_id in seen:
+                    raise ValueError("Employee IDs must be unique non-empty strings.")
+                seen.add(employee_id)
+                employee = connection.execute(
+                    """
+                    SELECT location, role FROM employees
+                    WHERE tenant_id = ? AND employee_id = ?
+                    """,
+                    (tenant_id, employee_id),
+                ).fetchone()
+                if not employee:
+                    raise ValueError("An employee profile does not belong to this business.")
+                if connection.execute(
+                    """
+                    SELECT 1 FROM roster_employee_settings
+                    WHERE tenant_id = ? AND employee_id = ?
+                    """,
+                    (tenant_id, employee_id),
+                ).fetchone():
+                    raise ValueError("An employee already has shared settings; existing values were not overwritten.")
+                if roster_pool_starts(pools, employee[0], employee[1]) is None:
+                    raise ValueError(f"No shared shift starts are configured for {employee[0]} · {employee[1]}.")
+                profile = roster_settings.normalize_profile_for_starts(
+                    item.get("settings"), roster_pool_starts(pools, employee[0], employee[1])
+                )
+                additions.append((tenant_id, employee_id, json.dumps(profile, separators=(",", ":"))))
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        result = connection.execute(
+            """
+            UPDATE roster_configurations
+            SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND revision = ?
+            """,
+            (tenant_id, payload["revision"]),
+        )
+        if result.rowcount != 1:
+            return jsonify(error="Shared roster configuration changed elsewhere. Reload before synchronizing."), 409
+        connection.executemany(
+            """
+            INSERT INTO roster_employee_settings
+                (tenant_id, employee_id, settings_json, revision)
+            VALUES (?, ?, ?, 1)
+            """,
+            additions,
+        )
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_events
+                (id, tenant_id, actor_id, actor_email, action, route, response_status)
+            VALUES (?, ?, ?, ?, ?, ?, 200)
+            """,
+            (
+                secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                session.get("tenant_admin_email"),
+                "shared-roster-employees-added:" + ",".join(item[1] for item in additions),
+                request.endpoint or "unknown",
+            ),
+        )
+    return jsonify(revision=payload["revision"] + 1, added=len(additions))
+
+
+@app.put("/api/roster-settings/<path:employee_id>")
+def update_admin_roster_employee(employee_id: str):
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Roster changes must be an object."), 400
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        return update_roster_employee(
+            connection, tenant_id, employee_id, payload.get("changes"),
+            payload.get("revision"), "admin",
+        )
+
+
+@app.route("/api/access/roster-settings", methods=["GET", "PUT"])
+def manager_roster_settings():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    if request.args.get("view") == "employee":
+        return jsonify(error="Use My shifts / employee view to manage your own roster preferences."), 403
+    tenant_id = user["tenantId"]
+    with closing(database_connect()) as connection:
+        config = roster_config_row(connection, tenant_id)
+        if not config:
+            return jsonify(error="The primary administrator has not initialized the shared roster."), 409
+        pools = json.loads(config[2])
+        employee_ids = manager_employee_ids(connection, tenant_id, user["email"])
+        if request.method == "GET":
+            records = []
+            if employee_ids:
+                placeholders = ",".join("?" for _ in employee_ids)
+                rows = connection.execute(
+                    f"""
+                    SELECT employee_id, name, location, role, active, schedule_location_id
+                    FROM employees WHERE tenant_id = ? AND employee_id IN ({placeholders})
+                    ORDER BY name COLLATE NOCASE
+                    """,
+                    (tenant_id, *sorted(employee_ids)),
+                ).fetchall()
+                records = [roster_employee_record(connection, tenant_id, row, pools) for row in rows]
+            if any(record["settings"] is None for record in records):
+                return jsonify(error="The shared roster is missing an employee profile. Ask the administrator to synchronize it."), 409
+            return jsonify(locked=bool(config[1]), employees=records)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("employeeId"), str):
+            return jsonify(error="Choose an employee from your authorized teams."), 400
+        employee_id = payload["employeeId"]
+        if employee_id not in employee_ids:
+            return jsonify(error="That employee is outside your currently authorized teams."), 403
+        with connection:
+            return update_roster_employee(
+                connection, tenant_id, employee_id, payload.get("changes"),
+                payload.get("revision"), "manager",
+            )
+
+
+@app.route("/api/access/my/roster-settings", methods=["GET", "PUT"])
+def personal_roster_settings():
+    user, failure = access_personal_guard()
+    if failure:
+        return failure
+    tenant_id, employee_id = user["tenantId"], user["employeeId"]
+    with closing(database_connect()) as connection:
+        config = roster_config_row(connection, tenant_id)
+        if not config:
+            return jsonify(error="The primary administrator has not initialized the shared roster."), 409
+        pools = json.loads(config[2])
+        employee = connection.execute(
+            """
+            SELECT employee_id, name, location, role, active, schedule_location_id
+            FROM employees WHERE tenant_id = ? AND employee_id = ? AND active = 1
+            """,
+            (tenant_id, employee_id),
+        ).fetchone()
+        record = roster_employee_record(connection, tenant_id, employee, pools) if employee else None
+        if not record or record["settings"] is None:
+            return jsonify(error="Your active employee roster settings are unavailable. Ask the administrator to synchronize the roster."), 409
+        if request.method == "GET":
+            return jsonify(locked=bool(config[1]), employee=record)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error="Roster changes must be an object."), 400
+        with connection:
+            return update_roster_employee(
+                connection, tenant_id, employee_id, payload.get("changes"),
+                payload.get("revision"), "employee",
+            )
 
 
 def access_audit(
