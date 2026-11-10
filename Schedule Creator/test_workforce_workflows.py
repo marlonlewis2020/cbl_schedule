@@ -762,6 +762,11 @@ class TradeWorkflowTests(unittest.TestCase):
 
 
 class BillingWorkflowTests(unittest.TestCase):
+    create_account = test_scheduler.ManagerEmployeeAccessTests.create_account
+    new_client = test_scheduler.ManagerEmployeeAccessTests.new_client
+    sign_in_manager = test_scheduler.ManagerEmployeeAccessTests.sign_in_manager
+    portal_employee_client = test_scheduler.ManagerEmployeeAccessTests.portal_employee_client
+
     def setUp(self):
         test_scheduler.ManagerEmployeeAccessTests.setUp(self)
         with closing(scheduler.database_connect()) as c, c:
@@ -814,13 +819,21 @@ class BillingWorkflowTests(unittest.TestCase):
 
     def test_daily_retry_ceiling_and_unknown_outcomes(self):
         tenant = self.seed("failed")
-        with patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription("10.00")), \
+        now = int(time.time())
+        with patch.object(billing.time, "time", return_value=now), \
+             patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription("10.00")), \
              patch.object(scheduler.billing_provider, "api", side_effect=billing.PaymentError("Sandbox declined")) as capture:
             for number in range(7):
                 with closing(scheduler.database_connect()) as c, c:
-                    c.execute("UPDATE billing_accounts SET next_retry=? WHERE tenant_id=?", (int(time.time()) - 1, tenant))
+                    c.execute("UPDATE billing_accounts SET next_retry=? WHERE tenant_id=?", (now - 1, tenant))
                 with scheduler.app.app_context():
                     billing.run_once(scheduler, scheduler.billing_provider)
+                    billing.run_once(scheduler, scheduler.billing_provider)
+                self.assertEqual(capture.call_count, number + 1)
+                with closing(scheduler.database_connect()) as c:
+                    attempt = c.execute("SELECT retry_count,retry_state,next_retry FROM billing_accounts").fetchone()
+                self.assertEqual(attempt, (number + 1, "exhausted" if number == 6 else "failed",
+                                           None if number == 6 else now + 86400))
             with scheduler.app.app_context():
                 billing.run_once(scheduler, scheduler.billing_provider)
             self.assertEqual(capture.call_count, 7)
@@ -834,23 +847,81 @@ class BillingWorkflowTests(unittest.TestCase):
                 billing.run_once(scheduler, scheduler.billing_provider)
                 billing.run_once(scheduler, scheduler.billing_provider)
             self.assertEqual(capture.call_count, 1)
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state,next_retry FROM billing_accounts").fetchone(),
+                             (1, "unknown", None))
         self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 403)
+        with patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription()), \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            result = self.admin.post("/api/business/billing/reconcile", headers=self.headers, json={})
+            self.assertEqual(result.status_code, 200, result.get_json())
+            writes.assert_not_called()
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state,access_state FROM billing_accounts").fetchone(),
+                             (0, "idle", "active"))
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 200)
+
+    def test_reminder_defers_charge_and_verified_retry_restores_access(self):
+        tenant = self.seed()
+        now = int(time.time())
+        with patch.object(billing.time, "time", return_value=now), \
+             patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription("10.00")), \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            with scheduler.app.app_context():
+                billing.run_once(scheduler, scheduler.billing_provider)
+                billing.run_once(scheduler, scheduler.billing_provider)
+            writes.assert_not_called()
+        with closing(scheduler.database_connect()) as c, c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state,next_retry FROM billing_accounts").fetchone(),
+                             (0, "failed", now + 86400))
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='payment-reminder'").fetchone()[0], 1)
+            c.execute("UPDATE billing_accounts SET access_state='suspended',next_retry=? WHERE tenant_id=?", (now - 1, tenant))
+        with patch.object(scheduler.billing_provider, "subscription", side_effect=[self.subscription("10.00"), self.subscription()]), \
+             patch.object(scheduler.billing_provider, "api", return_value={}) as writes:
+            with scheduler.app.app_context():
+                billing.run_once(scheduler, scheduler.billing_provider)
+            writes.assert_called_once()
+            self.assertEqual(writes.call_args.args[0:2], ("POST", "/v1/billing/subscriptions/I-TEST/capture"))
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state,access_state FROM billing_accounts").fetchone(),
+                             (0, "idle", "active"))
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='retry-paid'").fetchone()[0], 1)
 
     def test_manual_payment_audited_and_owner_configuration_validation(self):
         tenant = self.seed("exhausted")
-        with patch.object(scheduler, "platform_owner_guard", return_value=None):
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE billing_accounts SET access_state='suspended'")
+            c.execute("UPDATE tenants SET membership_status='paused',status='suspended' WHERE tenant_id=?", (tenant,))
+        with patch.object(scheduler, "platform_owner_guard", return_value=None), \
+             patch.object(billing.requests, "post", side_effect=AssertionError("External HTTP blocked")) as http_post, \
+             patch.object(billing.requests, "request", side_effect=AssertionError("External HTTP blocked")) as http_request:
+            result = self.admin.post("/api/hub/billing/manual-payment", json={
+                "confirmed": True, "tenantId": tenant, "reason": "",
+                "paidUntil": (scheduler.datetime.now(scheduler.timezone.utc) + timedelta(days=30)).isoformat(),
+            })
+            self.assertEqual(result.status_code, 400)
             result = self.admin.post("/api/hub/billing/manual-payment", json={
                 "confirmed": True, "tenantId": tenant, "reason": "Verified external payment",
                 "paidUntil": (scheduler.datetime.now(scheduler.timezone.utc) + timedelta(days=30)).isoformat(),
             })
             self.assertEqual(result.status_code, 200, result.get_json())
+            self.assertIn("does not cancel or settle", result.get_json()["warning"])
             result = self.admin.put("/api/hub/billing", json={
                 "confirmed": True, "enabled": False, "prices": {"silver:monthly": "-1"},
             })
             self.assertEqual(result.status_code, 400)
+            http_post.assert_not_called()
+            http_request.assert_not_called()
         with closing(scheduler.database_connect()) as c:
             self.assertEqual(c.execute("SELECT retry_state FROM billing_accounts").fetchone()[0], "manual")
+            self.assertEqual(c.execute("SELECT access_state,provider_status,subscription_id,next_retry FROM billing_accounts").fetchone(),
+                             ("active", "ACTIVE", "I-TEST", None))
+            self.assertEqual(c.execute("SELECT membership_status,status FROM tenants WHERE tenant_id=?", (tenant,)).fetchone(),
+                             ("paused", "suspended"))
+            self.assertEqual(c.execute("SELECT detail FROM billing_events WHERE kind='manual-payment'").fetchall(),
+                             [("Verified external payment",)])
             self.assertEqual(c.execute("SELECT COUNT(*) FROM hub_audit_events WHERE action='manual-payment'").fetchone()[0], 1)
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 403)
 
     def test_owner_feature_form_definitions_and_override_round_trip(self):
         self.seed()
@@ -912,6 +983,113 @@ class BillingWorkflowTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as c:
             self.assertEqual(c.execute("SELECT retry_count FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()[0], 0)
 
+    def test_unknown_checkout_recovery_matches_tenant_checkout_and_plan(self):
+        tenant = self.seed()
+        plan = "P-" + "A" * 24
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("DELETE FROM billing_subscription_index")
+            c.execute("UPDATE billing_accounts SET subscription_id=NULL,plan_id=?,provider_status='CREATING',retry_state='unknown'", (plan,))
+        subscription = dict(self.subscription(), plan_id=plan)
+        body = {"confirmed": True, "tenantId": tenant, "subscriptionId": "I-TEST"}
+        with patch.object(scheduler, "platform_owner_guard", return_value=None), \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            for wrong in (dict(subscription, custom_id="other-checkout"),
+                          dict(subscription, plan_id="P-" + "B" * 24)):
+                with patch.object(scheduler.billing_provider, "subscription", return_value=wrong):
+                    result = self.admin.post("/api/hub/billing/recover-checkout", json=body)
+                    self.assertEqual(result.status_code, 409)
+                with closing(scheduler.database_connect()) as c:
+                    self.assertEqual(c.execute("SELECT subscription_id,retry_state FROM billing_accounts").fetchone(),
+                                     (None, "unknown"))
+            with patch.object(scheduler.billing_provider, "subscription", return_value=subscription):
+                result = self.admin.post("/api/hub/billing/recover-checkout", json=dict(body, tenantId="other-tenant"))
+                self.assertEqual(result.status_code, 409)
+                result = self.admin.post("/api/hub/billing/recover-checkout", json=body)
+                self.assertEqual(result.status_code, 200, result.get_json())
+                result = self.admin.post("/api/hub/billing/recover-checkout", json=body)
+                self.assertEqual(result.status_code, 409)
+            writes.assert_not_called()
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT subscription_id,retry_state,access_state FROM billing_accounts").fetchone(),
+                             ("I-TEST", "idle", "active"))
+            self.assertEqual(c.execute("SELECT subscription_id,tenant_id FROM billing_subscription_index").fetchall(),
+                             [("I-TEST", tenant)])
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='checkout-recovered'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM hub_audit_events WHERE action='checkout-recovered'").fetchone()[0], 1)
+
+    def test_existing_or_unknown_checkout_blocks_new_provider_subscription(self):
+        tenant = self.seed()
+        with patch.object(scheduler.billing_provider, "configured", return_value=True), \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            for subscription_id, status, retry in (("I-TEST", "ACTIVE", "idle"),
+                                                     (None, "CREATING", "unknown")):
+                with closing(scheduler.database_connect()) as c, c:
+                    c.execute("UPDATE billing_accounts SET subscription_id=?,provider_status=?,retry_state=? WHERE tenant_id=?",
+                              (subscription_id, status, retry, tenant))
+                result = self.admin.post("/api/business/billing", headers=self.headers, json={
+                    "confirmed": True, "tier": "silver", "period": "monthly", "autoRenew": True,
+                })
+                self.assertEqual(result.status_code, 409, result.get_json())
+            writes.assert_not_called()
+
+    def test_worker_recovers_missed_payment_webhook_without_new_charge(self):
+        tenant = self.seed()
+        now = int(time.time())
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE billing_accounts SET access_state='suspended',next_retry=? WHERE tenant_id=?", (now - 1, tenant))
+        with patch.object(billing.time, "time", return_value=now), \
+             patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription()) as reads, \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            with scheduler.app.app_context():
+                billing.run_once(scheduler, scheduler.billing_provider)
+                billing.run_once(scheduler, scheduler.billing_provider)
+            reads.assert_called_once_with("I-TEST")
+            writes.assert_not_called()
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state,access_state,next_retry FROM billing_accounts").fetchone(),
+                             (0, "idle", "active", now + 600))
+            self.assertIsNotNone(c.execute("SELECT paid_until FROM billing_accounts").fetchone()[0])
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='payment-reconciled'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_webhook_receipts").fetchone()[0], 0)
+            self.assertEqual(c.execute("SELECT heartbeat FROM billing_worker_status WHERE id=1").fetchone()[0], now)
+
+    def test_expired_worker_claim_becomes_unknown_without_another_charge(self):
+        self.seed("running")
+        with patch.object(scheduler.billing_provider, "subscription") as reads, \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            with scheduler.app.app_context():
+                billing.run_once(scheduler, scheduler.billing_provider)
+                billing.run_once(scheduler, scheduler.billing_provider)
+            reads.assert_not_called()
+            writes.assert_not_called()
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT retry_count,retry_state FROM billing_accounts").fetchone(),
+                             (0, "unknown"))
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='payment-unknown'").fetchone()[0], 1)
+
+    def test_billing_suspension_and_verified_restoration_cover_tenant_roles(self):
+        employee = self.portal_employee_client()
+        manager, _, _ = self.sign_in_manager()
+        tenant = self.seed("exhausted")
+        clients = (
+            (self.admin, "/api/accepted-shifts"),
+            (manager, "/api/access/manager/attendance"),
+            (employee, "/api/access/me/attendance"),
+        )
+        for client, path in clients:
+            self.assertEqual(client.get(path).status_code, 200, path)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE billing_accounts SET access_state='suspended' WHERE tenant_id=?", (tenant,))
+        for client, path in clients:
+            self.assertEqual(client.get(path).status_code, 403, path)
+        with patch.object(scheduler.billing_provider, "subscription", return_value=self.subscription()), \
+             patch.object(scheduler.billing_provider, "api") as writes:
+            response = self.admin.post("/api/business/billing/reconcile", headers=self.headers, json={})
+            self.assertEqual(response.status_code, 200, response.get_json())
+            writes.assert_not_called()
+        for client, path in clients:
+            self.assertEqual(client.get(path).status_code, 200, path)
+
     def test_import_preserves_workflows_revokes_user_sessions_and_disables_billing(self):
         self.seed()
         TradeWorkflowTests.seed(self)
@@ -944,6 +1122,121 @@ class BillingWorkflowTests(unittest.TestCase):
             self.assertEqual(c.execute("SELECT membership_tier FROM tenants WHERE tenant_id=?",
                                       (scheduler.DEFAULT_TENANT_ID,)).fetchone()[0], "silver")
             self.assertFalse(billing.config(c)["enabled"])
+
+
+class BillingWorkerSupervisionTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        import billing_worker
+
+        self.module = billing_worker
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        directory_patch = patch.object(billing_worker.scheduler, "APP_DIRECTORY", self.directory)
+        directory_patch.start()
+        self.addCleanup(directory_patch.stop)
+        logging_patch = patch.object(billing_worker, "configure_logging")
+        self.configure_logging = logging_patch.start()
+        self.addCleanup(logging_patch.stop)
+
+    def test_worker_starts_with_default_log_and_releases_lock(self):
+        with patch.object(self.module, "run_worker") as run:
+            self.assertEqual(self.module.main([]), 0)
+            run.assert_called_once_with()
+        self.configure_logging.assert_called_once_with(self.directory / "data" / "billing_worker.log")
+        with self.module.FileLock(self.directory / "data" / "billing_worker.lock", timeout=0):
+            pass
+
+    def test_duplicate_worker_exits_without_initialization_or_sweep(self):
+        lock_path = self.directory / "data" / "billing_worker.lock"
+        lock_path.parent.mkdir(parents=True)
+        with self.module.FileLock(lock_path, timeout=0), patch.object(self.module, "run_worker") as run:
+            self.assertEqual(self.module.main([]), 0)
+            run.assert_not_called()
+
+    def test_unexpected_failure_releases_lock_and_propagates_for_supervisor(self):
+        with patch.object(self.module, "run_worker", side_effect=RuntimeError("test crash")), \
+             patch.object(self.module.logging, "exception") as report:
+            with self.assertRaisesRegex(RuntimeError, "test crash"):
+                self.module.main([])
+            report.assert_called_once()
+        with self.module.FileLock(self.directory / "data" / "billing_worker.lock", timeout=0):
+            pass
+
+    def test_sweep_uses_app_context_and_preserves_existing_interval(self):
+        with patch.object(self.module.scheduler, "initialize_database") as initialize, \
+             patch.object(self.module.membership_billing, "run_once") as sweep, \
+             patch.object(self.module.time, "sleep", side_effect=KeyboardInterrupt) as pause:
+            with self.assertRaises(KeyboardInterrupt):
+                self.module.run_worker()
+            initialize.assert_called_once_with()
+            sweep.assert_called_once_with(self.module.scheduler, self.module.scheduler.billing_provider)
+            pause.assert_called_once_with(60)
+
+
+class PayPalWebhookRelayTests(unittest.TestCase):
+    def setUp(self):
+        import paypal_webhook_relay
+
+        self.module = paypal_webhook_relay
+        self.client = paypal_webhook_relay.create_app().test_client()
+        self.headers = {name: "test-value" for name in paypal_webhook_relay.SIGNATURE_HEADERS}
+
+    def test_only_signed_webhook_posts_can_be_forwarded(self):
+        with patch.object(self.module.requests, "Session") as session_factory:
+            for path in ("/", "/hub", "/signin", "/api/hub/billing"):
+                self.assertEqual(self.client.post(path, json={}).status_code, 404)
+            for method in ("GET", "HEAD", "PUT", "DELETE", "OPTIONS"):
+                self.assertEqual(self.client.open(
+                    self.module.WEBHOOK_PATH, method=method,
+                ).status_code, 405)
+            self.assertEqual(self.client.post(
+                self.module.WEBHOOK_PATH, json={},
+            ).status_code, 400)
+            self.assertEqual(self.client.post(
+                self.module.WEBHOOK_PATH, data="test", headers=self.headers,
+            ).status_code, 415)
+            session_factory.assert_not_called()
+
+    def test_raw_body_and_signature_headers_preserved_without_credentials(self):
+        body = b'{"id":"test-event", "resource":{}}'
+        headers = dict(self.headers, Cookie="session=private", Authorization="Bearer private")
+        with patch.object(self.module.requests, "Session") as session_factory:
+            client = session_factory.return_value.__enter__.return_value
+            remote = client.post.return_value
+            remote.status_code = 400
+            remote.content = b'{"error":"Invalid signature"}'
+            remote.headers = {"Content-Type": "application/json", "Set-Cookie": "private"}
+            response = self.client.post(
+                self.module.WEBHOOK_PATH, data=body, headers=headers,
+                content_type="application/json",
+            )
+            expected_headers = dict(self.headers, **{"Content-Type": "application/json"})
+            client.post.assert_called_once_with(
+                "http://127.0.0.1:5001/api/payments/paypal/webhook",
+                data=body, headers=expected_headers, timeout=(3, 90), allow_redirects=False,
+            )
+            self.assertFalse(client.trust_env)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, remote.content)
+        self.assertNotIn("Set-Cookie", response.headers)
+
+    def test_large_bodies_and_upstream_failures_are_safe(self):
+        with patch.object(self.module.requests, "Session") as session_factory:
+            response = self.client.post(
+                self.module.WEBHOOK_PATH, data=b"x" * (1024 * 1024 + 1),
+                headers=self.headers, content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 413)
+            session_factory.assert_not_called()
+            client = session_factory.return_value.__enter__.return_value
+            client.post.side_effect = self.module.requests.ConnectionError("private detail")
+            response = self.client.post(
+                self.module.WEBHOOK_PATH, json={}, headers=self.headers,
+            )
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn(b"private detail", response.data)
 
 
 if __name__ == "__main__":

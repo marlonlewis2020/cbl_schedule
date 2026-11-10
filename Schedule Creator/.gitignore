@@ -1,3 +1,5 @@
 .env
 data/flask_secret.key
 data/mfa_encryption.key
+data/billing_worker.log*
+data/billing_worker.lock

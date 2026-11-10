@@ -1437,6 +1437,48 @@ class TenantAuthenticationTests(unittest.TestCase):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
 
+    def test_existing_scrypt_password_support_preserves_mfa_and_stored_hash(self):
+        import hashlib
+
+        password = "scrypt-test-only-password"
+        secret = "JBSWY3DPEHPK3PXP"
+        digest = hashlib.scrypt(
+            password.encode("utf-8"), salt=b"test-salt", n=32768, r=8, p=1,
+            maxmem=128 * 1024 * 1024,
+        ).hex()
+        stored_hash = "scrypt:32768:8:1$test-salt$" + digest
+        encrypted_secret = scheduler.mfa_cipher().encrypt(secret.encode("ascii")).decode("ascii")
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """INSERT INTO tenant_admins
+                   (id,tenant_id,email,display_name,password_hash,mfa_secret,mfa_enabled)
+                   VALUES(?,?,?,?,?,?,1)""",
+                ("scrypt-admin", scheduler.DEFAULT_TENANT_ID, "scrypt@example.test",
+                 "Scrypt Admin", stored_hash, encrypted_secret),
+            )
+        state = self.client.get("/api/tenant-auth/state").get_json()
+        headers = {"X-CSRF-Token": state["csrfToken"]}
+        payload = {
+            "email": "scrypt@example.test", "password": "wrong-password",
+            "bamboohrSubdomain": scheduler.DEFAULT_TENANT_ID, "code": "000000",
+        }
+        response = self.client.post("/api/tenant-auth/login", headers=headers, json=payload)
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(response.is_json)
+        payload["password"] = password
+        with patch.object(scheduler, "verify_totp", return_value=False) as verify:
+            response = self.client.post("/api/tenant-auth/login", headers=headers, json=payload)
+            self.assertEqual(response.status_code, 401)
+            verify.assert_called_once_with(secret, "000000")
+        with patch.object(scheduler, "verify_totp", return_value=True):
+            response = self.client.post("/api/tenant-auth/login", headers=headers, json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["authenticated"])
+        with closing(scheduler.database_connect()) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT password_hash FROM tenant_admins WHERE id='scrypt-admin'",
+            ).fetchone()[0], stored_hash)
+
     def test_sqlite_admin_email_migration_preserves_enrollment_and_scopes_uniqueness(self):
         with closing(scheduler.database_connect()) as connection, connection:
             connection.execute(
@@ -3703,6 +3745,35 @@ class DeveloperChangeRequestTests(unittest.TestCase):
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
+
+    def test_manual_clock_actions_are_pending_and_preserved_on_restart(self):
+        request_id = "attendance-manual-clock-actions"
+        definition = next(item for item in scheduler.DEVELOPER_REQUESTS if item[0] == request_id)
+        with closing(scheduler.database_connect()) as connection:
+            row = connection.execute(
+                "SELECT title, description, status FROM developer_change_requests WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            dependencies = connection.execute(
+                "SELECT COUNT(*) FROM developer_change_request_dependencies WHERE request_id=?",
+                (request_id,),
+            ).fetchone()[0]
+        self.assertEqual(row, (definition[1], definition[2], "pending"))
+        self.assertEqual(dependencies, len(definition[3]))
+        for requirement in ("Clock in", "Clock out", "Clock out at shift end",
+                            "same open attendance entry", "overnight", "BambooHR",
+                            "implementation pending"):
+            self.assertIn(requirement, definition[2])
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE developer_change_requests SET status='blocked' WHERE request_id=?",
+                (request_id,),
+            )
+        scheduler.initialize_database()
+        with closing(scheduler.database_connect()) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT status FROM developer_change_requests WHERE request_id=?", (request_id,),
+            ).fetchall(), [("blocked",)])
 
     def test_snapshot_request_migration_preserves_status_and_completed_requests(self):
         definition = next(

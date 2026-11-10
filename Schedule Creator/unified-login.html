@@ -28,6 +28,12 @@ const target=()=>{
  const allowed=({admin:["/","/app/business","/app/trades","/app/billing"],workforce:["/app/access","/app/trades"],owner:["/app/owner","/app/billing"]})[$("experience").value];
  return url.origin===location.origin&&allowed.includes(url.pathname)?url.pathname+url.search+url.hash:fallback;
 };
+async function responseData(response,fallback){
+ const data=await response.json().catch(()=>null);
+ if(!response.ok)throw Error(data?.error||`${fallback} (HTTP ${response.status}). Please try again shortly.`);
+ if(!data||typeof data!=="object"||Array.isArray(data))throw Error("The server returned an unexpected response. Reload and try again.");
+ return data;
+}
 async function state(){
  const revision=++stateRevision,button=$("login").querySelector("button");
  button.disabled=true;
@@ -35,13 +41,13 @@ async function state(){
  const endpoint=base;
  $("businessLabel").hidden=$("experience").value==="owner";$("business").required=$("experience").value!=="owner";
  $("changeLabel").hidden=true;$("newPassword").value="";$("enroll").hidden=true;$("login").hidden=false;$("message").textContent="";
- try{const response=await fetch(endpoint+"/state",{cache:"no-store"});const data=await response.json();if(revision!==stateRevision)return;if(!response.ok)throw Error(data.error||"Unable to load sign-in.");
+ try{const response=await fetch(endpoint+"/state",{cache:"no-store"});const data=await responseData(response,"Unable to load sign-in");if(revision!==stateRevision)return;
  csrf=data.csrfToken;ready=true;}catch(error){if(revision===stateRevision)$("message").textContent=error.message;}
  finally{if(revision===stateRevision)button.disabled=!ready;}
 }
 async function submit(path,body){
  const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify(body)});
- const data=await response.json();if(!response.ok)throw Error(data.error||"Sign-in failed.");
+ const data=await responseData(response,"The server could not complete sign-in");
  if(data.csrfToken)csrf=data.csrfToken;
  if(data.passwordChangeRequired){$("changeLabel").hidden=false;$("newPassword").focus();return;}
  if(data.mfaCodeRequired){$("message").textContent="Enter your authenticator code.";$("code").focus();return;}

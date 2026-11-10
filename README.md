@@ -546,6 +546,43 @@ subscription read; event IDs are deduplicated transactionally. The opaque
 `billing_subscription_index` resolves tenant context before applying forced RLS
 to billing accounts/events. It contains no payment details or business names.
 
+### Temporary localhost sandbox webhook
+
+For local sandbox testing, expose the webhook through the restricted relay,
+not the entire scheduler. From `Schedule Creator`, start the app normally on
+port 5001, then run these in two separate terminals:
+
+```powershell
+python paypal_webhook_relay.py --app-port 5001 --listen-port 5100
+```
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:5100 --no-autoupdate --protocol http2
+```
+
+Use the official Cloudflare `cloudflared` executable. Register the printed
+`https://<temporary-name>.trycloudflare.com/api/payments/paypal/webhook` URL
+under the PayPal **sandbox** REST app's webhooks. Select subscription activation,
+update, suspension, cancellation, expiration and payment-failure events, plus
+`PAYMENT.SALE.COMPLETED`. Save that webhook's ID with the sandbox client ID and
+client secret privately in the server environment or the ignored local `.env`.
+Never paste credentials into chat or put them in the billing form. Restart the
+app and worker after changing their environment so both load the same values.
+
+The relay binds only to `127.0.0.1`, exposes only POST requests to the webhook
+path, requires PayPal signature headers and limits the request body to 1 MB.
+It forwards the original body and signature headers without browser cookies or
+authorization headers. Signature verification remains the application's job;
+the relay does not authenticate or accept payments itself. Other paths return
+404, and GET requests to the webhook return 405; these are expected.
+
+Keep the app, relay and tunnel running during sandbox tests. Quick tunnels have
+no uptime guarantee and receive a new URL when restarted; update the sandbox
+webhook URL accordingly. Stop the tunnel and relay when testing is finished.
+Use a stable HTTPS deployment and supervised worker for ongoing acceptance.
+Do not enable billing until prices, credentials, all plans and worker health
+have been verified. This setup does not enable live payments.
+
 Run the worker **separately** from Flask, using the same database/environment:
 
 ```powershell
@@ -559,6 +596,36 @@ supervisor: start at system boot, run whether or not a user is logged in, preven
 duplicate instances, restart on failure, and retain process error output. Do not
 tie its lifetime to Chrome or the Flask development reloader. The owner page
 reports heartbeat health, and enabling billing requires a current heartbeat.
+
+The worker now uses an installation-wide file lock and rotating logs at
+`Schedule Creator/data/billing_worker.log` (1 MB per file, three backups).
+A duplicate worker exits without initializing storage or running a sweep.
+Unexpected failures are logged and exit nonzero for the supervisor; the OS
+releases the worker lock when the process exits. Runtime logs and the lock file
+are ignored by Git. Install the updated requirements before starting the worker.
+
+For Windows supervision, run the following from PowerShell under the same
+Windows account that owns the app. Task registration may require an elevated
+PowerShell window; the worker itself is configured with limited privileges:
+
+```powershell
+& "D:\Workspace\Code Projects\cbl_schedule\Schedule Creator\Install-Billing-Worker.ps1" -PythonPath "C:\Python310\python.exe"
+```
+
+The installer refuses to overwrite an existing task. It registers
+`CBL Schedule Creator Billing Worker Sandbox` with boot/logon triggers,
+password-free S4U logon, no execution time limit, IgnoreNew instance policy and
+up to three one-minute failure restarts. It does not start the task on demand.
+Close foreground workers, then start the task:
+
+```powershell
+Start-ScheduledTask -TaskName 'CBL Schedule Creator Billing Worker Sandbox'
+```
+
+Check its heartbeat, runtime log and Task Scheduler result. A registered trigger
+is not proof of actual reboot/logged-out operation: verify those separately.
+The 2026-11-09 non-elevated installation attempt was denied by Windows, so no
+scheduled installation or OS crash-restart acceptance is claimed from that run.
 
 The worker checks payment state and retries a failed outstanding balance daily,
 up to seven payment attempts; definitive failures suspend billing access after

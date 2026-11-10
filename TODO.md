@@ -513,9 +513,150 @@ shifts or live payment endpoints were used.
   required separate confirmed retry. Completion combines user-verified live
   test-account publishing with isolated mocked recovery, not live failure tests
   or production/PostgreSQL certification.
-- [ ] Configure PayPal sandbox credentials/webhook and prices privately. Verify
-  real hosted monthly/annual checkout, one-cycle versus auto-renew plans,
-  webhook signatures/replays, cancellation, failure retries and manual credits.
+- [x] Configure PayPal sandbox credentials/webhook and all eight USD prices
+  privately. Verified the registered webhook URL and event subscriptions,
+  prepared and read back 16 active plans (eight single-period and eight
+  auto-renewing), verified the worker heartbeat and enabled sandbox billing.
+  Completed 2026-11-09. Live payments remain unsupported.
+- [x] Hosted monthly checkout without auto-renew: user approved a USD 35 Bronze
+  sandbox payment for CBL. PayPal verified the checkout association, amount,
+  currency and zero outstanding balance. One cycle completed with no remaining
+  cycles; provider status EXPIRED is expected for this single-period plan.
+  At completion, app access was active through 2026-12-09 23:03:47
+  America/Jamaica; later checkout tests may extend this date.
+- [x] Receive and verify a real signed PAYMENT.SALE.COMPLETED webhook through
+  the restricted HTTPS relay. The application recorded webhook verification
+  and payment reconciliation, applied Bronze and recorded the paid-through
+  date. No real money was charged.
+- [x] Replay the same signed PayPal event and verify duplicate acknowledgement
+  without another payment reconciliation, access extension or membership change.
+  Verified 2026-11-09: PayPal accepted a resend of the already-applied payment
+  event; the HTTPS relay received it at 23:10:29 Jamaica and returned HTTP 200.
+  The complete billing/membership/receipt fingerprint stayed unchanged, with
+  two applied receipts, one payment reconciliation and the same paid-through
+  date. The isolated duplicate-response/manual-pause regression also passed
+  with external HTTP blocked; that mocked test is separate from the real resend.
+- [x] Reject missing, invalid and tampered webhook signatures without changing
+  billing/access state; preserve original-body signature verification.
+  Verified 2026-11-09 through the real public HTTPS endpoint: captured one
+  genuine PayPal redelivery in memory and observed HTTP 200 with duplicate=true.
+  Removing signature headers, changing the signature bytes and changing the
+  payment amount while retaining the genuine signature each returned HTTP 400.
+  The full billing/membership/receipt fingerprint stayed unchanged. Payloads
+  and signature headers were not printed or saved; the normal relay was restored.
+- [x] Hosted annual checkout without auto-renew: verify annual USD amount,
+  one-cycle completion and the annual paid-through date.
+  Verified 2026-11-09: user completed Bronze annual sandbox checkout; PayPal
+  verified USD 400, zero outstanding balance, the matching business checkout
+  and an annual plan with exactly one completed cycle and none remaining.
+  The signed PAYMENT.SALE.COMPLETED webhook and payment reconciliation were
+  recorded. Provider/app status EXPIRED is expected after the single cycle;
+  membership and billing access remain active, auto-renew is off, and the
+  paid-through date matches 2027-11-09 23:18:31 America/Jamaica. This does not
+  establish recurring annual collection or renewal behavior.
+- [x] Hosted monthly auto-renew checkout: verify first payment, ACTIVE provider
+  status, renewal consent and next billing date. Distinguish plan scheduling
+  from an actually observed subsequent recurring collection.
+  Verified 2026-11-09: user approved Bronze monthly auto-renew; PayPal verified
+  USD 35, zero outstanding balance, the matching checkout and a MONTH plan with
+  unlimited cycles. Provider/app status is ACTIVE, with one cycle completed and
+  the next billing date 2026-12-09 05:00 America/Jamaica. Signed payment and
+  activation webhooks were recorded. Prior annual paid access was preserved
+  through 2027-11-09 23:18:31 America/Jamaica. A subsequent recurring payment
+  has not been observed.
+- [x] Hosted annual auto-renew checkout: verify first payment, annual price,
+  renewal consent and next billing date. A later real annual collection cannot
+  be claimed merely from inspecting the plan or first payment.
+  Verified 2026-11-09: user approved Bronze annual auto-renew; PayPal verified
+  USD 400, zero outstanding balance, the matching checkout and a YEAR plan with
+  unlimited cycles. Provider/app status is ACTIVE, with one cycle completed and
+  next billing date 2027-11-09 05:00 America/Jamaica. Signed activation/payment
+  webhooks and payment reconciliation were recorded; CBL remains Bronze/active
+  with paid access through 2027-11-09 23:25:20 America/Jamaica. This verifies
+  initial checkout and scheduling, not a subsequent real annual collection.
+- [ ] Observe a subsequent real recurring collection separately from initial
+  checkout and plan scheduling. Keep this outstanding if the test subscription
+  is cancelled before renewal; do not claim a future monthly/annual charge was
+  verified from its next billing date or from mocked worker tests.
+- [x] Cancel an active sandbox subscription and verify provider/app status,
+  preserved paid access/history and no unintended refund or membership change.
+  Verified 2026-11-09: cancelled the active Bronze monthly auto-renew sandbox
+  subscription through the authenticated business UI with user approval.
+  PayPal and the app both report CANCELLED; retries are cancelled with no next
+  retry. CBL remains Bronze/active with paid access through 2027-11-09 23:18:31
+  America/Jamaica, the original last-payment value and all three reconciled
+  payments unchanged. The cancellation audit is recorded; no refund was requested.
+- [x] Verify business pause/resume against a sandbox subscription,
+  preserving separate membership restrictions and billing access rules.
+  Verified 2026-11-09 with user approval and the primary administrator's
+  authenticated browser: pausing CBL set membership to paused and provider/app
+  subscription status to SUSPENDED; the scheduling API returned HTTP 403 while
+  membership controls remained available. Resume restored membership and
+  provider/app status to ACTIVE and scheduling returned HTTP 200. Bronze tier,
+  all four reconciled payments and paid access through 2027-11-09 23:25:20
+  America/Jamaica were preserved. Provider and membership audit entries exist
+  for both actions. This live check used the primary-admin role; broader
+  billing-suspension role coverage remains in the recovery acceptance item.
+- [x] Verify business membership cancellation against an active sandbox
+  subscription, retained data/prepaid dates, blocked scheduling and explicit
+  platform-owner restoration. Restoring app membership must not reactivate
+  the cancelled PayPal subscription or issue a refund.
+  Verified 2026-11-09: user approved cancelling CBL and restoring through
+  owner login. Primary-admin cancellation set app/provider subscription status
+  to CANCELLED and membership to cancelled; scheduling returned HTTP 403 and a
+  primary-admin resume attempt was rejected with HTTP 409. Counts for employees,
+  locations, accepted schedules, attendance entries/records, settings and admins
+  were unchanged, as was the complete payment-history fingerprint. Bronze tier,
+  four reconciled payments and the 2027-11-09 23:25:20 America/Jamaica prepaid
+  date were retained; retries stopped and cancellation was audited. After the
+  user signed in as platform owner, the authenticated owner UI restored app
+  membership to active. Owner status confirmed an active business/membership
+  with no billing suspension; PayPal and the app still reported CANCELLED and
+  provider retries remained stopped. The same record counts, payment-history
+  fingerprint, Bronze tier and prepaid date were preserved, with an owner
+  restoration audit. No refund was requested. Restoration eligibility was
+  checked through owner status and persisted state; a fresh primary-admin
+  scheduling request was not part of this owner-only restoration check.
+- [x] Verify owner manual credit, reason and audit; paid-through extension must
+  not settle PayPal balances or reverse business/member suspension.
+  Verified 2026-11-09: user approved an owner-UI test credit extending CBL to
+  2027-11-10 23:26:00 America/Jamaica. Billing and owner audits retained the
+  explicit sandbox reason; membership/tier and the complete four-payment
+  history were unchanged. PayPal/app subscription remained CANCELLED, app retry
+  state became manual with no next retry, and no provider payment/refund was
+  requested. Separately, the strengthened disposable-data regression passed
+  with external HTTP blocked: an empty reason was rejected; credit restored
+  billing access without changing paused membership or suspended business
+  status, scheduling stayed HTTP 403, provider subscription state was untouched,
+  and both audit records were preserved. Mocked suspension evidence is not a
+  live PayPal declined-payment test.
+- [x] Verify isolated declined-payment handling, reminders, daily retry timing,
+  seven-attempt ceiling, suspension, unknown-outcome recovery and restoration.
+  Verified 2026-11-09 in disposable SQLite data with external billing HTTP
+  blocked: non-due retries did not run; definitive declines scheduled the next
+  attempt 86400 seconds later; the seventh attempt exhausted retries and
+  suspended billing access. Unknown capture outcomes stopped further attempts;
+  authoritative paid-state reconciliation restored access without another
+  capture. Initial outstanding balances generated one reminder without an
+  immediate charge; a due, verified retry restored access and recorded audit.
+  Primary-admin, manager (including normal MFA enrollment/login) and employee
+  workflows each returned HTTP 200 before suspension, HTTP 403 while suspended,
+  and HTTP 200 after verified restoration. Provider failures were simulated;
+  the working CBL business and its real sandbox subscription were not modified.
+- [ ] Verify a deliberately declined payment against PayPal's real sandbox
+  negative-testing facilities using a controlled test subscription. The isolated
+  decline/retry tests above do not establish actual provider decline behavior;
+  do not force failures against the working CBL business without fresh approval.
+- [x] Verify isolated unknown-checkout recovery and duplicate-checkout prevention
+  without repeated subscriptions; preserve the opaque checkout association.
+  Verified 2026-11-09 with mocked provider reads and blocked external billing
+  HTTP: wrong tenant, checkout and plan associations were rejected; a matching
+  unknown checkout was recovered exactly once with routing and both audits.
+  A repeated recovery and new checkout attempts against active or unresolved
+  accounts were rejected without provider mutations. The owner guard was
+  stubbed in the recovery test; actual owner authorization was exercised in the
+  separately recorded live configuration, credit and membership tests. No real
+  PayPal outage or ambiguous remote checkout was induced.
 - [ ] Install the worker under an always-on supervisor; verify restart/crash
   handling, heartbeat, single-instance claims, missed webhook polling, seven
   attempts and suspended membership access across all user roles.
@@ -523,11 +664,33 @@ shifts or live payment endpoints were used.
   service or scheduled task by worker script/name. The configured local SQLite
   database had no billing worker heartbeat. No processes/settings were changed;
   another machine or a generically named wrapper was not ruled out.
-  Verification was authorized on 2026-11-06, but the current environment has
+  Verification was authorized on 2026-11-06, but at that time the environment had
   no PayPal sandbox client ID, client secret or webhook ID, billing is disabled,
   no plans are configured, and no worker heartbeat exists. The sandbox denied
   Windows process/service/task inspection. No external provider calls or
-  service installation were made.
+  service installation were made. Update 2026-11-09: a foreground worker is now
+  running with a verified healthy heartbeat; credentials, plans, sandbox billing
+  and a real sandbox payment/webhook have been verified as recorded above.
+  Always-on supervision and the remaining recovery checks are still outstanding.
+  Update 2026-11-09, isolated worker coverage: missed-webhook polling recovered
+  an authoritative paid subscription without creating a payment or receipt,
+  recorded one reconciliation and throttled the next poll by 600 seconds. A
+  valid in-progress lease was not stolen; an expired in-progress claim became
+  unknown once without repeating a read/capture. Provider read failures did not
+  count as charge attempts. All 17 billing/relay regressions passed with external
+  billing HTTP blocked. These checks cover app recovery logic, not Windows
+  boot/logon execution, process-crash restart or a supervised service install.
+  Supervision preparation 2026-11-09: added rotating 1 MB logs with three backups
+  and a nonblocking filelock guard for one worker per installation. Four isolated
+  lifecycle tests passed: normal startup/lock release, duplicate worker rejection,
+  exceptional exit/lock release and app-context sweeps at the existing interval.
+  The foreground worker was restarted with the new lock/logging and recorded a
+  successful sweep. Added a least-privilege S4U Scheduled Task installer with
+  boot/logon triggers, IgnoreNew instances and three one-minute failure restarts.
+  PowerShell syntax/dependency probes passed, but Windows denied registration
+  with Access is denied in this non-elevated session. No task exists; no elevation
+  or registration workaround was attempted. User must run the installer in an
+  elevated PowerShell window before scheduled start/crash/boot tests can proceed.
 - [x] Apply/verify PostgreSQL startup or reference-schema migrations and forced
   tenant RLS for trade/billing tables in a disposable schema. The VS Code
   database connection was unavailable during this batch; no live migration
