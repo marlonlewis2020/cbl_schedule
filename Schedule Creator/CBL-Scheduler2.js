@@ -3376,26 +3376,27 @@ function openLocationRoleDialog(){
     if(!model.locations.length)throw Error('Add or accept a location first.');
     const dialog=workflowDialog('locationRoleDialog');
     const roles=[...new Set(model.pools.map(pool=>pool.role))].sort((a,b)=>a.localeCompare(b));
-    dialog.innerHTML=`<form id="locationRoleForm"><div class="dialoghead"><h2>Add role to location</h2><button type="button" data-dialog-close="locationRoleDialog" aria-label="Close">Close</button></div><label>Location ${select(model.locations.map(location=>[location.name,location.name]),model.locations[0].name,'name="location" required')}</label><label>Existing or new role<input name="role" maxlength="240" list="existingLocationRoles" required><datalist id="existingLocationRoles">${roles.map(role=>`<option value="${esc(role)}">`).join('')}</datalist></label><div class="actions"><button type="button" data-dialog-close="locationRoleDialog">Cancel</button><button type="submit" class="primary">Add role to location</button></div></form>`;
+    dialog.innerHTML=`<form id="locationRoleForm"><div class="dialoghead"><h2>Add role to locations</h2><button type="button" data-dialog-close="locationRoleDialog" aria-label="Close">Close</button></div><fieldset><legend>Select locations</legend><div class="assignment-list">${model.locations.map(location=>`<label><input type="checkbox" name="locations" value="${esc(location.name)}"><span>${esc(location.name)}</span></label>`).join('')}</div></fieldset><label>Existing or new role<input name="role" maxlength="240" list="existingLocationRoles" required><datalist id="existingLocationRoles">${roles.map(role=>`<option value="${esc(role)}">`).join('')}</datalist></label><div class="actions"><button type="button" data-dialog-close="locationRoleDialog">Cancel</button><button type="submit" class="primary">Add role to selected locations</button></div></form>`;
     dialog.querySelector('#locationRoleForm').addEventListener('submit',async event=>{
         event.preventDefault();
         try{
-            const values=new FormData(event.currentTarget),location=String(values.get('location')||''),role=String(values.get('role')||'').trim();
-            if(!model.locations.some(item=>item.name===location))throw Error('Choose an existing location.');
+            const values=new FormData(event.currentTarget),locations=values.getAll('locations').map(String),role=String(values.get('role')||'').trim();
+            if(!locations.length)throw Error('Select at least one location.');
+            if(locations.some(name=>!model.locations.some(item=>item.name===name)))throw Error('Choose existing locations.');
             if(!role)throw Error('Enter or select a role.');
-            if(model.pools.some(pool=>pool.location.toLowerCase()===location.toLowerCase()&&pool.role.toLowerCase()===role.toLowerCase()))throw Error('That role is already assigned to this location.');
-            const pool={id:key(location,role),location,role,shiftStarts:[...STARTS],shares:[1,0,0,0],enabled:false,row:model.pools.length+7};
+            const additions=locations.filter(location=>!model.pools.some(pool=>pool.location.toLowerCase()===location.toLowerCase()&&pool.role.toLowerCase()===role.toLowerCase()));
+            if(!additions.length)throw Error('That role is already assigned to every selected location.');
             if(sharedRoster?.configured){
                 if(sharedRoster.locked)throw Error('Unlock roster settings before adding a location-role pool.');
-                await saveSharedRosterConfiguration(false,[...sharedRoster.pools.map(item=>clone(item)),{location,role,starts:[...STARTS]}])
+                await saveSharedRosterConfiguration(false,[...sharedRoster.pools.map(item=>clone(item)),...additions.map(location=>({location,role,starts:[...STARTS]}))])
             }
-            model.pools.push(pool);
-            model.controls.location=location;
+            for(const location of additions)model.pools.push({id:key(location,role),location,role,shiftStarts:[...STARTS],shares:[1,0,0,0],enabled:false,row:model.pools.length+7});
+            model.controls.location=additions[0];
             model.controls.role=role;
             await saveState();
             dialog.close();
             render(true);
-            message(`Role ${role} added to ${location}.`)
+            message(`Role ${role} added to ${additions.length} location(s).`)
         }catch(error){message(error.message,true)}
     });
     if(!dialog.open)dialog.showModal()
