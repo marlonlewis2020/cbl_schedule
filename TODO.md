@@ -272,6 +272,27 @@ remain for production use:
   pagination, both resolution directions, and mocked partial BambooHR writes.
   No production schedule writes were made during implementation.
 
+## Attendance table manual clock actions (`attendance-manual-clock-actions`) — implemented, acceptance pending
+
+- [x] Add audited, confirmed Clock in, Clock out, and Clock out at shift end
+  actions. Enforce tenant-admin authorization, CSRF, employee mapping, leave
+  state, existing open clocks, and unresolved-write protections server-side.
+- [x] Clock out at shift end is unavailable until the scheduled end has passed
+  in Jamaica time, then writes that shift's scheduled date and end time to the
+  BambooHR clock-out endpoint. Require the open entry to belong to that shift;
+  reject stale clocks from prior shifts.
+- [x] Mocked attendance suite: 22 tests passed, including duplicate/unknown
+  writes, authorization, shift-end timing, current-time clock-out, and stale
+  prior-shift entries. JavaScript syntax and diff whitespace checks passed.
+- [x] Disposable PostgreSQL schema on the local port-5433 clone: startup
+  migrated an old `attendance_shift_records` table with `shift_end_at`, created
+  the clock-action audit table and unresolved-claim index, and forced its RLS
+  policy. Tenant reads were isolated, no-context reads were empty, and a
+  cross-tenant insert was rejected. The temporary schema was dropped; existing
+  clone schemas and data were not modified.
+- [ ] Live BambooHR clock-event writes and real-browser acceptance remain
+  unverified. No remote clock events were created during implementation.
+
 ## Manager and employee access (`manager-employee-access`) — complete
 
 - [x] Admins create manager and employee accounts in Settings → Manager &

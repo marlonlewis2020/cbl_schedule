@@ -156,6 +156,64 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
         reloaded = self.admin_client("additional")
         self.assertEqual(reloaded.get(path).status_code, 200)
 
+    def test_accept_bamboo_locations_initializes_meta_and_preserves_app_overrides(self):
+        denied = self.additional.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "manual", "locations": ["Unauthorized location"]},
+        )
+        self.assertEqual(denied.status_code, 403)
+        tenant_id = scheduler.DEFAULT_TENANT_ID
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.executemany(
+                """INSERT INTO employees
+                   (employee_id, tenant_id, bamboohr_id, name, location, role,
+                    active, source_type, bamboohr_location)
+                   VALUES (?, ?, ?, ?, ?, '', 0, 'bamboohr', 'KIDD')""",
+                [
+                    ("bamboo-unmapped", tenant_id, "bamboo-1", "Unmapped employee", ""),
+                    ("bamboo-overridden", tenant_id, "bamboo-2", "App override", "Custom app location"),
+                ],
+            )
+        response = self.primary.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "bamboohr", "locations": ["KIDD"]},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        result = response.get_json()
+        self.assertEqual(result["accepted"], ["KIDD"])
+        self.assertEqual(result["employeesAssigned"], 1)
+        self.assertEqual(result["locations"], [{
+            "name": "KIDD", "intensity": [None] * 7, "open": [None] * 7,
+        }])
+        settings = self.primary.get("/api/meta-settings").get_json()
+        self.assertTrue(settings["configured"])
+        with closing(scheduler.database_connect()) as connection:
+            employees = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT employee_id, location FROM employees WHERE tenant_id=?",
+                    (tenant_id,),
+                ).fetchall()
+            }
+        self.assertEqual(employees["bamboo-unmapped"], "KIDD")
+        self.assertEqual(employees["bamboo-overridden"], "Custom app location")
+        repeated = self.primary.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "bamboohr", "revision": result["revision"], "locations": ["KIDD"]},
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.get_json())
+        self.assertEqual(repeated.get_json()["accepted"], [])
+        self.assertEqual(repeated.get_json()["employeesAssigned"], 0)
+        rejected = self.primary.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "bamboohr", "revision": repeated.get_json()["revision"], "locations": ["Not in BambooHR"]},
+        )
+        self.assertEqual(rejected.status_code, 409)
+
     def test_no_owner_portal_or_cross_tenant_permission(self):
         path = "/api/workspace/data-settings"
         for role_session in (
@@ -2055,6 +2113,50 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         self.assertFalse(employees["901442"]["active"])
         self.assertFalse(employees["901442"]["bamboohrActive"])
 
+    def test_bamboo_sync_maps_new_employees_to_accepted_meta_locations(self):
+        tenant_id = scheduler.DEFAULT_TENANT_ID
+        locations = scheduler.meta_settings.normalize_locations([{
+            "name": "Airport",
+            "intensity": [None] * 7,
+            "open": [None] * 7,
+        }])
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """INSERT INTO meta_configurations
+                   (tenant_id, revision, locked, locations_json)
+                   VALUES (?, 1, 0, ?)""",
+                (tenant_id, json.dumps(locations)),
+            )
+            connection.executemany(
+                """INSERT INTO employees
+                   (employee_id, tenant_id, bamboohr_id, name, location, role,
+                    active, source_type, bamboohr_location)
+                   VALUES (?, ?, ?, ?, ?, '', 0, 'bamboohr', 'Airport')""",
+                [
+                    ("existing-blank", tenant_id, "bamboo-existing-blank", "Existing blank", ""),
+                    ("existing-override", tenant_id, "bamboo-existing-override", "Existing override", "App override"),
+                ],
+            )
+        remote = [
+            {"id": "airport-employee", "bamboohrId": "bamboo-airport", "name": "Airport Employee", "bamboohrLocation": "Airport"},
+            {"id": "existing-blank", "bamboohrId": "bamboo-existing-blank", "name": "Existing blank", "bamboohrLocation": "Airport"},
+            {"id": "existing-override", "bamboohrId": "bamboo-existing-override", "name": "Existing override", "bamboohrLocation": "Airport"},
+        ]
+        with patch.object(scheduler, "fetch_bamboohr_employees", return_value=remote):
+            response = self.client.post("/api/bamboohr/employees/sync", json={})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        employee = next(
+            row for row in self.client.get("/api/employees").get_json()["employees"]
+            if row["id"] == "airport-employee"
+        )
+        self.assertEqual(employee["location"], "Airport")
+        self.assertEqual(employee["role"], "")
+        self.assertIsNone(employee["scheduleLocationId"])
+        self.assertFalse(employee["active"])
+        employees={row["id"]:row for row in self.client.get("/api/employees").get_json()["employees"]}
+        self.assertEqual(employees["existing-blank"]["location"], "Airport")
+        self.assertEqual(employees["existing-override"]["location"], "App override")
+
     def test_bamboo_employee_fetch_follows_cursor_pages_and_accepts_filtered_records_without_status(self):
         class FakeResponse:
             def __init__(self, value):
@@ -3416,6 +3518,197 @@ class AttendanceAutomationTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(repeated["classifiedChanges"], 0)
         self.assertEqual(audit_count, 3)
+
+    @staticmethod
+    def clock_action_entry(entry_id, bamboohr_id, start, end=None):
+        return {
+            "id": entry_id, "employeeId": bamboohr_id, "type": "clock",
+            "date": "2026-11-02", "start": start, "end": end,
+            "timezone": "America/Jamaica", "approved": False,
+        }
+
+    @staticmethod
+    def fixed_attendance_time(hour, minute):
+        base_datetime = scheduler.datetime
+
+        class FixedDateTime(base_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = base_datetime(2026, 11, 2, hour, minute, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+                return fixed if tz is None else fixed.astimezone(tz)
+
+        return patch.object(scheduler, "datetime", FixedDateTime)
+
+    def test_clock_in_uses_mapped_employee_and_verifies_bamboohr_result(self):
+        existing, time_off = self.seed_attendance_schedule()
+        existing[0] = existing[0] | {"end": None}
+        now = scheduler.datetime(2026, 11, 2, 12, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+        with patch.object(scheduler, "bamboohr_api_key", return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            before = scheduler.sync_attendance_data(connection, existing, time_off, now=now)
+        before_rows = {row["employeeId"]: row for row in before["shifts"]}
+        self.assertTrue(before_rows["attendance-333"]["canClockIn"])
+        self.assertFalse(before_rows["attendance-111"]["canClockIn"])
+        self.assertEqual(before_rows["attendance-333"]["shiftEndAt"], "2026-11-02T14:00:00-05:00")
+        opened = self.clock_action_entry("new-clock", "333", "2026-11-02T17:01:00+00:00")
+        raw_existing = self.clock_action_entry("7685", "111", "2026-11-02T11:20:00+00:00")
+        clock_reads = [[], [opened], [raw_existing, opened], []]
+        body = {"action":"clock_in", "requestId":"00000000-0000-4000-8000-000000000001",
+                "runId":"attendance-run", "employeeId":"attendance-333", "date":"2026-11-02",
+                "reason":"Manager verified start time."}
+        with self.fixed_attendance_time(12, 1), \
+             patch.object(scheduler, "bamboohr_api_key", return_value="test-key"), \
+             patch.object(scheduler, "bamboohr_json", side_effect=clock_reads), \
+             patch.object(scheduler, "bamboo_shift_request", return_value={"success":True,"status":201}) as write:
+            response = self.client.post("/api/attendance/clock-events",
+                                        headers={"X-CSRF-Token":"test-csrf-token"}, json=body)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["outcome"], "succeeded")
+        self.assertEqual(write.call_args.args[1:4], (
+            "POST", "time_tracking/employees/333/clock_in", {"date":"2026-11-02","start":"12:01"},
+        ))
+        updated = {row["employeeId"]:row for row in response.get_json()["attendance"]["shifts"]}
+        self.assertEqual(updated["attendance-333"]["clockIn"], opened["start"])
+        self.assertTrue(updated["attendance-333"]["canClockOut"])
+        audit = self.query("SELECT action,outcome,reason,requested_date,requested_time,after_json FROM attendance_clock_action_audit_events")
+        self.assertEqual((audit[0][0],audit[0][1],audit[0][2],audit[0][3],audit[0][4]),
+                         ("clock_in","succeeded","Manager verified start time.","2026-11-02","12:01"))
+        self.assertEqual(json.loads(audit[0][5])["id"], "new-clock")
+
+    def test_clock_out_at_shift_end_waits_until_end_and_uses_that_shift_time(self):
+        opened = self.clock_action_entry("open-clock", "111", "2026-11-02T11:20:00+00:00")
+        closed = opened | {"end":"2026-11-02T19:00:00+00:00"}
+        _, time_off = self.seed_attendance_schedule()
+        body = {"action":"clock_out_shift_end", "requestId":"00000000-0000-4000-8000-000000000002",
+                "runId":"attendance-run", "employeeId":"attendance-111", "date":"2026-11-02",
+                "reason":"Manager confirmed the scheduled shift ended."}
+        parsed_opened=scheduler.parse_bamboohr_clock_entries([opened])
+        with patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection,parsed_opened,time_off,
+                now=scheduler.datetime(2026,11,2,13,59,tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        with self.fixed_attendance_time(13,59), patch.object(scheduler,"bamboohr_api_key",return_value="test-key"):
+            row=next(item for item in self.client.get("/api/attendance?date=2026-11-02").get_json()["shifts"]
+                 if item["employeeId"]=="attendance-111")
+        self.assertTrue(row["canClockOut"])
+        self.assertFalse(row["canClockOutAtShiftEnd"])
+        reads=[ [opened], [closed], [closed], [] ]
+        with self.fixed_attendance_time(13,59), \
+             patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             patch.object(scheduler,"bamboohr_json",side_effect=reads), \
+             patch.object(scheduler,"bamboo_shift_request") as write:
+            too_early=self.client.post("/api/attendance/clock-events",
+                headers={"X-CSRF-Token":"test-csrf-token"},json=body)
+            self.assertEqual(too_early.status_code,409)
+            self.assertIn("after the scheduled shift end",too_early.get_json()["error"])
+            write.assert_not_called()
+            with self.fixed_attendance_time(14,1):
+                response=self.client.post("/api/attendance/clock-events",
+                    headers={"X-CSRF-Token":"test-csrf-token"},json=body | {
+                        "requestId":"00000000-0000-4000-8000-000000000003"})
+        self.assertEqual(response.status_code,200,response.get_json())
+        self.assertEqual(write.call_args.args[1:4],(
+            "POST","time_tracking/employees/111/clock_out",{"date":"2026-11-02","end":"14:00"}))
+        row=next(item for item in response.get_json()["attendance"]["shifts"] if item["employeeId"]=="attendance-111")
+        self.assertEqual(row["clockOut"],closed["end"])
+        audits=self.query("SELECT outcome,requested_date,requested_time FROM attendance_clock_action_audit_events ORDER BY created_at")
+        self.assertEqual(audits,[ ("succeeded","2026-11-02","14:00") ])
+
+    def test_clock_out_now_uses_current_jamaica_date_and_time(self):
+        opened=self.clock_action_entry("open-clock","111","2026-11-02T11:20:00+00:00")
+        closed=opened | {"end":"2026-11-02T18:30:00+00:00"}
+        _,time_off=self.seed_attendance_schedule()
+        with patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection,
+                scheduler.parse_bamboohr_clock_entries([opened]),time_off,
+                now=scheduler.datetime(2026,11,2,13,59,tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        body={"action":"clock_out","requestId":"00000000-0000-4000-8000-000000000005",
+              "runId":"attendance-run","employeeId":"attendance-111","date":"2026-11-02",
+              "reason":"Manager verified the employee left."}
+        with self.fixed_attendance_time(13,30), \
+             patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             patch.object(scheduler,"bamboohr_json",side_effect=[[opened],[closed],[closed],[]]), \
+             patch.object(scheduler,"bamboo_shift_request",return_value={"success":True,"status":200}) as write:
+            response=self.client.post("/api/attendance/clock-events",
+                headers={"X-CSRF-Token":"test-csrf-token"},json=body)
+        self.assertEqual(response.status_code,200,response.get_json())
+        self.assertEqual(write.call_args.args[1:4],(
+            "POST","time_tracking/employees/111/clock_out",{"date":"2026-11-02","end":"13:30"}))
+
+    def test_clock_out_rejects_an_open_entry_from_a_prior_shift(self):
+        stale_entry=self.clock_action_entry("stale-clock","111","2026-11-01T11:20:00+00:00")
+        _,time_off=self.seed_attendance_schedule()
+        with patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection,[],time_off,
+                now=scheduler.datetime(2026,11,2,14,1,tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        body={"action":"clock_out","requestId":"00000000-0000-4000-8000-000000000008",
+              "runId":"attendance-run","employeeId":"attendance-111","date":"2026-11-02",
+              "reason":"Reject a stale clock from another shift."}
+        with self.fixed_attendance_time(14,1), \
+             patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             patch.object(scheduler,"bamboohr_json",return_value=[stale_entry]), \
+             patch.object(scheduler,"bamboo_shift_request") as write:
+            response=self.client.post("/api/attendance/clock-events",
+                headers={"X-CSRF-Token":"test-csrf-token"},json=body)
+        self.assertEqual(response.status_code,409)
+        self.assertIn("exactly one open BambooHR clock entry for this shift",response.get_json()["error"])
+        write.assert_not_called()
+
+    def test_unknown_clock_write_stays_locked_until_reconciled(self):
+        opened=self.clock_action_entry("open-clock","111","2026-11-02T11:20:00+00:00")
+        _,time_off=self.seed_attendance_schedule()
+        with patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection,
+                scheduler.parse_bamboohr_clock_entries([opened]),time_off,
+                now=scheduler.datetime(2026,11,2,14,1,tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        body={"action":"clock_out","requestId":"00000000-0000-4000-8000-000000000006",
+              "runId":"attendance-run","employeeId":"attendance-111","date":"2026-11-02",
+              "reason":"Unknown outcome protection test."}
+        with self.fixed_attendance_time(14,1), \
+             patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             patch.object(scheduler,"bamboohr_json",return_value=[opened]), \
+             patch.object(scheduler,"bamboo_shift_request",return_value={"success":False,"status":None,"outcome":"unknown"}) as write:
+            first=self.client.post("/api/attendance/clock-events",
+                headers={"X-CSRF-Token":"test-csrf-token"},json=body)
+            self.assertEqual(first.status_code,502)
+            self.assertEqual(first.get_json()["outcome"],"unknown")
+            second=self.client.post("/api/attendance/clock-events",
+                headers={"X-CSRF-Token":"test-csrf-token"},json=body | {
+                    "requestId":"00000000-0000-4000-8000-000000000007"})
+            self.assertEqual(second.status_code,409)
+            self.assertIn("unresolved",second.get_json()["error"])
+            write.assert_called_once()
+        with self.fixed_attendance_time(13,59), patch.object(scheduler,"bamboohr_api_key",return_value="test-key"):
+            row=next(item for item in self.client.get("/api/attendance?date=2026-11-02").get_json()["shifts"]
+                     if item["employeeId"]=="attendance-111")
+        self.assertFalse(row["canClockOut"])
+        self.assertIn("unresolved",row["clockActionUnavailableReason"])
+
+    def test_clock_actions_require_csrf_reject_duplicate_clocks_and_block_manager_api(self):
+        opened=self.clock_action_entry("open-clock","111","2026-11-02T11:20:00+00:00")
+        _,time_off=self.seed_attendance_schedule()
+        parsed_opened=scheduler.parse_bamboohr_clock_entries([opened])
+        with patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             closing(scheduler.database_connect()) as connection, connection:
+            scheduler.sync_attendance_data(connection,parsed_opened,time_off,
+                now=scheduler.datetime(2026,11,2,12,1,tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        body={"action":"clock_in","requestId":"00000000-0000-4000-8000-000000000004",
+              "runId":"attendance-run","employeeId":"attendance-111","date":"2026-11-02",
+              "reason":"Duplicate protection test."}
+        with self.fixed_attendance_time(12,1), \
+             patch.object(scheduler,"bamboohr_api_key",return_value="test-key"), \
+             patch.object(scheduler,"bamboohr_json",return_value=[opened]), \
+             patch.object(scheduler,"bamboo_shift_request") as write:
+            self.assertEqual(self.client.post("/api/attendance/clock-events",json=body).status_code,400)
+            response=self.client.post("/api/attendance/clock-events",headers={"X-CSRF-Token":"test-csrf-token"},json=body)
+            self.assertEqual(response.status_code,409)
+            self.assertIn("already has an open",response.get_json()["error"])
+            employee=scheduler.app.test_client()
+            self.assertEqual(employee.post("/api/attendance/clock-events",json=body).status_code,401)
+            write.assert_not_called()
 
     def test_timesheet_must_cover_an_hour_and_flags_early_leave_and_overtime(self):
         self.seed_attendance_schedule()

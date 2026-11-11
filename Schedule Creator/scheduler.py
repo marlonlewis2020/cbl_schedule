@@ -296,10 +296,33 @@ DEVELOPER_REQUESTS = (
         ("developer-change-log", "primary-admin-data-settings"),
     ),
     (
+        "schedule-locations-plan-schedules-category",
+        "Move Schedule Locations into Plan Schedules",
+        "Move the Schedule Locations page link from People into the Plan Schedules navigation category. Preserve the existing page, URL, access rules, and all current scheduling and location-management behavior. This is a navigation-placement request only; do not rename or remove the page.",
+        ("unified-application-shell",),
+    ),
+    (
+        "schedule-location-role-management",
+        "Create roles for a schedule location",
+        "Allow authorized business administrators to create roles for a selected schedule location from the Schedule Locations page. Store roles scoped to the tenant and location, validate role names, and prevent duplicate roles for the same location. Keep existing role assignments and do not grant role creation to managers or employees. Clarify role editing/deletion and whether a role may be shared across locations during implementation.",
+        ("business-hub",),
+    ),
+    (
         "historical-attendance-trend-reports",
         "Historical weekly and monthly attendance reports with employee and DC trends",
         "Allow administrators and managers to generate attendance reports for a selected historical week or previous month, downloadable as matching Excel and self-contained interactive HTML. Administrators may select all or specific distribution centres (DCs)/locations; managers may report only on authorized teams, with tenant/team scope enforced server-side during generation, history access and downloads. Include branded executive/DC summaries of expected shifts, confirmed attendance, attendance percentage, approved leave, verified late arrivals and absences; an employee register with the existing documented attendance-score calculation, expected/confirmed shifts, late and absence counts with dates and shift times; and dated attendance evidence and exception details. Add week-over-week and month-over-month comparisons per employee and DC, showing counts, eligible-shift denominators, rates and percentage-point changes across comparable completed periods. Analyze employee late/absence patterns by shift-start time, weekday, first scheduled shift after a verified day off, and first scheduled shift after dated approved time off; separate leave types where reliable evidence exists. Show incidents and eligible shifts for every pattern, not raw counts alone. Provide coordinated DC/team/employee/period filters, search, sortable tables and evidence drill-down, with KPI cards, comparison charts, trend lines and heatmaps where evidence supports them. Excel must include corresponding summary, employee, comparison, pattern-analysis and detailed-evidence worksheets using identical calculations. Reuse reporting infrastructure and saved branding; show Jamaica-time reporting boundaries, source freshness and incomplete evidence. Preserve attendance-score rules, worked-time validation, approved-leave exclusions, corrections and overnight attribution to shift start date; distinguish verified late arrivals from missing-punch late statuses. Use dated schedule, attendance and assignment evidence rather than reconstructing history from current settings or employee teams. Define historical manager access without exposing other teams after transfers. Missing schedule records are not proof of a day off. Comparisons require evidence for both periods; unavailable history must remain unavailable, not zero. Agree the week boundary, comparison/history window, minimum eligible-shift sample and historical manager-access policy before implementation. Clearly distinguish observed patterns, insufficient evidence and no recorded incidents; label partial periods and avoid misleading full-period comparisons. Describe association, not cause or predictions; post-leave patterns must not automatically trigger disciplinary action. Verify authorization and transfers, period boundaries, denominators/scores, late/absence dates, overnight/leave/correction rules, shift/day/post-day-off/post-time-off analysis, insufficient history/sample cases, cross-format parity and offline HTML interaction. Automatic email is not included. Approved for recording only; implementation pending.",
         ("snapshot-email-reports", "interactive-attendance-snapshot", "manager-employee-access"),
+    ),
+    (
+        "attendance-page-setup-and-reports",
+        "Attendance setup and reports navigation",
+        "Reorganize the Attendance page into two clear sections without changing existing features or permissions. Put BambooHR attendance sync, Attendance shift source, Attendance filters, and Attendance rules together in one Setup section. Put Attendance snapshots and Historical attendance trend reports together in a Reports section. Preserve current behavior, tenant/role authorization, report history, and direct links. This request is for navigation and grouping only.",
+        (
+            "attendance-automation",
+            "attendance-shift-source-reconciliation",
+            "interactive-attendance-snapshot",
+            "historical-attendance-trend-reports",
+        ),
     ),
     (
         "workload-fte-headcount-planning",
@@ -974,6 +997,7 @@ def initialize_database() -> None:
                 clock_in_at TEXT,
                 clock_in_timezone TEXT NOT NULL DEFAULT '',
                 clock_out_at TEXT,
+                shift_end_at TEXT,
                 worked_minutes INTEGER,
                 early_minutes INTEGER NOT NULL DEFAULT 0,
                 overtime_minutes INTEGER NOT NULL DEFAULT 0,
@@ -1009,6 +1033,31 @@ def initialize_database() -> None:
                 actor_email TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS attendance_clock_action_audit_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                bamboohr_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                schedule_run_id TEXT NOT NULL,
+                shift_date TEXT NOT NULL,
+                action TEXT NOT NULL CHECK (action IN ('clock_in', 'clock_out', 'clock_out_shift_end')),
+                outcome TEXT NOT NULL CHECK (outcome IN ('pending', 'succeeded', 'failed', 'unknown', 'rejected')),
+                reason TEXT NOT NULL,
+                requested_date TEXT NOT NULL,
+                requested_time TEXT NOT NULL,
+                before_json TEXT NOT NULL DEFAULT '{{}}',
+                after_json TEXT NOT NULL DEFAULT '{{}}',
+                detail TEXT NOT NULL DEFAULT '',
+                actor_id TEXT,
+                actor_email TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (tenant_id, request_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS attendance_clock_action_claim_idx
+                ON attendance_clock_action_audit_events (tenant_id, bamboohr_id)
+                WHERE outcome IN ('pending', 'unknown');
             CREATE TABLE IF NOT EXISTS attendance_score_overrides (
                 tenant_id TEXT NOT NULL,
                 employee_id TEXT NOT NULL,
@@ -1357,6 +1406,7 @@ def initialize_database() -> None:
             "attendance_shift_records",
             "attendance_shift_audit_events",
             "attendance_reconciliation_audit_events",
+            "attendance_clock_action_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
         ):
@@ -1527,6 +1577,7 @@ def initialize_database() -> None:
                 "attendance_shift_records",
                 "attendance_shift_audit_events",
                 "attendance_reconciliation_audit_events",
+                "attendance_clock_action_audit_events",
                 "attendance_score_overrides",
                 "attendance_score_audit_events",
                 "attendance_notifications",
@@ -1694,6 +1745,7 @@ def initialize_database() -> None:
         }
         for column, definition in (
             ("clock_out_at", "TEXT"),
+            ("shift_end_at", "TEXT"),
             ("worked_minutes", "INTEGER"),
             ("early_minutes", "INTEGER NOT NULL DEFAULT 0"),
             ("overtime_minutes", "INTEGER NOT NULL DEFAULT 0"),
@@ -1857,6 +1909,9 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
         attendance_reconciliation_audit_events = source_rows(
             "attendance_reconciliation_audit_events"
         )
+        attendance_clock_action_audit_events = source_rows(
+            "attendance_clock_action_audit_events"
+        )
         attendance_score_overrides = source_rows("attendance_score_overrides")
         attendance_score_audit_events = source_rows("attendance_score_audit_events")
         workflow_rows = {
@@ -1928,6 +1983,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
             "attendance_shift_records",
             "attendance_shift_audit_events",
             "attendance_reconciliation_audit_events",
+            "attendance_clock_action_audit_events",
             "attendance_score_overrides",
             "attendance_score_audit_events",
         ):
@@ -2056,14 +2112,15 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                 INSERT INTO attendance_shift_records
                     (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
                      status, source, reason, employee_name, location, role, clock_in_at,
-                     clock_in_timezone, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     clock_in_timezone, shift_end_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (tenant_id, schedule_run_id, employee_id, shift_date)
                 DO UPDATE SET shift_start = excluded.shift_start, status = excluded.status,
                     source = excluded.source, reason = excluded.reason,
                     employee_name = excluded.employee_name, location = excluded.location,
                     role = excluded.role, clock_in_at = excluded.clock_in_at,
                     clock_in_timezone = excluded.clock_in_timezone,
+                    shift_end_at = excluded.shift_end_at,
                     updated_at = excluded.updated_at
                 """,
                 [
@@ -2072,7 +2129,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                         row["shift_date"], row["shift_start"], row["status"],
                         row["source"], row["reason"], row["employee_name"],
                         row["location"], row["role"], row["clock_in_at"],
-                        row["clock_in_timezone"], row["updated_at"],
+                        row["clock_in_timezone"], row.get("shift_end_at"), row["updated_at"],
                     )
                     for row in attendance_shift_records
                 ],
@@ -2115,6 +2172,23 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                         source_value(row, "created_at", datetime.now().isoformat()),
                     )
                     for row in attendance_reconciliation_audit_events
+                ],
+            )
+        if attendance_clock_action_audit_events:
+            connection.executemany(
+                """INSERT OR IGNORE INTO attendance_clock_action_audit_events
+                   (id,tenant_id,request_id,bamboohr_id,employee_id,schedule_run_id,
+                    shift_date,action,outcome,reason,requested_date,requested_time,
+                    before_json,after_json,detail,actor_id,actor_email,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    tuple(row[column] for column in (
+                        "id", "tenant_id", "request_id", "bamboohr_id", "employee_id",
+                        "schedule_run_id", "shift_date", "action", "outcome", "reason",
+                        "requested_date", "requested_time", "before_json", "after_json",
+                        "detail", "actor_id", "actor_email", "created_at", "updated_at",
+                    ))
+                    for row in attendance_clock_action_audit_events
                 ],
             )
         if attendance_score_overrides:
@@ -4789,6 +4863,135 @@ def get_admin_meta_settings():
     )
 
 
+@app.post("/api/meta-settings/locations/accept")
+def accept_meta_locations():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    source = payload.get("source") if isinstance(payload, dict) else None
+    raw_locations = payload.get("locations") if isinstance(payload, dict) else None
+    if source not in {"bamboohr", "manual", "workbook"}:
+        return jsonify(error="Choose a supported location source."), 400
+    if not isinstance(raw_locations, list) or not raw_locations or len(raw_locations) > 500:
+        return jsonify(error="Accept at least one location."), 400
+    locations, seen_names = [], set()
+    try:
+        for item in raw_locations:
+            if isinstance(item, str):
+                item = {"name": item}
+            if not isinstance(item, dict):
+                raise ValueError("Each location must be an object or name.")
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip() or len(name) > 240:
+                raise ValueError("Each location requires a valid name.")
+            name = name.strip()
+            if name.casefold() in seen_names:
+                raise ValueError("Location names must be unique.")
+            seen_names.add(name.casefold())
+            locations.append({
+                "name": name,
+                "intensity": item.get("intensity", [None] * 7),
+                "open": item.get("open", [None] * 7),
+            })
+        normalized = meta_settings.normalize_locations(locations)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+
+    tenant_id = active_tenant_id()
+    with closing(database_connect()) as connection, connection:
+        if source == "bamboohr":
+            available_names = {
+                str(row[0]).strip().casefold()
+                for row in connection.execute(
+                    """SELECT DISTINCT bamboohr_location FROM employees
+                       WHERE tenant_id=? AND bamboohr_location IS NOT NULL
+                         AND trim(bamboohr_location) != ''""",
+                    (tenant_id,),
+                ).fetchall()
+            }
+            unverified = [
+                item["name"] for item in normalized
+                if item["name"].casefold() not in available_names
+            ]
+            if unverified:
+                return jsonify(
+                    error="One or more selected locations are not present in the synced BambooHR employee directory.",
+                    locations=unverified,
+                ), 409
+
+        config = meta_configuration_row(connection, tenant_id)
+        roster_config = roster_config_row(connection, tenant_id)
+        if config:
+            revision = payload.get("revision")
+            if not isinstance(revision, int) or isinstance(revision, bool):
+                return jsonify(error="Reload META locations before accepting changes."), 400
+            if revision != config[0]:
+                return jsonify(error="Shared META configuration changed elsewhere. Reload before accepting locations."), 409
+            existing_locations = json.loads(config[2])
+            existing_names = {item["name"].casefold() for item in existing_locations}
+            additions = [item for item in normalized if item["name"].casefold() not in existing_names]
+            if additions and config[1]:
+                return jsonify(error="Unlock configuration before adding META locations."), 409
+            merged_locations = existing_locations + additions
+            if additions:
+                updated = connection.execute(
+                    """UPDATE meta_configurations
+                       SET locations_json=?, revision=revision+1, updated_at=CURRENT_TIMESTAMP
+                       WHERE tenant_id=? AND revision=?""",
+                    (json.dumps(merged_locations, separators=(",", ":")), tenant_id, revision),
+                )
+                if updated.rowcount != 1:
+                    return jsonify(error="Shared META configuration changed elsewhere. Reload before accepting locations."), 409
+                revision += 1
+            locked = bool(config[1])
+        else:
+            if not normalized:
+                return jsonify(error="Accept at least one location before initializing META settings."), 400
+            additions = normalized
+            merged_locations = normalized
+            locked = bool(roster_config and roster_config[1])
+            revision = 1
+            connection.execute(
+                """INSERT INTO meta_configurations
+                   (tenant_id, revision, locked, locations_json)
+                   VALUES (?, 1, ?, ?)""",
+                (tenant_id, int(locked), json.dumps(merged_locations, separators=(",", ":"))),
+            )
+
+        employees_assigned = 0
+        if source == "bamboohr":
+            for item in normalized:
+                result = connection.execute(
+                    """UPDATE employees SET location=?
+                       WHERE tenant_id=? AND source_type='bamboohr'
+                         AND (location IS NULL OR trim(location)='')
+                         AND lower(trim(bamboohr_location))=lower(?)""",
+                    (item["name"], tenant_id, item["name"]),
+                )
+                employees_assigned += result.rowcount
+        if additions or employees_assigned:
+            connection.execute(
+                """INSERT INTO tenant_audit_events
+                   (id, tenant_id, actor_id, actor_email, action, route, response_status)
+                   VALUES (?, ?, ?, ?, ?, ?, 200)""",
+                (
+                    secrets.token_urlsafe(18), tenant_id, session.get("tenant_admin_id"),
+                    session.get("tenant_admin_email"),
+                    "meta-locations-accepted:" + source + ":" + ",".join(item["name"] for item in additions),
+                    request.endpoint or "unknown",
+                ),
+            )
+    return jsonify(
+        configured=True, revision=revision, locked=locked,
+        locations=merged_locations,
+        accepted=[item["name"] for item in additions],
+        employeesAssigned=employees_assigned,
+    )
+
+
 @app.post("/api/meta-settings/import/preview")
 def preview_admin_meta_import():
     denied = primary_admin_guard()
@@ -6992,20 +7195,22 @@ def bamboo_employee_sync_conflicts(
     connection: DatabaseConnection, remote_employees: list[dict[str, str]]
 ) -> list[dict]:
     records = connection.execute(
-        """
-        SELECT employee_id, bamboohr_id, name, location, role, active,
-               schedule_location_id, source_type
-        FROM employees
-        """
-    ).fetchall()
+         """
+         SELECT employee_id, bamboohr_id, name, location, role, active,
+             schedule_location_id, source_type
+         FROM employees
+         WHERE tenant_id=?
+         """,
+         (active_tenant_id(),),
+        ).fetchall()
     if len({normalized_employee_id(row[0]) for row in records}) != len(records):
         raise RuntimeError(
             "The app contains duplicate Employee IDs ignoring case; resolve them before syncing."
         )
-    by_id = {normalized_employee_id(row[0]): row for row in records}
     by_bamboo_id = {
         row[1]: row for row in records if row[1] and row[7] == "bamboohr"
     }
+    by_id = {normalized_employee_id(row[0]): row for row in records}
     conflicts = []
     for remote in remote_employees:
         employee = by_bamboo_id.get(remote["bamboohrId"])
@@ -7042,11 +7247,22 @@ def mapped_bamboohr_location(connection: DatabaseConnection, location: str) -> s
     if not location:
         return ""
     rows = connection.execute(
-        "SELECT DISTINCT location FROM schedule_locations"
+        "SELECT DISTINCT location FROM schedule_locations WHERE tenant_id = ?",
+        (active_tenant_id(),),
     ).fetchall()
+    meta = connection.execute(
+        "SELECT locations_json FROM meta_configurations WHERE tenant_id = ?",
+        (active_tenant_id(),),
+    ).fetchone()
+    if meta:
+        rows.extend(
+            (item["name"],)
+            for item in json.loads(meta[0])
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        )
     matches = [
-        row[0] for row in rows
-        if normalized_employee_id(row[0]) == normalized_employee_id(location)
+        value for value in dict.fromkeys(row[0] for row in rows)
+        if normalized_employee_id(value) == normalized_employee_id(location)
     ]
     return matches[0] if len(matches) == 1 else ""
 
@@ -7259,12 +7475,15 @@ def sync_bamboohr_employees():
                     """
                     UPDATE employees
                     SET name = ?, bamboohr_id = ?, bamboohr_location = ?,
+                        location = CASE WHEN trim(COALESCE(location, '')) = '' THEN ? ELSE location END,
                         source_type = 'bamboohr', bamboohr_active = 1
                     WHERE employee_id = ?
                     """,
                     (
                         remote["name"], remote["bamboohrId"],
-                        remote["bamboohrLocation"], remote["id"],
+                        remote["bamboohrLocation"],
+                        mapped_bamboohr_location(connection, remote["bamboohrLocation"]),
+                        remote["id"],
                     ),
                 )
                 updated += 1
@@ -8504,6 +8723,7 @@ def record_attendance_status(
     role: str,
     clock_in_at: str | None,
     clock_in_timezone: str,
+    shift_end_at: str | None = None,
     existing: dict[tuple[str, str, str], tuple[str, str, str]],
     preserve_manual: bool = True,
     actor_id: str | None = None,
@@ -8522,19 +8742,21 @@ def record_attendance_status(
         INSERT INTO attendance_shift_records
             (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
              status, source, reason, employee_name, location, role, clock_in_at,
-             clock_in_timezone, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+               clock_in_timezone, shift_end_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT (tenant_id, schedule_run_id, employee_id, shift_date)
         DO UPDATE SET shift_start = excluded.shift_start, status = excluded.status,
             source = excluded.source, reason = excluded.reason,
             employee_name = excluded.employee_name, location = excluded.location,
             role = excluded.role, clock_in_at = excluded.clock_in_at,
             clock_in_timezone = excluded.clock_in_timezone,
+            shift_end_at = COALESCE(excluded.shift_end_at, attendance_shift_records.shift_end_at),
             updated_at = CURRENT_TIMESTAMP
         """,
         (
             tenant_id, run_id, employee_id, shift_date, shift_start, status, source,
             reason, employee_name, location, role, clock_in_at, clock_in_timezone,
+            shift_end_at,
         ),
     )
     existing[key] = (status, source, reason)
@@ -8630,13 +8852,38 @@ def attendance_payload(
         SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
                source, reason, employee_name, location, role, clock_in_at,
                clock_in_timezone, clock_out_at, worked_minutes, early_minutes,
-               overtime_minutes
+             overtime_minutes, shift_end_at
         FROM attendance_shift_records
         WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
         ORDER BY shift_date, location, role, shift_start, employee_name
         """,
         (tenant_id, report_start.isoformat(), report_end.isoformat()),
     ).fetchall()
+    employee_clock_ids = {
+        str(row[0]): (str(row[1] or ""), bool(row[2]))
+        for row in connection.execute(
+            "SELECT employee_id,bamboohr_id,active FROM employees WHERE tenant_id=?",
+            (tenant_id,),
+        )
+    }
+    open_clock_entries: dict[str, list[dict[str, object]]] = {}
+    for bamboohr_id, entry_id, started_at, timezone_name in connection.execute(
+        """SELECT bamboohr_id,entry_id,started_at,timezone FROM attendance_time_entries
+           WHERE tenant_id=? AND ended_at IS NULL""",
+        (tenant_id,),
+    ):
+        open_clock_entries.setdefault(str(bamboohr_id), []).append(
+            {"id": str(entry_id), "start": str(started_at), "timezone": str(timezone_name)}
+        )
+    unresolved_clock_actions = {
+        str(row[0]): str(row[1])
+        for row in connection.execute(
+            """SELECT bamboohr_id,action FROM attendance_clock_action_audit_events
+               WHERE tenant_id=? AND outcome IN ('pending','unknown')""",
+            (tenant_id,),
+        )
+    }
+    clock_actions_enabled = bool(bamboohr_api_key())
     current_shifts = []
     expected = clocked_in = late = absent = approved_leave = 0
     for row in rows:
@@ -8644,6 +8891,39 @@ def attendance_payload(
         start = schedule_shift_datetime(shift_day, row[3])
         if start > as_of:
             continue
+        shift_end_at = row[16]
+        try:
+            shift_end = datetime.fromisoformat(shift_end_at) if shift_end_at else None
+            if shift_end and (shift_end.tzinfo is None or shift_end <= start):
+                shift_end = None
+        except (TypeError, ValueError):
+            shift_end = None
+        bamboohr_id, employee_active = employee_clock_ids.get(str(row[1]), ("", False))
+        employee_open_entries = open_clock_entries.get(bamboohr_id, [])
+        unresolved_action = unresolved_clock_actions.get(bamboohr_id)
+        if shift_end is not None:
+            matching_open_entries = [
+                entry for entry in employee_open_entries
+                if datetime.fromisoformat(str(entry["start"])) < shift_end
+                and datetime.fromisoformat(str(entry["start"])) <= now
+                and start < now
+                and (
+                    str(entry["start"]) == str(row[10])
+                    if row[10]
+                    else datetime.fromisoformat(str(entry["start"])) >= start
+                )
+            ]
+        else:
+            matching_open_entries = []
+        clocked_in_for_shift = len(matching_open_entries) == 1 and len(employee_open_entries) == 1
+        eligible_clock_action = (
+            clock_actions_enabled
+            and employee_active
+            and re.fullmatch(r"[0-9]+", bamboohr_id) is not None
+            and shift_end is not None
+            and row[4] not in {"approved_leave", "sick", "vacation"}
+            and unresolved_action is None
+        )
         item = {
             "runId": row[0],
             "employeeId": row[1],
@@ -8655,12 +8935,23 @@ def attendance_payload(
             "name": row[7],
             "location": row[8],
             "role": row[9],
-            "clockIn": row[10],
-            "clockInTimezone": row[11],
+            "clockIn": row[10] or (matching_open_entries[0]["start"] if matching_open_entries else None),
+            "clockInTimezone": row[11] or (matching_open_entries[0]["timezone"] if matching_open_entries else ""),
             "clockOut": row[12],
+            "shiftEndAt": shift_end.isoformat() if shift_end else None,
             "workedMinutes": row[13],
             "earlyMinutes": row[14] or 0,
             "overtimeMinutes": row[15] or 0,
+            "isClockedInForShift": clocked_in_for_shift,
+            "canClockIn": bool(eligible_clock_action and not employee_open_entries
+                                and start <= now < shift_end),
+            "canClockOut": bool(eligible_clock_action and clocked_in_for_shift),
+            "canClockOutAtShiftEnd": bool(eligible_clock_action and clocked_in_for_shift
+                                           and now >= shift_end),
+            "clockActionUnavailableReason": (
+                "A previous BambooHR clock action is unresolved. Reconcile it before continuing."
+                if unresolved_action else ""
+            ),
         }
         current_shifts.append(item)
         if row[4] in {"approved_leave", "sick", "vacation"}:
@@ -9736,6 +10027,7 @@ def sync_attendance_data(
                     clock_in_timezone=(
                         str(recorded_entry["timezone"]) if recorded_entry else ""
                     ),
+                    shift_end_at=shift_end.isoformat(),
                     existing=existing,
                     timesheet=timesheet,
                 )
@@ -9949,6 +10241,261 @@ def get_attendance():
                 "unresolvedDiscrepancies": discrepancies,
             }
         return jsonify(result)
+
+
+def attendance_clock_entries_for_employee(api_key: str, bamboohr_id: str, start: date, end: date):
+    raw = bamboohr_json(
+        api_key,
+        "time_tracking/timesheet_entries",
+        {"start": start.isoformat(), "end": end.isoformat()},
+        "time-tracking",
+    )
+    return [
+        entry for entry in parse_bamboohr_clock_entries(raw)
+        if entry["bamboohrId"] == bamboohr_id
+    ]
+
+
+def clock_action_result_matches(action: str, entries, before_entry, requested_at: datetime) -> dict | None:
+    target = requested_at.astimezone(timezone.utc)
+    if action == "clock_in":
+        matching = [
+            entry for entry in entries
+            if entry["end"] is None
+            and abs((datetime.fromisoformat(entry["start"]).astimezone(timezone.utc) - target).total_seconds()) < 60
+        ]
+        return matching[0] if len(matching) == 1 else None
+    if not before_entry:
+        return None
+    matching = [
+        entry for entry in entries
+        if entry["id"] == before_entry["id"]
+        and entry["end"] is not None
+        and abs((datetime.fromisoformat(entry["end"]).astimezone(timezone.utc) - target).total_seconds()) < 60
+    ]
+    return matching[0] if len(matching) == 1 else None
+
+
+def refresh_attendance_after_clock_action(shift_date: date, now: datetime):
+    history_start = min(shift_date, now.date())
+    history_end = now.date()
+    api_start = history_start - timedelta(days=1)
+    api_key = bamboohr_api_key()
+    clocks = parse_bamboohr_clock_entries(
+        bamboohr_json(
+            api_key, "time_tracking/timesheet_entries",
+            {"start": api_start.isoformat(), "end": history_end.isoformat()}, "time-tracking",
+        )
+    )
+    time_off = parse_bamboohr_time_off(
+        bamboohr_json(
+            api_key, "time_off/whos_out",
+            {"start": api_start.isoformat(), "end": history_end.isoformat()}, "time-off",
+        )
+    )
+    with closing(database_connect()) as connection, connection:
+        source = attendance_shift_source(connection)
+        bamboo_shifts = (
+            fetch_bamboohr_scheduled_shifts(connection, history_start, history_end)
+            if source == "bamboohr" else None
+        )
+        sync_attendance_data(
+            connection, clocks, time_off, now=now,
+            period_start=history_start, period_end=history_end,
+            bamboo_shifts=bamboo_shifts,
+        )
+        return attendance_payload(
+            connection, now, period_start=history_start, period_end=history_end,
+        )
+
+
+@app.post("/api/attendance/clock-events")
+def create_attendance_clock_event():
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="A clock action is required."), 400
+    action = payload.get("action")
+    run_id = payload.get("runId")
+    employee_id = payload.get("employeeId")
+    shift_text = payload.get("date")
+    request_id = payload.get("requestId")
+    reason = payload.get("reason")
+    if (
+        action not in {"clock_in", "clock_out", "clock_out_shift_end"}
+        or not isinstance(run_id, str) or not 1 <= len(run_id) <= 200
+        or not isinstance(employee_id, str) or not 1 <= len(employee_id) <= 80
+        or not isinstance(shift_text, str)
+        or not isinstance(request_id, str) or not re.fullmatch(r"[A-Fa-f0-9-]{36}", request_id)
+        or not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500
+    ):
+        return jsonify(error="Provide a valid clock action, attendance row, request ID and audit reason."), 400
+    try:
+        shift_date = date.fromisoformat(shift_text)
+        if shift_date.isoformat() != shift_text:
+            raise ValueError
+    except ValueError:
+        return jsonify(error="Provide a valid shift date in YYYY-MM-DD format."), 400
+
+    now = datetime.now(ATTENDANCE_TIMEZONE).replace(second=0, microsecond=0)
+    if shift_date > now.date() or (now.date() - shift_date).days > 363:
+        return jsonify(error="Clock actions are limited to a current BambooHR-supported attendance period."), 409
+    api_key = bamboohr_api_key()
+    if not api_key:
+        return jsonify(error="The BambooHR API key is not configured for this business."), 503
+
+    with closing(database_connect()) as connection:
+        previous_request = connection.execute(
+            "SELECT outcome,detail FROM attendance_clock_action_audit_events "
+            "WHERE tenant_id=? AND request_id=?",
+            (active_tenant_id(), request_id),
+        ).fetchone()
+        if previous_request:
+            if previous_request[0] == "succeeded":
+                return jsonify(outcome="succeeded", duplicate=True, message="This clock action was already completed.")
+            return jsonify(error="This clock action request is already recorded; refresh attendance before continuing.",
+                           outcome=previous_request[0]), 409
+        row = connection.execute(
+            """SELECT r.shift_start,r.shift_end_at,r.status,r.employee_name,r.location,r.role,
+                      e.bamboohr_id,e.active,r.clock_in_at
+               FROM attendance_shift_records r
+               JOIN employees e ON e.employee_id=r.employee_id AND e.tenant_id=r.tenant_id
+               WHERE r.tenant_id=? AND r.schedule_run_id=? AND r.employee_id=? AND r.shift_date=?""",
+            (active_tenant_id(), run_id, employee_id, shift_text),
+        ).fetchone()
+        if not row:
+            return jsonify(error="The scheduled attendance record was not found. Sync attendance and retry."), 404
+        try:
+            shift_start = schedule_shift_datetime(shift_date, row[0])
+            shift_end = datetime.fromisoformat(row[1]) if row[1] else None
+            if shift_end and (shift_end.tzinfo is None or shift_end <= shift_start):
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            return jsonify(error="A verified scheduled shift end is unavailable. Sync attendance and retry."), 409
+        bamboohr_id = str(row[6] or "")
+        if not row[7] or re.fullmatch(r"[0-9]+", bamboohr_id) is None:
+            return jsonify(error="This active employee has no valid BambooHR employee ID."), 409
+        if row[2] in {"approved_leave", "sick", "vacation"}:
+            return jsonify(error="Clock actions are unavailable for approved leave."), 409
+        if shift_end is None or shift_start > now:
+            return jsonify(error="Clock actions are available only for a shift that has started."), 409
+        if action == "clock_in" and now >= shift_end:
+            return jsonify(error="Clock in is available only before the scheduled shift end."), 409
+        if action == "clock_out_shift_end" and now < shift_end:
+            return jsonify(error="Clock out at shift end is available only after the scheduled shift end has passed."), 409
+        existing_open_claim = connection.execute(
+            """SELECT request_id FROM attendance_clock_action_audit_events
+               WHERE tenant_id=? AND bamboohr_id=? AND outcome IN ('pending','unknown')""",
+            (active_tenant_id(), bamboohr_id),
+        ).fetchone()
+        if existing_open_claim:
+            return jsonify(error="A previous BambooHR clock result is unresolved. Refresh and reconcile it before another action."), 409
+
+    try:
+        history_start = min(shift_date - timedelta(days=1), now.date() - timedelta(days=2))
+        fresh_entries = attendance_clock_entries_for_employee(
+            api_key, bamboohr_id, history_start, now.date(),
+        )
+    except AttendanceIntegrationError as error:
+        return jsonify(error=str(error)), 502
+
+    open_entries = [entry for entry in fresh_entries if entry["end"] is None]
+    overlapping_open = [
+        entry for entry in open_entries
+        if datetime.fromisoformat(str(entry["start"])) < shift_end
+        and (
+            str(entry["start"]) == str(row[8])
+            if row[8]
+            else datetime.fromisoformat(str(entry["start"])) >= shift_start
+        )
+    ]
+    if action == "clock_in":
+        if open_entries:
+            return jsonify(error="The employee already has an open BambooHR clock entry."), 409
+        requested_at = now
+        request_date = requested_at.date()
+        request_time = requested_at.strftime("%H:%M")
+        endpoint_action = "clock_in"
+        before_entry = None
+    else:
+        if len(open_entries) != 1 or len(overlapping_open) != 1:
+            return jsonify(error="The employee must have exactly one open BambooHR clock entry for this shift."), 409
+        before_entry = overlapping_open[0]
+        if action == "clock_out_shift_end":
+            requested_at = shift_end.astimezone(ATTENDANCE_TIMEZONE).replace(second=0, microsecond=0)
+        else:
+            requested_at = now
+        request_date = requested_at.date()
+        request_time = requested_at.strftime("%H:%M")
+        endpoint_action = "clock_out"
+
+    try:
+        with closing(database_connect()) as connection, connection:
+            connection.execute(
+                """INSERT INTO attendance_clock_action_audit_events
+                   (id,tenant_id,request_id,bamboohr_id,employee_id,schedule_run_id,
+                    shift_date,action,outcome,reason,requested_date,requested_time,
+                    before_json,actor_id,actor_email)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    secrets.token_urlsafe(18), active_tenant_id(), request_id, bamboohr_id,
+                    employee_id, run_id, shift_text, action, "pending", reason.strip(),
+                    request_date.isoformat(), request_time,
+                    json.dumps(before_entry or {}), session.get("tenant_admin_id"),
+                    session.get("tenant_admin_email"),
+                ),
+            )
+    except database_integrity_errors():
+        return jsonify(error="Another clock action for this employee is already in progress."), 409
+
+    remote = bamboo_shift_request(
+        api_key, "POST",
+        f"time_tracking/employees/{bamboohr_id}/{endpoint_action}",
+        {"date": request_date.isoformat(), "start" if action == "clock_in" else "end": request_time},
+    )
+    if not remote.get("success"):
+        outcome = "unknown" if remote.get("outcome") == "unknown" else "failed"
+        detail = "BambooHR clock action outcome is unknown." if outcome == "unknown" else f"BambooHR rejected the clock action (HTTP {remote.get('status')})."
+        with closing(database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE attendance_clock_action_audit_events SET outcome=?,detail=?,updated_at=CURRENT_TIMESTAMP "
+                "WHERE tenant_id=? AND request_id=?",
+                (outcome, detail, active_tenant_id(), request_id),
+            )
+        return jsonify(error=detail, outcome=outcome, requestId=request_id), 502
+
+    try:
+        verified_entries = attendance_clock_entries_for_employee(
+            api_key, bamboohr_id, history_start, now.date(),
+        )
+    except AttendanceIntegrationError:
+        verified_entries = []
+    verified_entry = clock_action_result_matches(action, verified_entries, before_entry, requested_at)
+    if not verified_entry:
+        detail = "BambooHR accepted the request but the resulting clock entry could not yet be verified. Do not retry until attendance has been refreshed."
+        with closing(database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE attendance_clock_action_audit_events SET outcome='unknown',detail=?,updated_at=CURRENT_TIMESTAMP "
+                "WHERE tenant_id=? AND request_id=?",
+                (detail, active_tenant_id(), request_id),
+            )
+        return jsonify(error=detail, outcome="unknown", requestId=request_id), 502
+
+    after = {"id": verified_entry["id"], "date": verified_entry["date"],
+             "start": verified_entry["start"], "end": verified_entry["end"]}
+    with closing(database_connect()) as connection, connection:
+        connection.execute(
+            "UPDATE attendance_clock_action_audit_events SET outcome='succeeded',after_json=?,detail=?,updated_at=CURRENT_TIMESTAMP "
+            "WHERE tenant_id=? AND request_id=? AND outcome='pending'",
+            (json.dumps(after), f"Verified BambooHR {endpoint_action} clock event.", active_tenant_id(), request_id),
+        )
+    try:
+        updated_attendance = refresh_attendance_after_clock_action(shift_date, now)
+    except AttendanceIntegrationError:
+        return jsonify(outcome="succeeded", requestId=request_id,
+                       warning="The BambooHR clock action succeeded, but attendance refresh failed. Refresh the Attendance page."), 200
+    return jsonify(outcome="succeeded", requestId=request_id, attendance=updated_attendance)
 
 
 @app.put("/api/attendance/settings")

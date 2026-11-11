@@ -137,6 +137,38 @@ CREATE TABLE IF NOT EXISTS attendance_reconciliation_audit_events (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS attendance_clock_action_audit_events (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
+    request_id TEXT NOT NULL,
+    bamboohr_id TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    schedule_run_id TEXT NOT NULL,
+    shift_date TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('clock_in', 'clock_out', 'clock_out_shift_end')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('pending', 'succeeded', 'failed', 'unknown', 'rejected')),
+    reason TEXT NOT NULL,
+    requested_date TEXT NOT NULL,
+    requested_time TEXT NOT NULL,
+    before_json TEXT NOT NULL DEFAULT '{}',
+    after_json TEXT NOT NULL DEFAULT '{}',
+    detail TEXT NOT NULL DEFAULT '',
+    actor_id TEXT,
+    actor_email TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS attendance_clock_action_claim_idx
+    ON attendance_clock_action_audit_events (tenant_id, bamboohr_id)
+    WHERE outcome IN ('pending', 'unknown');
+
+DO $$ BEGIN
+    IF to_regclass('attendance_shift_records') IS NOT NULL THEN
+        ALTER TABLE attendance_shift_records ADD COLUMN IF NOT EXISTS shift_end_at TEXT;
+    END IF;
+END $$;
+
 -- Identity (looked up before a tenant is known, so no row-level security) ----
 
 CREATE TABLE IF NOT EXISTS tenants (
@@ -275,6 +307,13 @@ ALTER TABLE attendance_reconciliation_audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_reconciliation_audit_events FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON attendance_reconciliation_audit_events;
 CREATE POLICY tenant_isolation ON attendance_reconciliation_audit_events
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE attendance_clock_action_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_clock_action_audit_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_clock_action_audit_events;
+CREATE POLICY tenant_isolation ON attendance_clock_action_audit_events
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
