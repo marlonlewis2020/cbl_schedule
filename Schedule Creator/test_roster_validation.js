@@ -83,7 +83,69 @@ function runRosterValidationTests(source) {
     equal(employee.allow[0], 0, 'No selection synchronises legacy permission');
     edit(employee, 'start:15', '1');
     equal(employee.shiftAvailability['15'], 1, 'Custom permission edit persists');
+
+    const applyLocations = new Function('clone',
+        'let model={locations:[]},sharedMeta=null,sharedMetaError="error";' +
+        extract('applyAcceptedLocations') +
+        ';return {apply:applyAcceptedLocations,model:()=>model,shared:()=>sharedMeta,error:()=>sharedMetaError};'
+    )(value => JSON.parse(JSON.stringify(value)));
+    const localLocation = {name:'Airport',intensity:[0.5,0.5,null,null,null,null,null],open:[1,1,0,0,0,0,0]};
+    const serverLocation = {name:'Airport',intensity:[0.2,0.3,0.5,null,null,null,null],open:[1,1,1,0,0,0,0]};
+    const newLocation = {name:'New location',intensity:[null,null,null,null,null,null,null],open:[null,null,null,null,null,null,null]};
+    const workspace={locations:[localLocation]};
+    applyLocations.apply({configured:true,revision:3,locked:false,selected:['Airport','New location'],accepted:['New location'],locations:[serverLocation,newLocation]},workspace);
+    equal(workspace.locations,[localLocation,newLocation],'Acceptance adds selected server locations without overwriting local calendar values');
+    const workbook={locations:[localLocation]};
+    applyLocations.apply({configured:true,revision:3,locked:false,locations:[serverLocation,newLocation]},workbook,true);
+    equal(workbook.locations,[serverLocation,newLocation],'Reviewed workbook import uses the accepted shared META snapshot');
+    equal(applyLocations.shared().locations,[serverLocation,newLocation],'Accepted META state tracks all server locations');
+    equal(applyLocations.error(),'','Successful acceptance clears META error state');
+    assert(source.includes('meta[name="cbl-empty-bootstrap"]')&&source.includes("doc.querySelector('meta[name=\"cbl-empty-bootstrap\"]')?.remove()"),
+        'Starter bootstrap marker is removed from portable workspace exports');
+    const flexible = new Function('model','DAYS','STARTS','poolStarts','employeeStartPermission',
+        extract('setEmployeeFlexibleAvailability')+';return setEmployeeFlexibleAvailability;'
+    )({pools:[{location:'Test',role:'Cashier',shiftStarts:[6,15]}]},
+        ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],[6,8.5,14,22],
+        pool=>pool.shiftStarts,
+        (value,start)=>value.shiftAvailability[String(start)]??null);
+    const flexibleEmployee={location:'Test',role:'Cashier',flex:'No',days:[0,0,0,0,0,0,0],
+        allow:[0,0,0,0],shiftAvailability:{'6':0,'15':0,'22':0}};
+    equal(flexible(flexibleEmployee),{
+        flex:'Yes',days:[1,1,1,1,1,1,1],shiftAvailability:{'6':1,'15':1},
+    },'Flexible Yes returns all days and configured shift starts as available');
+    equal(flexibleEmployee.shiftAvailability,{'6':1,'15':1,'22':0},
+        'Flexible Yes preserves non-applicable shift values');
+    const locationRoleOptions = new Function('model',
+        extract('scheduleLocationRoleOptions')+';return scheduleLocationRoleOptions;'
+    )({pools:[
+        {location:'Logic One',role:'Warehouse'},
+        {location:'Logic One',role:'Cashier'},
+        {location:'Logic Two',role:'Supervisor'},
+    ]});
+    equal(locationRoleOptions('Logic One'),['Cashier','Warehouse'],
+        'Schedule-location role choices come only from the selected app location');
+    const rosterStatusMatches = new Function(extract('rosterEmployeeMatchesStatus')+';return rosterEmployeeMatchesStatus;')();
+    equal([
+        rosterStatusMatches({active:true},'Active'),
+        rosterStatusMatches({active:false},'Active'),
+        rosterStatusMatches({active:false},'Inactive'),
+        rosterStatusMatches({active:true},'Inactive'),
+        rosterStatusMatches({active:false},'All'),
+    ],[true,false,true,false,true],'Roster status filter distinguishes active and inactive employees');
+    const preferredScheduleLocation = new Function(
+        extract('preferredScheduleLocationId')+';return preferredScheduleLocationId;'
+    )();
+    equal(preferredScheduleLocation('',[{id:'only'}]),'only',
+        'One compatible Schedule Location is selected automatically');
+    equal(preferredScheduleLocation('',[{id:'first'},{id:'second'}]),'',
+        'Multiple compatible Schedule Locations require a choice');
+    equal(preferredScheduleLocation('second',[{id:'first'},{id:'second'}]),'second',
+        'Existing compatible Schedule Location selection is preserved');
     return {checks, result: 'passed'};
+}
+
+function assert(value,label){
+    if(!value)throw new Error(label);
 }
 
 if (typeof module !== 'undefined') {

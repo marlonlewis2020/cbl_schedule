@@ -4925,6 +4925,8 @@ def accept_meta_locations():
         config = meta_configuration_row(connection, tenant_id)
         roster_config = roster_config_row(connection, tenant_id)
         if config:
+            if roster_config and bool(roster_config[1]) != bool(config[1]):
+                return jsonify(error="Shared META and roster lock states differ. Reload the workspace and retry."), 409
             revision = payload.get("revision")
             if not isinstance(revision, int) or isinstance(revision, bool):
                 return jsonify(error="Reload META locations before accepting changes."), 400
@@ -4948,8 +4950,8 @@ def accept_meta_locations():
                 revision += 1
             locked = bool(config[1])
         else:
-            if not normalized:
-                return jsonify(error="Accept at least one location before initializing META settings."), 400
+            if roster_config and roster_config[1]:
+                return jsonify(error="Unlock roster settings before accepting new locations."), 409
             additions = normalized
             merged_locations = normalized
             locked = bool(roster_config and roster_config[1])
@@ -4987,6 +4989,7 @@ def accept_meta_locations():
     return jsonify(
         configured=True, revision=revision, locked=locked,
         locations=merged_locations,
+        selected=[item["name"] for item in normalized],
         accepted=[item["name"] for item in additions],
         employeesAssigned=employees_assigned,
     )

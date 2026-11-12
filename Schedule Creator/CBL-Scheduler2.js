@@ -632,8 +632,8 @@ async function downloadInputs(){
 }
 const MENU_GROUPS=[
     {label:'Workspace',pages:[['home','Overview']]},
-    {label:'Plan schedules',pages:[['pools','Location roles'],['roster','Roster settings'],['controls','Controls & lock'],['schedules','Weekly schedules']]},
-    {label:'People',pages:[['employees','Employees'],['scheduleLocations','Schedule locations'],['attendance','Attendance']]},
+    {label:'Plan schedules',pages:[['pools','Location roles'],['scheduleLocations','Schedule locations'],['roster','Roster settings'],['controls','Controls & lock'],['schedules','Weekly schedules']]},
+    {label:'People',pages:[['employees','Employees'],['attendance','Attendance']]},
     {label:'Integrations',pages:[['publish','Publish to BambooHR'],['links','Workforce Links']]},
     {label:'Data & settings',pages:[['source','Source & backups'],['meta','META · operating days']]}
 ];
@@ -2279,7 +2279,7 @@ document.addEventListener('click',async e=>{
 }
 );
 let storageMode='unknown',storageReason='';
-let expandedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
+let expandedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',rosterStatusFilter='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
 let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0,sharedRoster=null,sharedRosterError='',sharedMeta=null,sharedMetaError='';
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -2311,6 +2311,13 @@ function applySharedRosterSettings(result){
     sharedRoster=result;sharedRosterError='';
     if(!result.configured||!model)return;
     model.locked=result.locked;
+    if(!model.pools.length&&result.pools.length){
+        model.pools=result.pools.map((pool,index)=>({
+            id:key(pool.location,pool.role),location:pool.location,role:pool.role,
+            shiftStarts:pool.starts.map(Number),shares:pool.starts.map((_,startIndex)=>startIndex===0?1:0),
+            enabled:false,row:index+7,
+        }));
+    }
     for(const remotePool of result.pools){
         const pool=model.pools.find(item=>item.location===remotePool.location&&item.role===remotePool.role);
         if(!pool)continue;
@@ -2363,7 +2370,15 @@ async function loadSharedMetaSettings(){
 }
 function sharedRosterImportPayload(){
     if(!model||!tenantAuthTenantId)throw Error('The workspace or business identity is not ready.');
-    const employees=employeeDirectory.map(employee=>{
+    const mappedEmployees=employeeDirectory.filter(employee=>
+        employee.location&&employee.role&&model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role)
+    );
+    if(!mappedEmployees.length)throw Error('Assign at least one employee to a configured location-role pool before initializing roster settings.');
+    const unprofiledActive=employeeDirectory.filter(employee=>employee.active&&(
+        !employee.location||!employee.role||!model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role)
+    ));
+    if(unprofiledActive.length)throw Error('Map every active employee to a location-role pool before initializing roster settings.');
+    const employees=mappedEmployees.map(employee=>{
         const profile=model.roster.find(item=>String(item.id)===String(employee.id));
         if(!profile)throw Error('The local workspace is missing '+employee.name+'’s roster profile. Reload the roster and retry.');
         const starts=poolStarts(model.pools.find(pool=>pool.location===profile.location&&pool.role===profile.role));
@@ -2507,7 +2522,7 @@ async function acceptLocationsOnServer(source,locations){
 }
 function applyAcceptedLocations(result,target=model,replace=false){
     if(replace)target.locations=result.locations.map(location=>clone(location));
-    else for(const name of result.accepted){
+    else for(const name of result.selected||result.accepted){
         if(target.locations.some(location=>location.name.toLowerCase()===name.toLowerCase()))continue;
         const accepted=result.locations.find(location=>location.name.toLowerCase()===name.toLowerCase());
         if(accepted)target.locations.push(clone(accepted))
@@ -2515,16 +2530,15 @@ function applyAcceptedLocations(result,target=model,replace=false){
     sharedMeta={configured:true,revision:result.revision,locked:result.locked,locations:result.locations};
     sharedMetaError=''
 }
-async function syncSharedRosterEmployeeField(employee,field,value){
+async function syncSharedRosterEmployeeChanges(employee,changes){
     if(!sharedRoster?.configured)return;
     const record=sharedRoster.employees.find(item=>String(item.employeeId)===String(employee.id));
     if(!record||!record.settings||!Number.isInteger(record.revision)){
         throw Error('This employee has no shared profile yet. Synchronize new employees first.')
     }
-    const next=field==='flex'||field==='reason'?value:value===''?null:Number(value);
     const result=await directoryRequest('/roster-settings/'+encodeURIComponent(employee.id),{
         method:'PUT',headers:{'X-CSRF-Token':tenantAuthCsrfToken},
-        body:JSON.stringify({revision:record.revision,changes:{[field]:next}})
+        body:JSON.stringify({revision:record.revision,changes})
     });
     record.settings=result.settings;record.revision=result.revision;
     await saveState()
@@ -2713,6 +2727,10 @@ function roleFitsScheduleGroup(role,scheduleLocation){
     if(group.includes('supervisor'))return value.includes('supervisor');
     if(group.includes('settlement'))return value.includes('settlement');
     return value===group
+}
+function preferredScheduleLocationId(currentId,candidates){
+    if(candidates.some(candidate=>candidate.id===currentId))return currentId;
+    return candidates.length===1?candidates[0].id:''
 }
 async function loadDirectoryData(){
     try{
@@ -3031,6 +3049,20 @@ const ROSTER_FIELDS=[['flex','Flexible','list'],['reason','Reason if no','text']
 function rosterFields(pool){
     return [...ROSTER_FIELDS.slice(0,6),...poolStarts(pool).map(s=>['start:'+s,'Allow '+timeLabel(s),'binary']),...ROSTER_FIELDS.slice(6)]
 }
+function setEmployeeFlexibleAvailability(employee){
+    const pool=model.pools.find(item=>item.location===employee.location&&item.role===employee.role);
+    const starts=poolStarts(pool);
+    employee.flex='Yes';
+    employee.days=DAYS.map(()=>1);
+    employee.shiftAvailability={...(employee.shiftAvailability||{})};
+    for(const start of starts)employee.shiftAvailability[String(start)]=1;
+    employee.allow=STARTS.map(start=>starts.includes(start)?1:employeeStartPermission(employee,start)??null);
+    return {
+        flex:'Yes',
+        days:[...employee.days],
+        shiftAvailability:Object.fromEntries(starts.map(start=>[String(start),1])),
+    }
+}
 function rosterInput(e,i,k,type){
     let val=k.startsWith('start:')?e.shiftAvailability?.[String(Number(k.slice(6)))]:k.startsWith('day')?e.days[+k.slice(3)]:e[k],at=`data-employee="${i}" data-field="${k}" ${disabled()} aria-label="${esc(e.name+' '+k)}"`;
     if(type==='text')return `<input type="text" value="${esc(val)}" maxlength="240" ${at}>`;
@@ -3041,9 +3073,11 @@ function rosterInput(e,i,k,type){
 function sharedRosterPanel(){
     if(sharedRosterError)return panel('Shared roster unavailable',`<p class="badtext">${esc(sharedRosterError)}</p><button type="button" data-action="reloadSharedRoster">Retry</button>`);
     if(!sharedRoster?.configured){
-        const unmapped=employeeDirectory.filter(employee=>!employee.location||!employee.role||!model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role));
-        const ready=employeeDirectory.length>0&&!unmapped.length;
-        return panel('Shared roster setup',`${tenantAuthPrimaryAdmin?`<p>${unmapped.length?`${unmapped.length} employee(s) still need an accepted location and a location-role assignment.`:'Directory profiles are ready to initialize.'}</p><button type="button" class="primary" data-action="initializeSharedRoster" ${ready?'':'disabled'}>Initialize from employee directory</button>`:'<p class="note">Ask the primary administrator to initialize shared roster settings.</p>'}`)
+        const mapped=employeeDirectory.filter(employee=>employee.location&&employee.role&&model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role));
+        const activeUnmapped=employeeDirectory.some(employee=>employee.active&&!(employee.location&&employee.role&&model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role)));
+        const ready=mapped.length>0&&!activeUnmapped;
+        const unmapped=employeeDirectory.length-mapped.length;
+        return panel('Shared roster setup',`${tenantAuthPrimaryAdmin?`<p>${mapped.length} employee profile(s) can be initialized.${unmapped?` ${unmapped} employee(s) still need an accepted location and a location-role assignment.`:''}${activeUnmapped?' Active employees must be mapped before setup can continue.':''}</p><button type="button" class="primary" data-action="initializeSharedRoster" ${ready?'':'disabled'}>Initialize from employee directory</button>`:'<p class="note">Ask the primary administrator to initialize shared roster settings.</p>'}`)
     }
     const missing=sharedRoster.employees.filter(employee=>!employee.settings);
     const assignableMissing=missing.filter(employee=>employee.location&&employee.role&&model.pools.some(pool=>pool.location===employee.location&&pool.role===employee.role));
@@ -3062,9 +3096,9 @@ function roster(){
     )).filter(({
         e
     }
-    )=>(filterLoc==='All'||e.location===filterLoc)&&(filterRole==='All'||e.role===filterRole)&&(!search||(e.name+' '+e.id).toLowerCase().includes(search.toLowerCase())));
+    )=>(filterLoc==='All'||e.location===filterLoc)&&(filterRole==='All'||e.role===filterRole)&&rosterEmployeeMatchesStatus(e,rosterStatusFilter)&&(!search||(e.name+' '+e.id).toLowerCase().includes(search.toLowerCase())));
     let groups=model.pools.map(pool=>({pool,entries:shown.filter(({e})=>key(e.location,e.role)===pool.id)}    )).filter(group=>group.entries.length);
-    return heading('PEOPLE / ROSTER','Respect employee constraints.','Set each employee’s availability for every configured shift start in their location-role pool. Inactive employees remain visible here but are excluded from schedules.')+sharedRosterPanel()+`<div class="toolbar"><label>Location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="rosterLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(model.roster.map(e=>e.role))].sort().map(x=>[x,x])],filterRole,'id="rosterRole"')}</label><label>Find employee<input id="rosterSearch" placeholder="Name or ID" value="${esc(search)}"></label><span>${shown.length} employees</span></div>`+panel('Employee settings',groups.length?groups.map(({pool,entries})=>`<h3>${esc(pool.location)} · ${esc(pool.role)}</h3><div class="tablewrap rostergrid"><table><thead><tr><th>ID / Employee</th><th>Location / Role</th>${rosterFields(pool).map(([k,l])=>'<th>'+esc(l)+'</th>').join('')}<th>Validation</th></tr></thead><tbody>${entries.map(({e,i})=>`<tr data-roster-employee="${esc(e.id)}"><td class="sticky"><b>${esc(e.name)}</b><small>${esc(e.id)} · ${e.active===false?'Inactive':'Active'}</small></td><td>${esc(e.location)}<small>${esc(e.role)}</small></td>${rosterFields(pool).map(([k,l,t])=>'<td>'+rosterInput(e,i,k,t)+'</td>').join('')}<td>${rosterErrors(e).length?'<span class="badtext">'+esc(rosterErrors(e).join('; '))+'</span>':badge('Ready','good')}</td></tr>`).join('')}</tbody></table></div>`).join(''):'<p>No employee settings are available until locations and roles are configured.</p>','Source random scores remain editable. Attendance scores are editable snapshots; blank scores receive no top-three preference bonus. Availability is per shift start and employee, in addition to the daily availability fields.')
+    return heading('PEOPLE / ROSTER','Respect employee constraints.','Set each employee’s availability for every configured shift start in their location-role pool. Inactive employees remain visible here but are excluded from schedules.')+sharedRosterPanel()+`<div class="toolbar"><label>Location ${select([['All','All locations'],...model.locations.map(l=>[l.name,l.name])],filterLoc,'id="rosterLocation"')}</label><label>Role ${select([['All','All roles'],...[...new Set(model.roster.map(e=>e.role))].sort().map(x=>[x,x])],filterRole,'id="rosterRole"')}</label><label>Status ${select([['All','All statuses'],['Active','Active'],['Inactive','Inactive']],rosterStatusFilter,'id="rosterStatus"')}</label><label>Find employee<input id="rosterSearch" placeholder="Name or ID" value="${esc(search)}"></label><span>${shown.length} employees</span></div>`+panel('Employee settings',groups.length?groups.map(({pool,entries})=>`<h3>${esc(pool.location)} · ${esc(pool.role)}</h3><div class="tablewrap rostergrid"><table><thead><tr><th>ID / Employee</th><th>Location / Role</th>${rosterFields(pool).map(([k,l])=>'<th>'+esc(l)+'</th>').join('')}<th>Validation</th></tr></thead><tbody>${entries.map(({e,i})=>`<tr data-roster-employee="${esc(e.id)}"><td class="sticky"><b>${esc(e.name)}</b><small>${esc(e.id)} · ${e.active===false?'Inactive':'Active'}</small></td><td>${esc(e.location)}<small>${esc(e.role)}</small></td>${rosterFields(pool).map(([k,l,t])=>'<td>'+rosterInput(e,i,k,t)+'</td>').join('')}<td>${rosterErrors(e).length?'<span class="badtext">'+esc(rosterErrors(e).join('; '))+'</span>':badge('Ready','good')}</td></tr>`).join('')}</tbody></table></div>`).join(''):'<p>No employee settings match these filters.</p>','Source random scores remain editable. Attendance scores are editable snapshots; blank scores receive no top-three preference bonus. Availability is per shift start and employee, in addition to the daily availability fields.')
 }
 function allEmployeeRecords(){
     let records=employeeDirectory.map(employee=>({...employee,roster:model.roster.find(entry=>String(entry.id)===employee.id)||null}));
@@ -3086,6 +3120,12 @@ function employeeRoleOptions(employee){
     let roles=[...new Set(model.pools.filter(pool=>pool.location===employee.location).map(pool=>pool.role))];
     if(employee.role&&!roles.includes(employee.role))roles.push(employee.role);
     return [['','Assign role'],...roles.sort().map(role=>[role,role])]
+}
+function scheduleLocationRoleOptions(locationName){
+    return [...new Set(model.pools.filter(pool=>pool.location===locationName).map(pool=>pool.role))].sort((first,second)=>first.localeCompare(second))
+}
+function rosterEmployeeMatchesStatus(employee,status){
+    return status==='All'||(status==='Active'?employee.active!==false:employee.active===false)
 }
 function employeesPage(){
     let allEmployees=allEmployeeRecords();
@@ -3181,7 +3221,10 @@ async function finishBambooEmployeeSync(result){
     render(true);
     message(directoryReloadError?`BambooHR sync completed, but the employee directory could not be refreshed: ${directoryReloadError}`:persisted?'BambooHR employee directory synchronized. Review new or unmapped employees and assign their roles.':'BambooHR employee directory synchronized for this session. Download a workspace backup to preserve roster changes.',!!directoryReloadError);
     if(!directoryReloadError){
-        const known=new Set(model.locations.map(location=>location.name.toLowerCase()));
+        const known=new Set([
+            ...model.locations.map(location=>location.name.toLowerCase()),
+            ...(sharedMeta?.locations||[]).map(location=>location.name.toLowerCase()),
+        ]);
         const candidates=[...new Map(employeeDirectory.map(employee=>String(employee.bamboohrLocation||'').trim()).filter(name=>name&&!known.has(name.toLowerCase())).map(name=>[name.toLowerCase(),name])).values()];
         if(candidates.length){
             if(tenantAuthPrimaryAdmin)openBambooLocationAcceptanceDialog(candidates);
@@ -3409,13 +3452,15 @@ function openEmployeeForm(employeeId=''){
     dialog.innerHTML=`<form id="employeeForm"><div class="dialoghead"><div><div class="eyebrow">EMPLOYEE DIRECTORY</div><h2>${existing?'Edit employee': 'Add manual employee'}</h2></div><button type="button" data-dialog-close="employeeDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Employee ID<input name="id" required maxlength="80" value="${esc(employee.id)}" ${!isManual?'readonly':''}></label><label>BambooHR ID<input name="bamboohrId" readonly value="${esc(employee.bamboohrId||'Assigned automatically for manual employees')}"></label><label>Employee name<input name="name" required maxlength="240" value="${esc(employee.name)}" ${!isManual?'readonly':''}></label><label>Location ${select(locations,employee.location,'name="location" required')}</label><label>Role ${select([['','Select role'],...roles.map(role=>[role,role])],employee.role,'name="role" required')}</label><label>Schedule location ${select([['','Not assigned'],...scheduleLocations.filter(item=>item.location===employee.location&&roleFitsScheduleGroup(employee.role,item)).map(item=>[item.id,item.name])],employee.scheduleLocationId||'','name="scheduleLocationId" '+(!existing?'disabled':'') )}</label><label class="setting-row"><input type="checkbox" name="active" ${employee.active?'checked':''} ${!existing?'disabled':''}><span><b>Active for scheduling</b><small>${existing?'App-only status; it does not change BambooHR.':'New manual employees start inactive.'}</small></span></label></div><p class="note">${existing?.source==='bamboohr'?'BambooHR ID, Employee ID, and name are read-only and refreshed from BambooHR.':'Manual employees receive an app-generated dummy BambooHR ID and are never published to BambooHR.'} Active status requires a complete roster profile. Role and location must match a source Location Roles pool.</p><div class="actions"><button type="button" data-dialog-close="employeeDialog">Cancel</button><button class="primary" type="submit">Save employee</button></div></form>`;
     dialog.showModal();
     let refreshScheduleLocations=()=>{
-        let current=dialog.querySelector('select[name="scheduleLocationId"]'),chosen=scheduleLocations.find(item=>item.id===current.value);
+        let current=dialog.querySelector('select[name="scheduleLocationId"]');
         let selectedLocation=dialog.querySelector('select[name="location"]').value,selectedRole=dialog.querySelector('select[name="role"]').value;
-        current.innerHTML=`<option value="">Not assigned</option>${scheduleLocations.filter(item=>item.location===selectedLocation&&roleFitsScheduleGroup(selectedRole,item)).map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
-        if(chosen?.location===selectedLocation&&roleFitsScheduleGroup(selectedRole,chosen))current.value=chosen.id
+        let candidates=scheduleLocations.filter(item=>item.location===selectedLocation&&roleFitsScheduleGroup(selectedRole,item));
+        current.innerHTML=`<option value="">Not assigned</option>${candidates.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
+        current.value=preferredScheduleLocationId(current.value,candidates)
     };
     dialog.querySelector('select[name="location"]').addEventListener('change',refreshScheduleLocations);
     dialog.querySelector('select[name="role"]').addEventListener('change',refreshScheduleLocations);
+    refreshScheduleLocations();
     dialog.querySelector('#employeeForm').addEventListener('submit',async event=>{
         event.preventDefault();
         try{
@@ -3430,8 +3475,22 @@ function openScheduleLocationForm(locationId=''){
     let existing=scheduleLocations.find(location=>location.id===locationId),dialog=$('scheduleLocationDialog'),location=existing||{
         id:'',name:'',bambooScheduleId:'',location:model.locations[0]?.name||'',roleGroup:'',managerName:'',managerEmail:''
     };
-    dialog.innerHTML=`<form id="scheduleLocationForm"><div class="dialoghead"><div><div class="eyebrow">BAMBOOHR SCHEDULE</div><h2>${existing?'Edit schedule location':'Add schedule location'}</h2></div><button type="button" data-dialog-close="scheduleLocationDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Schedule name<input name="name" required maxlength="240" value="${esc(location.name)}"></label><label>BambooHR schedule ID<input name="bambooScheduleId" required maxlength="120" value="${esc(location.bambooScheduleId)}"></label><label>App location ${select(model.locations.map(item=>[item.name,item.name]),location.location,'name="location" required')}</label><label>Role group / description<input name="roleGroup" maxlength="120" value="${esc(location.roleGroup)}"></label><label>Manager name<input name="managerName" required maxlength="120" value="${esc(location.managerName)}"></label><label>Manager email<input name="managerEmail" type="email" required maxlength="254" value="${esc(location.managerEmail)}"></label></div><div class="actions"><button type="button" data-dialog-close="scheduleLocationDialog">Cancel</button><button class="primary" type="submit">Save schedule location</button></div></form>`;
+    dialog.innerHTML=`<form id="scheduleLocationForm"><div class="dialoghead"><div><div class="eyebrow">BAMBOOHR SCHEDULE</div><h2>${existing?'Edit schedule location':'Add schedule location'}</h2></div><button type="button" data-dialog-close="scheduleLocationDialog" aria-label="Close">✕</button></div><div class="formgrid"><label>Schedule name<input name="name" required maxlength="240" value="${esc(location.name)}"></label><label>BambooHR schedule ID<input name="bambooScheduleId" required maxlength="120" value="${esc(location.bambooScheduleId)}"></label><label>App location ${select(model.locations.map(item=>[item.name,item.name]),location.location,'name="location" required')}</label><label>Role group<select name="roleGroup"></select></label><label>Manager name<input name="managerName" required maxlength="120" value="${esc(location.managerName)}"></label><label>Manager email<input name="managerEmail" type="email" required maxlength="254" value="${esc(location.managerEmail)}"></label></div><div class="actions"><button type="button" data-dialog-close="scheduleLocationDialog">Cancel</button><button class="primary" type="submit">Save schedule location</button></div></form>`;
     dialog.showModal();
+    const appLocation=dialog.querySelector('select[name="location"]'),roleGroup=dialog.querySelector('select[name="roleGroup"]');
+    const refreshRoleGroups=()=>{
+        const selectedLocation=appLocation.value;
+        const roles=scheduleLocationRoleOptions(selectedLocation);
+        const legacyGroup=existing&&selectedLocation===existing.location&&existing.roleGroup&&!roles.includes(existing.roleGroup)?existing.roleGroup:'';
+        const options=[['','Select role group'],...roles.map(role=>[role,role])];
+        if(legacyGroup)options.push([legacyGroup,`${legacyGroup} · existing group`]);
+        roleGroup.innerHTML=options.map(([value,label])=>`<option value="${esc(value)}">${esc(label)}</option>`).join('');
+        roleGroup.value=roles.includes(location.roleGroup)&&selectedLocation===location.location?location.roleGroup:legacyGroup||'';
+        roleGroup.required=roles.length>0||!!legacyGroup;
+        if(!roles.length&&!legacyGroup)roleGroup.options[0].textContent='No roles created for this location';
+    };
+    refreshRoleGroups();
+    appLocation.addEventListener('change',refreshRoleGroups);
     dialog.querySelector('#scheduleLocationForm').addEventListener('submit',async event=>{
         event.preventDefault();
         try{
@@ -3752,6 +3811,10 @@ function render(preserveScroll=false){
         filterRole=e.target.value;render()
     }
     );
+    $('rosterStatus')?.addEventListener('change',e=>{
+        rosterStatusFilter=e.target.value;render()
+    }
+    );
     $('employeeLocationFilter')?.addEventListener('change',e=>{
         employeeLocationFilter=e.target.value;render()
     }
@@ -3928,7 +3991,8 @@ function editChange(event){
     }
     if(e.dataset.employee!==undefined){
         let r=model.roster[+e.dataset.employee],k=e.dataset.field,v=e.value;
-        if(k==='flex'||k==='reason')r[k]=v;
+        if(k==='flex'&&v==='Yes')sharedRosterEdit={employee:r,changes:setEmployeeFlexibleAvailability(r)};
+        else if(k==='flex'||k==='reason')r[k]=v;
         else if(k.startsWith('start:')){
             let start=Number(k.slice(6)),permission=v===''?null:Number(v);
             r.shiftAvailability[String(start)]=permission;
@@ -3940,7 +4004,10 @@ function editChange(event){
         }
         else if(k.startsWith('day'))r.days[+k.slice(3)]=v===''?null:Number(v);
         else r[k]=v===''?null:Number(v);
-        sharedRosterEdit={employee:r,field:k,value:v};
+        if(!sharedRosterEdit)sharedRosterEdit={
+            employee:r,
+            changes:{[k]:k==='flex'||k==='reason'?v:v===''?null:Number(v)},
+        };
         changed=true
     }
     if(e.dataset.control){
@@ -3953,7 +4020,7 @@ function editChange(event){
     }
     if(changed){
         if(sharedRosterEdit&&sharedRoster?.configured){
-            void syncSharedRosterEmployeeField(sharedRosterEdit.employee,sharedRosterEdit.field,sharedRosterEdit.value)
+            void syncSharedRosterEmployeeChanges(sharedRosterEdit.employee,sharedRosterEdit.changes)
                 .then(()=>{message('Roster setting saved to the shared business roster.');refreshConfigurationIndicators()})
                 .catch(async error=>{
                     message('Roster setting was not synchronized: '+error.message,true);
@@ -5405,6 +5472,7 @@ async function portableHtmlBlob(){
     let bytes=new TextEncoder().encode(JSON.stringify(model)),gzip=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()),base='';
     for(let b of gzip)base+=String.fromCharCode(b);
     let doc=document.documentElement.cloneNode(true);
+    doc.querySelector('meta[name="cbl-empty-bootstrap"]')?.remove();
     doc.querySelectorAll('[data-export-dialog]').forEach(d=>d.remove());
     doc.querySelector('#payload').textContent=btoa(base);
     doc.querySelector('#content').innerHTML='<div class="empty">Loading scheduling workspace…</div>';
@@ -5531,20 +5599,20 @@ async function init(){
     try{
         let encoded=atob($('payload').textContent.trim()),data=JSON.parse(new TextDecoder().decode(await inflate(Uint8Array.from(encoded,c=>c.charCodeAt(0)),'gzip')));
         model=migrateScheduleWeeks(data);
+        if(document.querySelector('meta[name="cbl-empty-bootstrap"]')){
+            model.roster=[];
+            model.locations=[];
+            model.pools=[];
+            model.results=[];
+            model.selectedRun='';
+            model.controls.location='';
+            model.controls.role='';
+            model.locked=false;
+        }
         try{
             let saved=await store('get');
             storageMode='persistent';
             if(saved)model=migrateScheduleWeeks(saved);
-            else{
-                model.roster=[];
-                model.locations=[];
-                model.pools=[];
-                model.results=[];
-                model.selectedRun='';
-                model.controls.location='';
-                model.controls.role='';
-                model.locked=false;
-            }
             storageStatus()
         }
         catch(e){

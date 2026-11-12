@@ -182,6 +182,7 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.get_json())
         result = response.get_json()
+        self.assertEqual(result["selected"], ["KIDD"])
         self.assertEqual(result["accepted"], ["KIDD"])
         self.assertEqual(result["employeesAssigned"], 1)
         self.assertEqual(result["locations"], [{
@@ -205,6 +206,7 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
             json={"source": "bamboohr", "revision": result["revision"], "locations": ["KIDD"]},
         )
         self.assertEqual(repeated.status_code, 200, repeated.get_json())
+        self.assertEqual(repeated.get_json()["selected"], ["KIDD"])
         self.assertEqual(repeated.get_json()["accepted"], [])
         self.assertEqual(repeated.get_json()["employeesAssigned"], 0)
         rejected = self.primary.post(
@@ -213,6 +215,42 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
             json={"source": "bamboohr", "revision": repeated.get_json()["revision"], "locations": ["Not in BambooHR"]},
         )
         self.assertEqual(rejected.status_code, 409)
+
+    def test_accept_additional_location_preserves_meta_calendar_and_honors_lock(self):
+        tenant_id = scheduler.DEFAULT_TENANT_ID
+        existing = {
+            "name": "Existing",
+            "intensity": [0.2, 0.3, 0.1, 0.1, 0.3, None, None],
+            "open": [1, 1, 1, 1, 1, None, None],
+        }
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """INSERT INTO meta_configurations
+                   (tenant_id, revision, locked, locations_json) VALUES (?, 4, 0, ?)""",
+                (tenant_id, json.dumps([existing])),
+            )
+        accepted = self.primary.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "manual", "revision": 4, "locations": ["New location"]},
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.get_json())
+        locations = accepted.get_json()["locations"]
+        self.assertEqual(locations[0], existing)
+        self.assertEqual(locations[1]["name"], "New location")
+        self.assertEqual(locations[1]["intensity"], [None] * 7)
+        self.assertEqual(locations[1]["open"], [None] * 7)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE meta_configurations SET locked=1 WHERE tenant_id=?",
+                (tenant_id,),
+            )
+        locked = self.primary.post(
+            "/api/meta-settings/locations/accept",
+            headers=self.headers,
+            json={"source": "manual", "revision": accepted.get_json()["revision"], "locations": ["Locked addition"]},
+        )
+        self.assertEqual(locked.status_code, 409)
 
     def test_no_owner_portal_or_cross_tenant_permission(self):
         path = "/api/workspace/data-settings"
@@ -246,6 +284,23 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
         self.assertNotIn('data-page="meta"', planning)
         self.assertNotIn('data-page="settings"', group)
         self.assertIn('</div>\n                <button type="button" data-page="settings">', markup)
+
+    def test_schedule_locations_link_is_in_plan_schedules_menu(self):
+        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
+        people = markup.split('People</span>', 1)[1].split('</div>', 1)[0]
+        planning = markup.split('Plan schedules</span>', 1)[1].split('</div>', 1)[0]
+        self.assertNotIn('data-page="scheduleLocations"', people)
+        self.assertIn('data-page="scheduleLocations"', planning)
+        script = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.js").read_text(encoding="utf-8")
+        self.assertIn("{label:'Plan schedules',pages:[['pools','Location roles'],['scheduleLocations','Schedule locations']", script)
+        self.assertIn("{label:'People',pages:[['employees','Employees'],['attendance','Attendance']]}", script)
+
+    def test_empty_starter_bootstrap_does_not_clear_portable_workspace_payloads(self):
+        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
+        script = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.js").read_text(encoding="utf-8")
+        self.assertIn('<meta name="cbl-empty-bootstrap" content="true">', markup)
+        self.assertIn("if(document.querySelector('meta[name=\"cbl-empty-bootstrap\"]'))", script)
+        self.assertIn("doc.querySelector('meta[name=\"cbl-empty-bootstrap\"]')?.remove()", script)
 
 
 class TemporaryLanHttpTests(unittest.TestCase):
