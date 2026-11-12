@@ -31,7 +31,7 @@
                 <div class="nav-group" hidden><span class="nav-group-title">Data & settings</span><button type="button" data-page="source" hidden><b aria-hidden="true">↥</b>Source & backups</button><button type="button" data-page="meta" hidden><b aria-hidden="true">◷</b>META · operating days</button></div>
                 <button type="button" data-page="settings"><b aria-hidden="true">⚙</b>Settings</button>
             </nav>
-            <div class="sidefoot"><button type="button" data-page="source" hidden>Source & saving →</button><a class="developer-link" href="/developer/change-requests">Developer change requests</a><strong>Workforce Planning</strong>Internal scheduling workspace<br>Configure → Lock → Generate → Review
+            <div class="sidefoot"><button type="button" data-page="source" hidden>Source & saving →</button><a class="developer-link" id="businessChangeRequestsLink" href="/business/change-requests" hidden>Business change requests</a><strong>Workforce Planning</strong>Internal scheduling workspace<br>Configure → Lock → Generate → Review
             </div>
         </aside>
         <main>
@@ -44,6 +44,13 @@
                     </div>
                     <div class="topactions"><button type="button" id="notificationButton" class="notification-bell" data-action="toggleNotifications"                     aria-label="Notifications">🔔<span id="notificationBadge" class="notification-badge" hidden>0</span></button><button type="button" id="profileButton" data-action="profile">Your profile</button><button type="button" data-action="tenantLogout">Sign out</button>                    <button type="button" id="themeButton" aria-label="Toggle light or dark mode">◐</button>                    </div>
                 </div>
+                <div id="feedbackHistoryControlWrap" class="headernotice" hidden>
+                    <button type="button" id="feedbackHistoryButton" data-action="toggleFeedbackHistory" aria-controls="feedbackHistoryWrap" aria-expanded="false">Recent feedback</button>
+                </div>
+                <section id="feedbackHistoryWrap" class="headernotice feedback-history" aria-label="Recent feedback" hidden>
+                    <div class="feedback-history-head"><strong>Recent feedback</strong><button type="button" data-action="toggleFeedbackHistory" aria-label="Close recent feedback">Close</button></div>
+                    <ol id="feedbackHistoryList"></ol>
+                </section>
                 <div id="storageWarningWrap" class="headernotice" hidden>
                     <div id="storageWarning" class="storagewarning" role="status" hidden>
                     </div><button type="button" class="dismissnotice" data-dismiss-header="storageWarning" aria-label="Dismiss storage notification">✕</button>

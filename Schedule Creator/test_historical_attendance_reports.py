@@ -43,6 +43,15 @@ class HistoricalAttendanceReportTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as connection, connection:
             connection.execute(
                 """
+                INSERT INTO employees
+                    (employee_id, tenant_id, name, location, role, active, source_type)
+                VALUES (?, ?, ?, ?, ?, 1, 'manual')
+                ON CONFLICT DO NOTHING
+                """,
+                (employee_id, scheduler.DEFAULT_TENANT_ID, name, location, role),
+            )
+            connection.execute(
+                """
                 INSERT INTO attendance_shift_records
                     (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
                      status, source, reason, employee_name, location, role, clock_in_at,
@@ -118,6 +127,63 @@ class HistoricalAttendanceReportTests(unittest.TestCase):
         self.assertEqual(report["patterns"]["postApprovedTimeOff"]["sampleAnalysis"], "insufficient_sample")
         self.assertIn("missing row", report["evidence"]["schedule"])
         self.assertIn("emp-b", [row["employeeId"] for row in report["records"]])
+
+    def test_bamboohr_source_reports_unregistered_provider_employees_only(self):
+        self.seed_week()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+                VALUES ('attendance_shift_source', 'bamboohr', ?)
+                ON CONFLICT (tenant_id, setting_key)
+                DO UPDATE SET setting_value=excluded.setting_value
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+            connection.execute(
+                """
+                INSERT INTO attendance_score_overrides
+                    (tenant_id, employee_id, score, reason)
+                VALUES (?, 'bamboohr:999', 1, 'App-local override must not apply')
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+            connection.execute(
+                """
+                INSERT INTO attendance_shift_records
+                    (tenant_id, schedule_run_id, employee_id, shift_date, shift_start,
+                     status, source, employee_name, location, role)
+                VALUES (?, 'bamboohr:shift-999', 'bamboohr:999', '2026-11-03', 8,
+                        'attended', 'bamboohr', 'Unregistered Provider Employee',
+                        'Kingston', 'Cashier')
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        response = self.create_week(self.admin, self.admin_headers)
+        self.assertEqual(response.status_code, 201, response.get_json())
+        report = response.get_json()["report"]
+        self.assertEqual(report["shiftSource"], "BambooHR schedules")
+        self.assertTrue(report["records"])
+        self.assertTrue(all(row["runId"].startswith("bamboohr:") for row in report["records"]))
+        self.assertIn("bamboohr:999", {row["employeeId"] for row in report["records"]})
+        provider_employee = next(
+            row for row in report["employees"] if row["employeeId"] == "bamboohr:999"
+        )
+        self.assertEqual(provider_employee["effectiveScore"], 100.0)
+        self.assertIsNone(provider_employee["scoreOverride"])
+
+    def test_app_source_reports_only_currently_active_app_employees(self):
+        self.seed_week()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE employees SET active=0 WHERE tenant_id=? AND employee_id='emp-b'",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        response = self.create_week(self.admin, self.admin_headers)
+        self.assertEqual(response.status_code, 201, response.get_json())
+        report = response.get_json()["report"]
+        self.assertEqual(report["shiftSource"], "Accepted app shifts")
+        self.assertNotIn("emp-b", {row["employeeId"] for row in report["records"]})
 
     def test_post_day_off_and_leave_need_three_eligible_events_but_remain_uncertain(self):
         for day, status in (

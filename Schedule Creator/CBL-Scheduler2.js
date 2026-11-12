@@ -734,10 +734,11 @@ function attendancePage(){
     }).join('');
     let sourceControl=collapsiblePanel('attendance-source','Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" ${sourceInfo.selected==='bamboohr'?'selected':''}>BambooHR shifts</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}. BambooHR clock events remain the source of attendance evidence.</p>`)+(sourceInfo.selected==='bamboohr'?collapsiblePanel('attendance-discrepancies','Unresolved BambooHR shift discrepancies',sourceInfo.bamboohrAvailable===true?(discrepancies.length?`<p>${discrepancies.length} unresolved difference${discrepancies.length===1?'':'s'} match the current filters. Differences are rechecked before each resolution.</p><div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Accepted app shift</th><th>BambooHR shift</th><th>Resolution</th></tr></thead><tbody>${discrepancyRows}</tbody></table></div>`:'<p>No unresolved shift discrepancies match the current filters.</p>'):'<p class="badtext">BambooHR shifts could not be checked. Refresh the attendance page before relying on this comparison.</p>'):'');
     return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+
-        collapsiblePanel('attendance-sync','BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
-        sourceControl+'<section id="attendanceReports" class="panel"></section><section id="historicalAttendanceReports" class="panel"></section>'+
+        '<section class="attendance-group" aria-labelledby="attendanceSetupHeading"><h2 id="attendanceSetupHeading">Setup</h2>'+collapsiblePanel('attendance-sync','BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
+        sourceControl+
         collapsiblePanel('attendance-filters','Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
         collapsiblePanel('attendance-rules','Attendance rules',`<div class="formgrid"><label>Lateness tolerance · minutes<input id="attendanceTolerance" type="number" min="0" max="120" step="1" value="${settings.latenessToleranceMinutes}"></label><label>Attendance score period · days<input id="attendancePeriod" type="number" min="30" max="45" step="1" value="${settings.scorePeriodDays}"></label></div><div class="actions"><button type="button" class="primary" data-action="saveAttendanceSettings">Save attendance rules</button></div><p class="note">Clock entries count as attendance evidence even if they are awaiting BambooHR approval. Approved leave is excluded from absence classification and the score denominator.</p>`)+
+        '</section><section class="attendance-group" aria-labelledby="attendanceReportsHeading"><h2 id="attendanceReportsHeading">Reports</h2><section id="attendanceReports" class="panel"></section><section id="historicalAttendanceReports" class="panel"></section></section>'+
         stats([['Expected shifts',f(summary.expected),'Accepted shifts in selected period'],['Clocked in',f(summary.clockedIn),'Includes late arrivals'],['Attendance',summary.attendancePercent===null?'—':f(summary.attendancePercent,2)+'%','Clocked in ÷ expected'],['Late / absent',f(summary.late)+' / '+f(summary.absent),'Exceptions in selected period'],['Approved leave',f(summary.approvedLeave),'Excluded from attendance rate']])+
         panel(`Attendance · ${esc(data?.periodStart||selectedDate||'')} to ${esc(data?.periodEnd||selectedDate||'')}`,`<div class="tablewrap"><table><thead><tr>${attendanceSortHeader('shifts','date','Date')}${attendanceSortHeader('shifts','name','Employee')}${attendanceSortHeader('shifts','location','Location')}${attendanceSortHeader('shifts','role','Role')}${attendanceSortHeader('shifts','shiftStart','Shift start')}${attendanceSortHeader('shifts','clockIn','Clock-in')}${attendanceSortHeader('shifts','status','Status')}${attendanceSortHeader('shifts','reason','Reason')}<th>Actions</th></tr></thead><tbody>${shiftRows}</tbody></table></div>`)+
         panel(`Attendance scores · selected period`,scores.length?`<div class="tablewrap"><table><thead><tr>${attendanceSortHeader('scores','name','Employee')}${attendanceSortHeader('scores','location','Location')}${attendanceSortHeader('scores','role','Role')}${attendanceSortHeader('scores','attended','Attended / scheduled')}${attendanceSortHeader('scores','computedScore','Calculated')}${attendanceSortHeader('scores','score','Effective')}<th>Actions</th></tr></thead><tbody>${scoreRows}</tbody></table></div>`:(allScores.length?'<p>No active employees match these filters.</p>':'<p>No active employees are available.</p>'))+
@@ -2291,13 +2292,107 @@ const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,
 function membershipFeatureEnabled(feature){
     return tenantMembership?.features?.[feature]===true
 }
+const feedbackHistoryStorageKey='cbl-scheduler-feedback-history',feedbackHistoryLimit=20;
+function loadFeedbackHistory(){
+    try{
+        let history=JSON.parse(sessionStorage.getItem(feedbackHistoryStorageKey)||'[]');
+        return Array.isArray(history)?history.filter(item=>item&&typeof item.text==='string').slice(-feedbackHistoryLimit):[]
+    }
+    catch{return []}
+}
+let feedbackHistory=loadFeedbackHistory(),feedbackToastQueue=[],activeFeedbackToast=null,feedbackToastTimer=null;
+function renderFeedbackHistory(){
+    let list=$('feedbackHistoryList'),control=$('feedbackHistoryControlWrap'),button=$('feedbackHistoryButton');
+    if(!list||!control||!button)return;
+    list.replaceChildren();
+    for(let item of [...feedbackHistory].reverse()){
+        let row=document.createElement('li'),time=document.createElement('time'),text=document.createElement('span'),created=new Date(Number(item.createdAt));
+        row.className=item.error?'feedback-history-item error':'feedback-history-item';
+        if(!Number.isNaN(created.valueOf())){
+            time.dateTime=created.toISOString();
+            time.textContent=created.toLocaleTimeString()
+        }
+        text.textContent=item.text;
+        row.append(time,text);
+        list.append(row)
+    }
+    control.hidden=feedbackHistory.length===0;
+    button.textContent=`Recent feedback (${feedbackHistory.length})`
+}
+function addFeedback(text,error=false){
+    if(!text)return;
+    let item={id:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),text:String(text),error:Boolean(error),createdAt:Date.now()};
+    feedbackHistory.push(item);
+    feedbackHistory=feedbackHistory.slice(-feedbackHistoryLimit);
+    try{sessionStorage.setItem(feedbackHistoryStorageKey,JSON.stringify(feedbackHistory))}catch{}
+    renderFeedbackHistory();
+    feedbackToastQueue.push(item);
+    showNextFeedbackToast()
+}
+function ensureFeedbackToastHost(){
+    let host=$('feedbackToastHost');
+    if(!host){
+        host=document.createElement('div');
+        host.id='feedbackToastHost';
+        host.className='feedback-toast-host';
+        host.setAttribute('aria-live','off');
+        document.body.append(host)
+    }
+    return host
+}
+function showNextFeedbackToast(){
+    if(activeFeedbackToast||!feedbackToastQueue.length)return;
+    let item=feedbackToastQueue.shift(),host=ensureFeedbackToastHost(),toast=document.createElement('div'),text=document.createElement('span'),close=document.createElement('button');
+    activeFeedbackToast=item.id;
+    toast.className=item.error?'feedback-toast error':'feedback-toast';
+    toast.setAttribute('role',item.error?'alert':'status');
+    toast.setAttribute('aria-atomic','true');
+    text.textContent=item.text;
+    close.type='button';
+    close.className='feedback-toast-dismiss';
+    close.dataset.action='dismissFeedbackToast';
+    close.dataset.feedbackId=item.id;
+    close.setAttribute('aria-label','Dismiss feedback');
+    close.textContent='✕';
+    toast.append(text,close);
+    host.replaceChildren(toast);
+    feedbackToastTimer=setTimeout(()=>dismissFeedbackToast(item.id),7000)
+}
+function dismissFeedbackToast(id){
+    if(!activeFeedbackToast||activeFeedbackToast!==id)return;
+    clearTimeout(feedbackToastTimer);
+    feedbackToastTimer=null;
+    activeFeedbackToast=null;
+    $('feedbackToastHost')?.replaceChildren();
+    showNextFeedbackToast()
+}
+function toggleFeedbackHistory(){
+    let panel=$('feedbackHistoryWrap'),button=$('feedbackHistoryButton');
+    if(!panel||!button)return;
+    panel.hidden=!panel.hidden;
+    button.setAttribute('aria-expanded',String(!panel.hidden))
+}
+function clearFeedbackHistory(){
+    feedbackHistory=[];
+    feedbackToastQueue=[];
+    clearTimeout(feedbackToastTimer);
+    feedbackToastTimer=null;
+    activeFeedbackToast=null;
+    $('feedbackToastHost')?.remove();
+    if($('feedbackHistoryWrap'))$('feedbackHistoryWrap').hidden=true;
+    $('feedbackHistoryButton')?.setAttribute('aria-expanded','false');
+    try{sessionStorage.removeItem(feedbackHistoryStorageKey)}catch{}
+    renderFeedbackHistory()
+}
 function message(text,error=false){
     dismissedHeaderNotices.delete('notice');
     if($('noticeWrap'))$('noticeWrap').hidden=!text;
     $('notice').textContent=text;
     $('notice').className=error?'notice error':'notice';
+    if(text)addFeedback(text,error)
 
 }
+renderFeedbackHistory();
 async function directoryRequest(path,options={}){
     let response=await fetch('/api'+path,{
         ...options,headers:{
@@ -2594,7 +2689,7 @@ function openAccessRoleDialog(id){
     };
     dialog.showModal()
 }
-let attendanceNotifications=[],archivedNotifications=[],pendingTradeNotifications=[],notificationView='active',expandedNotifications=new Set();
+let attendanceNotifications=[],archivedNotifications=[],pendingTradeNotifications=[],notificationView='active',expandedNotifications=new Set(),notificationPollInitialized=false,seenHeaderNotificationIds=new Set();
 function renderNotificationBadge(){
     let badge=$('notificationBadge'),unread=attendanceNotifications.filter(item=>!item.read).length+pendingTradeNotifications.filter(item=>item.unread).length;
     if(!badge)return;
@@ -2640,8 +2735,22 @@ async function pollAttendanceNotifications(){
             directoryRequest('/attendance/notifications'),
             membershipFeatureEnabled('shiftTrades')?directoryRequest('/shift-trades'):Promise.resolve({trades:[]})
         ]);
-        attendanceNotifications=result.notifications;
-        pendingTradeNotifications=trades.trades.filter(trade=>trade.state==='manager_accepted'&&trade.actions.includes('approve'));
+        let nextAttendance=result.notifications,nextTrades=trades.trades.filter(trade=>trade.state==='manager_accepted'&&trade.actions.includes('approve'));
+        for(let item of nextAttendance){
+            let key='attendance:'+item.id;
+            if(seenHeaderNotificationIds.has(key))continue;
+            seenHeaderNotificationIds.add(key);
+            if(notificationPollInitialized)addFeedback(item.message)
+        }
+        for(let trade of nextTrades){
+            let key='trade:'+trade.id;
+            if(seenHeaderNotificationIds.has(key))continue;
+            seenHeaderNotificationIds.add(key);
+            if(notificationPollInitialized)addFeedback(`Shift trade pending administrator approval · week ${trade.start||'unavailable'} · ${trade.employeeNameA} ↔ ${trade.employeeNameB}`)
+        }
+        notificationPollInitialized=true;
+        attendanceNotifications=nextAttendance;
+        pendingTradeNotifications=nextTrades;
         renderNotificationBadge();
         renderNotificationPanel()
     }
@@ -4123,6 +4232,14 @@ document.addEventListener('click',async e=>{
 }
 );
 async function action(a,element=null){
+    if(a==='toggleFeedbackHistory'){
+        toggleFeedbackHistory();
+        return
+    }
+    if(a==='dismissFeedbackToast'){
+        dismissFeedbackToast(element?.dataset.feedbackId);
+        return
+    }
     if(busy)return;
     if(['backup','restore','sourceInputs','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
         message('Source & backups requires the primary business administrator and an enabled page.',true);
@@ -4141,6 +4258,7 @@ async function action(a,element=null){
             });
             let logoutResult=await logoutResponse.json();
             if(!logoutResponse.ok)throw Error(logoutResult.error||'Sign out failed.');
+            clearFeedbackHistory();
             window.location.assign('/');
             return
         }
@@ -5635,6 +5753,7 @@ async function init(){
         tenantAuthCsrfToken=authState.csrfToken;
         tenantAuthTenantId=authState.tenantId;
         tenantAuthPrimaryAdmin=authState.isPrimaryAdmin===true;
+        if($('businessChangeRequestsLink'))$('businessChangeRequestsLink').hidden=!tenantAuthPrimaryAdmin;
         tenantMembership=authState.membership;
         await loadSharedRosterSettings();
         await loadSharedMetaSettings();

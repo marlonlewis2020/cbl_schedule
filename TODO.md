@@ -272,6 +272,41 @@ remain for production use:
   pagination, both resolution directions, and mocked partial BambooHR writes.
   No production schedule writes were made during implementation.
 
+## Attendance setup and reports navigation (`attendance-page-setup-and-reports`) — implemented, awaiting acceptance
+
+- [x] Group BambooHR attendance sync, shift source, filters and rules under
+  Setup; group attendance snapshots and historical reports under Reports.
+- [x] Preserve existing behavior, authorization, direct links, report history,
+  report-script mount IDs, and always-visible attendance and score tables.
+- [x] JavaScript syntax, editor diagnostics, whitespace validation, and the
+  focused attendance-source regression test passed. The browser fixture could
+  not start because its historical seed-metrics assertion fails before serving
+  the page; no browser verification was completed.
+
+## Source-specific attendance populations and history (`attendance-source-specific-populations-and-history`) — in progress
+
+- Implemented: BambooHR mode fetches the provider's active employee directory
+  independently of app active status and Employee #. Linked app-inactive people
+  retain their app ID; unregistered BambooHR people use a namespaced provider
+  ID and mapped Schedule Location metadata. App mode only includes currently
+  active app employees.
+- Implemented: clock events count regardless of BambooHR approval. Attendance
+  and historical queries are source-filtered; syncing one source preserves the
+  other source's rows. BambooHR-source local attendance/score overrides do not
+  affect provider-source reports. Snapshots and historical HTML/XLSX identify
+  the selected source. Existing confirmed, audited two-way shift reconciliation
+  is unchanged.
+- Verified: 27 attendance automation tests, 12 snapshot/report tests, and
+  focused provider-only/app-inactive, source-switch retention, override
+  exclusion, directory-fetch and snapshot-provenance checks pass.
+- Still outstanding: BambooHR employment status is not retained as dated
+  history, so a report cannot determine active status as of an arbitrary past
+  date. BambooHR scheduled-shift API coverage for completed historical shifts
+  also remains unverified; reports use only provider-source shifts previously
+  captured and retained by the app. Do not silently substitute app schedules.
+  The historical suite has two unrelated existing assertions failing: a
+  429-versus-400 rate-limit expectation and a weekday/week-end date expectation.
+
 ## Attendance table manual clock actions (`attendance-manual-clock-actions`) — implemented, acceptance pending
 
 - [x] Add audited, confirmed Clock in, Clock out, and Clock out at shift end
@@ -993,33 +1028,33 @@ Requests below remain pending unless implementation evidence is explicitly noted
   an offline fallback is separately implemented.
 - Recording only: no runtime feature or environment-file change made yet.
 
-## Timed action-feedback toasts (`action-feedback-toasts`) - low priority, approved for recording only
+## Timed action-feedback toasts (`action-feedback-toasts`) - low priority, implemented, awaiting acceptance
 
-- Show user-action feedback in a nonblocking top-right toast for seven seconds,
-  with a close button and accessible status announcements. Queue or stack rapid
-  messages rather than silently overwriting them.
-- Keep expired and dismissed feedback in a bounded, current-session history
-  available by expanding the header, so users can review missed feedback.
-- Toast newly received header alert events once; do not replay existing alerts
-  during polling or change the notification bell's durable read/archive state.
-- Verify timing, dismissal, rapid actions, history, alert deduplication,
-  accessibility, keyboard use and responsive layouts. No implementation yet.
+- User-action feedback appears in a dismissible, nonblocking top-right toast for
+  seven seconds. Rapid feedback is queued; the latest 20 messages are retained
+  in tab session storage and are reviewable from the expanded header.
+- New attendance and pending shift-trade alerts toast once after initial
+  notification polling. Existing unread alerts are not replayed; bell read and
+  archive behavior is unchanged. History and queued toasts clear on sign-out.
+- Verified JavaScript syntax, seven-second duration, queue progression,
+  dismissal, session history, accessible expansion state, sign-out cleanup and
+  notification deduplication with Node checks. Awaiting user acceptance;
+  interactive browser, keyboard and viewport verification remain outstanding.
 
-## Change request visibility (`primary-admin-change-request-visibility`) - approved, implementation pending
+## Change request visibility (`primary-admin-change-request-visibility`) - implemented, awaiting acceptance
 
-- Only the business's designated primary administrator sees the business-user
-  link and read-only register of completed, current and planned changes.
-- Preserve separate developer access; only the authenticated developer may
-  create, edit, delete or change statuses and dependencies.
-- Deny other business users and platform-owner sessions without developer
-  authentication. Enforce page/API permissions server-side, including direct
-  URLs, mutations and current primary-admin designation.
-- Present business-appropriate information without secrets, sensitive internal
-  notes or other businesses' data. Preserve developer authentication, CSRF,
-  auditing and existing prerequisite/status rules.
-- Verify role access, read-only enforcement, navigation, reassignment and tenant
-  isolation. Depends on `developer-change-log` and `primary-admin-data-settings`.
-- Recording only; implementation pending.
+- The current primary business administrator receives a separately guarded,
+  read-only page and GET API; the scheduler link is hidden from other roles.
+- The API exposes only business-facing titles and coarse statuses. It excludes
+  request IDs, descriptions, dependencies, timestamps, private developer and
+  identity requests, and all mutation controls. Status changes remain developer-only.
+- Page/API requests recheck the current primary-admin designation and tenant.
+  Anonymous users, other admins and platform-owner sessions without developer
+  authentication are denied. Developer page and APIs are unchanged.
+- Verified the focused access/sanitization test and all 11 developer
+  change-request tests, including current primary-admin demotion and mutation
+  denial. Syntax and whitespace checks passed. Awaiting user acceptance;
+  interactive browser role/viewport verification remains outstanding.
 
 ## Historical attendance trends (`historical-attendance-trend-reports`) - implemented, awaiting acceptance
 

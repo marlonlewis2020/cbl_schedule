@@ -386,6 +386,16 @@ select,input{
     margin-bottom:20px;
     min-width:0
 }
+.attendance-group{
+    margin-bottom:24px
+}
+.attendance-group>h2{
+    margin:0 0 12px;
+    padding-bottom:8px;
+    border-bottom:1px solid var(--line);
+    color:var(--ink);
+    font-size:17px
+}
 .panel h3{
     margin:0 0 18px;
     font-size:15px;
@@ -1974,6 +1984,77 @@ dialog input[type=checkbox]{
     position:relative;
     padding-right:38px
 }
+.feedback-history{
+    max-height:260px;
+    overflow:auto
+}
+.feedback-history-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:8px
+}
+#feedbackHistoryList{
+    list-style:none;
+    margin:0;
+    padding:0
+}
+.feedback-history-item{
+    display:grid;
+    grid-template-columns:max-content minmax(0,1fr);
+    gap:8px;
+    padding:7px 0;
+    border-top:1px solid var(--line);
+    overflow-wrap:anywhere
+}
+.feedback-history-item time{
+    color:var(--muted);
+    font-size:11px
+}
+.feedback-history-item.error span{
+    color:#a83224
+}
+.feedback-toast-host{
+    position:fixed;
+    z-index:80;
+    top:16px;
+    right:16px;
+    display:grid;
+    gap:8px;
+    width:min(390px,calc(100vw - 32px));
+    pointer-events:none
+}
+.feedback-toast{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    padding:12px 10px 12px 14px;
+    border:1px solid var(--line);
+    border-left:4px solid #087f5b;
+    border-radius:7px;
+    background:#fff;
+    color:var(--ink);
+    box-shadow:0 6px 20px #0003;
+    line-height:1.45;
+    pointer-events:auto;
+    overflow-wrap:anywhere
+}
+.feedback-toast.error{
+    border-left-color:#c62828
+}
+.feedback-toast-dismiss{
+    flex:0 0 30px;
+    min-height:30px;
+    padding:3px;
+    border:0;
+    background:transparent;
+    color:inherit
+}
+.feedback-toast-dismiss:hover{
+    background:var(--bg)
+}
 .headernotice .dismissnotice{
     position:absolute;
     right:0;
@@ -2385,6 +2466,7 @@ dialog input[type=checkbox]{
 .notification-detail dt{font-size:.75rem;text-transform:uppercase;color:#52697a;margin-top:6px}
 .notification-detail dd{margin:0}
 [data-theme="dark"] .notification-panel{background:#14283a;color:#dcebf3;border-color:#4a6478}
+[data-theme="dark"] .feedback-toast{background:#162936;color:var(--ink);border-color:#4a6478}
 [data-theme="dark"] .notification-item{background:#1c3345;border-color:#314858;color:#8fa6b5}
 [data-theme="dark"] .notification-item.unread{background:#5c4600;border-color:#f0b429;color:#fff4cf}
 [data-theme="dark"] .notification-detail{background:#0e1c28;color:#dcebf3;border-top-color:#314858}

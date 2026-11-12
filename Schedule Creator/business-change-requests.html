@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Business change requests</title>
+    <link rel="stylesheet" href="/CBL-Scheduler2.css">
+    <script src="/session-idle.js"></script>
+    <style>
+        body.business-change-requests{min-height:100vh;padding:24px;background:var(--bg)}
+        body.business-change-requests>main{width:min(100%,1040px);margin:0 auto}
+        .business-change-requests .top{position:static;margin-bottom:20px}
+        .business-change-requests .topline{align-items:center}
+        .business-change-requests .topactions{gap:10px}
+        .business-change-list{margin:0;padding:0;list-style:none}
+        .business-change-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:14px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
+        .business-change-list li:first-child{border-top:0}
+        .business-change-status{flex:0 0 auto;color:var(--muted);font-size:12px}
+        #businessChangeStatus{display:block;margin-bottom:12px}
+        @media(max-width:600px){body.business-change-requests{padding:12px}.business-change-list li{display:grid;gap:5px}}
+    </style>
+</head>
+<body class="business-change-requests">
+    <main>
+        <header class="top">
+            <div class="topline">
+                <div><h1>Business change requests</h1><small>Completed, active and planned changes</small></div>
+                <div class="topactions"><a href="/">Back to scheduler</a><button type="button" id="businessThemeButton" aria-label="Toggle light or dark mode">Theme</button></div>
+            </div>
+        </header>
+        <section class="panel" aria-labelledby="businessChangeHeading">
+            <h2 id="businessChangeHeading">Change summary</h2>
+            <p class="note">This read-only view shows business-facing change titles and status. Developer notes, request identifiers, dependencies and editing controls are not included.</p>
+            <output id="businessChangeStatus" aria-live="polite">Loading changes...</output>
+            <ul id="businessChangeList" class="business-change-list"></ul>
+        </section>
+    </main>
+    <script>
+        const status=document.getElementById('businessChangeStatus');
+        const list=document.getElementById('businessChangeList');
+        const themeButton=document.getElementById('businessThemeButton');
+        function setTheme(theme){
+            document.documentElement.dataset.theme=theme;
+            try{localStorage.setItem('cbl-application-theme',theme)}catch{}
+        }
+        try{
+            const theme=localStorage.getItem('cbl-application-theme');
+            if(theme==='dark'||theme==='light')setTheme(theme)
+        }catch{}
+        themeButton.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+        async function loadChanges(){
+            try{
+                const response=await fetch('/api/business/change-requests',{credentials:'same-origin',cache:'no-store'});
+                const data=await response.json().catch(()=>({}));
+                if(!response.ok)throw Error(data.error||'Unable to load change requests.');
+                list.replaceChildren();
+                for(const item of data.requests){
+                    const row=document.createElement('li'),title=document.createElement('span'),stage=document.createElement('span');
+                    title.textContent=item.title;
+                    stage.className='business-change-status';
+                    stage.textContent=item.status;
+                    row.append(title,stage);
+                    list.append(row)
+                }
+                status.textContent=data.requests.length?'':'No change requests are currently listed.'
+            }catch(error){
+                list.replaceChildren();
+                status.className='badtext';
+                status.textContent=error.message
+            }
+        }
+        loadChanges()
+    </script>
+</body>
+</html>

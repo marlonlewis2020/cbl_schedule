@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import unittest
@@ -142,6 +143,37 @@ class ApplicationReportTests(unittest.TestCase):
         self.assertEqual(history[0]["id"], report_id)
         self.assertEqual(history[0]["state"], "ready")
 
+    def test_bamboohr_snapshot_uses_provider_population_and_labels_xlsx_source(self):
+        now = datetime.now(scheduler.ATTENDANCE_TIMEZONE)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute(
+                """
+                INSERT INTO application_settings (setting_key, setting_value, tenant_id)
+                VALUES ('attendance_shift_source', 'bamboohr', ?)
+                ON CONFLICT (tenant_id, setting_key)
+                DO UPDATE SET setting_value=excluded.setting_value
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        with scheduler.app.app_context(), \
+             patch.object(scheduler, "bamboohr_api_key", return_value="fixture"), \
+             patch.object(scheduler, "bamboohr_json", return_value=[]), \
+             patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=[]) as fetch:
+            report_id = reports.capture(
+                scheduler, scheduler.DEFAULT_TENANT_ID, now, "manual:bamboohr-source", now=now
+            )
+        self.assertTrue(fetch.call_args.kwargs["attendance_mode"])
+        with closing(scheduler.database_connect()) as c:
+            saved = c.execute(
+                "SELECT payload FROM attendance_reports WHERE tenant_id=? AND id=?",
+                (scheduler.DEFAULT_TENANT_ID, report_id),
+            ).fetchone()
+        payload = json.loads(saved[0])
+        self.assertEqual(payload["attendance"]["shiftSource"]["selected"], "bamboohr")
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload["workbook"]))) as archive:
+            self.assertIn(b"Shift source", archive.read("xl/worksheets/sheet1.xml"))
+            self.assertIn(b"bamboohr", archive.read("xl/worksheets/sheet1.xml"))
+
     def test_exact_cutoff_excludes_future_shifts_and_keeps_overnight(self):
         cutoff = datetime(2026, 11, 5, 7, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
         document = {"id": "overnight", "start": "2026-11-02", "location": "Kingston",
@@ -194,7 +226,8 @@ class ApplicationReportTests(unittest.TestCase):
             self.assertEqual(data[1][0].get("s"), "2")
             self.assertEqual(data[2][0].get("s"), "3")
             summary = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
-            values = [cell.find("s:is/s:t", ns).text for cell in summary.findall("s:sheetData/s:row", ns)[4]]
+            summary_rows = summary.findall("s:sheetData/s:row", ns)
+            values = [cell.find("s:is/s:t", ns).text for cell in summary_rows[5]]
             self.assertEqual(values[3:7], ["3", "1", "1", "1"])
 
 

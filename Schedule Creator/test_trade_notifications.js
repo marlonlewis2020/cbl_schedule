@@ -2,7 +2,7 @@ async function runTradeNotificationTests(source) {
   new Function(source);
   const section = source.slice(source.indexOf("let attendanceNotifications="), source.indexOf("function blankRosterProfile("));
   const original = document.body.innerHTML;
-  let checks = 0, enabled = true, error = false, feedback = "", requests = [];
+  let checks = 0, enabled = true, error = false, feedback = "", requests = [], feedbackToasts = [], newAttendanceAlert = false;
   const assert = (value, message) => { if (!value) throw Error(message); checks++; };
   const trade = {id: "fixture", state: "manager_accepted", actions: ["approve"], unread: true, version: 3, start: "2026-11-09", employeeNameA: "Ann", employeeNameB: "Bob"};
   try {
@@ -12,14 +12,15 @@ async function runTradeNotificationTests(source) {
       if (error) throw Error("Refresh failed");
       if (path.endsWith("/read")) { trade.unread = false; return {updated: true}; }
       if (path === "/shift-trades") return {trades: [trade, {...trade, id: "other", state: "approved", actions: ["apply"]}]};
-      return {notifications: [{id: "late", read: false, date: "2026-11-09", message: "Late employee"}]};
+      return {notifications: [{id: "late", read: false, date: "2026-11-09", message: "Late employee"}, ...(newAttendanceAlert ? [{id: "new-late", read: false, date: "2026-11-10", message: "Another late employee"}] : [])]};
     };
-    const functions = new Function("$", "esc", "timeLabel", "directoryRequest", "membershipFeatureEnabled", "tenantAuthCsrfToken", "message",
+    const functions = new Function("$", "esc", "timeLabel", "directoryRequest", "membershipFeatureEnabled", "tenantAuthCsrfToken", "message", "addFeedback",
       section + ";return {pollAttendanceNotifications,openTradeApproval};")(
       id => document.getElementById(id), value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"),
-      String, api, () => enabled, "fixture-token", text => { feedback = text; }
+      String, api, () => enabled, "fixture-token", text => { feedback = text; }, text => feedbackToasts.push(text)
     );
     await functions.pollAttendanceNotifications();
+    assert(feedbackToasts.length === 0, "Initial polling does not replay existing alerts as toasts");
     assert(document.getElementById("notificationBadge").textContent === "2", "Bell counts attendance and pending trade unread updates");
     assert(document.querySelectorAll('[data-action="openTradeApproval"]').length === 1, "Only manager-accepted requests show as pending approvals");
     assert(document.getElementById("notificationPanel").textContent.includes("Ann") && document.getElementById("notificationPanel").textContent.includes("administrator approval"), "Notification identifies the pending swap");
@@ -41,6 +42,11 @@ async function runTradeNotificationTests(source) {
     enabled = false; requests = [];
     await functions.pollAttendanceNotifications();
     assert(!requests.some(item => item.path === "/shift-trades"), "Unavailable trade entitlement does not poll trade API");
+    newAttendanceAlert = true;
+    await functions.pollAttendanceNotifications();
+    assert(feedbackToasts.length === 1 && feedbackToasts[0] === "Another late employee", "New attendance alert is toasted once");
+    await functions.pollAttendanceNotifications();
+    assert(feedbackToasts.length === 1, "Repeated polling does not duplicate alert toasts");
     error = true;
     await functions.pollAttendanceNotifications();
     assert(feedback.includes("Refresh failed"), "Polling errors are surfaced");

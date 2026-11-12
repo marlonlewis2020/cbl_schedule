@@ -131,16 +131,26 @@ def _selected_location(s, user, locations, selected):
 
 
 def _query_period(s, connection, tenant_id, start, end, now, role, locations, selected_location, selected_role):
+    source = s.attendance_shift_source(connection)
+    source_clause = (
+        "schedule_run_id LIKE 'bamboohr:%'"
+        if source == "bamboohr"
+        else "schedule_run_id NOT LIKE 'bamboohr:%' AND employee_id IN "
+             "(SELECT employee_id FROM employees WHERE tenant_id = ? AND active = 1)"
+    )
+    parameters = (tenant_id, start.isoformat(), end.isoformat())
+    if source == "app":
+        parameters += (tenant_id,)
     rows = connection.execute(
-        """
+        f"""
         SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
                source, reason, employee_name, location, role, clock_in_at,
                clock_out_at, worked_minutes, early_minutes, overtime_minutes
         FROM attendance_shift_records
-        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ? AND {source_clause}
         ORDER BY shift_date, shift_start, employee_name, employee_id
         """,
-        (tenant_id, start.isoformat(), end.isoformat()),
+        parameters,
     ).fetchall()
     results = []
     for row in rows:
@@ -510,6 +520,7 @@ def _pattern_heatmap(rows):
 
 def build_report(s, connection, tenant_id, period, start, end, previous_start, previous_end,
                  now, user, locations, selected_location, selected_role):
+    source = s.attendance_shift_source(connection)
     current_now = now
     current = _query_period(
         s, connection, tenant_id, start, end, current_now, user["role"], locations,
@@ -534,12 +545,21 @@ def build_report(s, connection, tenant_id, period, start, end, previous_start, p
     )
     current_locations, previous_locations = _rates_by_location(current), _rates_by_location(previous)
     current_employees, previous_employees = _rates_by_employee(current), _rates_by_employee(previous)
-    current_employees = _apply_score_overrides(
-        connection, tenant_id, current_employees, min(end, current_now.date())
-    )
-    previous_employees = _apply_score_overrides(
-        connection, tenant_id, previous_employees, min(previous_end, current_now.date())
-    )
+    if source == "app":
+        current_employees = _apply_score_overrides(
+            connection, tenant_id, current_employees, min(end, current_now.date())
+        )
+        previous_employees = _apply_score_overrides(
+            connection, tenant_id, previous_employees, min(previous_end, current_now.date())
+        )
+    else:
+        for employee in current_employees + previous_employees:
+            employee.update(
+                formulaScore=employee["score"],
+                effectiveScore=employee["score"],
+                scoreOverride=None,
+                overrideEvidence="not_applicable_to_BambooHR_source",
+            )
     comparison = {
         "period": period, "start": previous_start.isoformat(), "end": previous_end.isoformat(),
         "current": current_metrics, "previous": previous_metrics, "change": rate_change,
@@ -553,6 +573,7 @@ def build_report(s, connection, tenant_id, period, start, end, previous_start, p
         "type": "historical_attendance_trend", "period": period,
         "start": start.isoformat(), "end": end.isoformat(),
         "periodLabel": "Week (Monday–Sunday)" if period == "week" else "Calendar month",
+        "shiftSource": "BambooHR schedules" if source == "bamboohr" else "Accepted app shifts",
         "timezone": "America/Jamaica", "generatedAt": now.isoformat(),
         "cutoff": min(end, now.date()).isoformat(),
         "filters": {
@@ -621,6 +642,7 @@ def _workbook_sheets(report):
     return [
         ("Summary", [
             ["Historical attendance trends", report["periodLabel"], report["timezone"]],
+            ["Shift source", report["shiftSource"]],
             ["Selected period", report["start"], report["end"]],
             ["Generated", report["generatedAt"], "Saved cutoff", report["cutoff"]],
             ["Recorded shifts", summary["expected"], "Present", summary["present"], "Attendance score", summary["score"] if summary["score"] is not None else "N/A"],

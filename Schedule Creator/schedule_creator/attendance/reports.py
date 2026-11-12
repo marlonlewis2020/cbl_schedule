@@ -139,7 +139,7 @@ def capture(s, tenant, cutoff, run_key, missed=False, now=None):
             clocks = s.parse_bamboohr_clock_entries(s.bamboohr_json(key, "time_tracking/timesheet_entries", {"start": start, "end": end}, "time-tracking"))
             leave = s.parse_bamboohr_time_off(s.bamboohr_json(key, "time_off/whos_out", {"start": start, "end": end}, "time-off"))
             with closing(s.database_connect()) as c, c:
-                shifts = s.fetch_bamboohr_scheduled_shifts(c, cutoff.date() - timedelta(days=1), cutoff.date()) if s.attendance_shift_source(c) == "bamboohr" else None
+                shifts = s.fetch_bamboohr_scheduled_shifts(c, cutoff.date() - timedelta(days=1), cutoff.date(), attendance_mode=True) if s.attendance_shift_source(c) == "bamboohr" else None
                 s.sync_attendance_data(c, clocks, leave, now=cutoff, period_start=cutoff.date() - timedelta(days=1), period_end=cutoff.date(), bamboo_shifts=shifts)
         except s.AttendanceIntegrationError as error:
             refresh_error = str(error)

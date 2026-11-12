@@ -92,7 +92,7 @@ const fillSelect=(select,values)=>[...new Set(values.filter(Boolean))].sort().fo
 const eligible=items=>items.filter(item=>!["approved_leave","sick","vacation","day_off","off"].includes(item.status));
 const counts=items=>{const shifts=eligible(items),present=shifts.filter(item=>["attended","late"].includes(item.status)).length,confirmed=shifts.filter(item=>item.status==="attended").length,lateDateValues=[...new Set(items.filter(item=>item.status==="late").map(item=>item.date))].sort(),absentDateValues=[...new Set(items.filter(item=>item.status==="absent").map(item=>item.date))].sort();return {expected:shifts.length,present,score:shifts.length?Math.round(present*10000/shifts.length)/100:null,confirmed,confirmedAttendancePercent:shifts.length?Math.round(confirmed*1000/shifts.length)/10:null,late:items.filter(item=>item.status==="late").length,lateDates:lateDateValues.length,lateDateValues,absent:items.filter(item=>item.status==="absent").length,absentDates:absentDateValues.length,absentDateValues,leave:items.filter(item=>["approved_leave","sick","vacation"].includes(item.status)).length};};
 $("period").textContent=`${data.periodLabel}: ${data.start} to ${data.end} · ${data.timezone}`;
-$("generated").textContent=`Generated ${data.generatedAt}. Rates use attended/late shift records divided by recorded eligible shifts; approved leave is excluded.`;
+$("generated").textContent=`Source: ${data.shiftSource}. Generated ${data.generatedAt}. Rates use attended/late shift records divided by recorded eligible shifts; approved leave is excluded.`;
 const allRecords=[...data.records,...data.previousRecords];
 fillSelect($("locationFilter"),allRecords.map(item=>item.location));
 fillSelect($("roleFilter"),allRecords.map(item=>item.role));

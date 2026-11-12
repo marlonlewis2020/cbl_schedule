@@ -211,6 +211,12 @@ DEVELOPER_REQUESTS = (
         ("attendance-automation",),
     ),
     (
+        "attendance-source-specific-populations-and-history",
+        "Source-specific attendance populations and historical evidence",
+        "Make the Attendance source selection govern employee eligibility, shift expectations, attendance calculations, snapshots, and historical reports consistently. When BambooHR is selected, include every active BambooHR employee with BambooHR scheduled shifts for the reporting period, regardless of app-active status; do not require an app employee row to include the employee. Base BambooHR-mode schedules and historical references only on BambooHR records, including schedules, clock activities, timesheets, and approved leave, with source and period provenance retained. Continue showing differences from accepted app shifts and retain the existing confirmed, audited choice to reconcile either direction. Count all BambooHR clock activities regardless of their approval flag; timesheet/clock approval and correction are handled by managers outside this app, with no in-app approval gate or workflow. When accepted app shifts are selected, include only active app employees and use accepted app schedules as expected shifts, with BambooHR clock activities/timesheets and approved leave as attendance evidence. Ensure the live attendance table and rate, scores, HTML/XLSX snapshots, and historical trend reports all use the same selected-source population and evidence. Do not silently substitute or mix sources when historical BambooHR evidence is unavailable; disclose missing or incomplete provider history. Define how active BambooHR status is established for historical periods and retain dated provider evidence where needed. Verify unlinked and app-inactive BambooHR employees, inactive app employees, source switching, approval-independent clock matching, snapshots, reports, historical boundaries, missing mappings, provider failures, and source provenance.",
+        (),
+    ),
+    (
         "workforce-dashboards",
         "Live attendance and staffing dashboards",
         "Priority: Medium. Build a live attendance dashboard from timely attendance events and accepted schedules. Show the selected day's snapshot so far: people expected to have started by now, people who clocked in, attendance percentage, and exception counts and employee names/statuses (including sick, absent, late, and vacation when supported by verified leave data). Break down the live attendance percentage and exceptions by role and shift; preserve the reporting hierarchy location → role → location × role team → shift. Admins have full business-wide access, default to All locations, and see groups by location; filters must not hide the location grouping. Managers see and act only on their assigned locations/teams, and employees see a simplified read-only dashboard for their own location × role team. Show the reporting timestamp/time zone and distinguish approved leave, open/current shifts, and genuine exceptions so live percentages use only employees expected so far. Define the refresh/update mechanism and finalize the interval length (hourly, 30-minute, or shift-start slots) and snapshot contents before building the separate daily staffing-vs-demand interval snapshot. Attendance dashboard access remains Silver+; daily interval staffing snapshots remain Gold and Platinum. Planned coverage comes from accepted schedules; actual attendance and four-hour absence classification depend on attendance-automation.",
@@ -368,6 +374,10 @@ DEVELOPER_REQUESTS = (
     ),
 )
 WORKFORCE_IMPLEMENTATION_NOTES = {
+    "attendance-source-specific-populations-and-history": "In progress: BambooHR attendance fetch now uses the provider's active employee directory, includes app-inactive and unregistered employees via BambooHR-namespaced IDs, and counts clock activity independent of approval. App mode filters to active app employees. Attendance/history queries are source-filtered; switching sources preserves the other source's rows. HTML/XLSX snapshots and historical reports identify their shift source; app overrides do not affect BambooHR-source history. Verified 27 attendance, 12 snapshot/report, source-population and provenance checks. Historical BambooHR active-status snapshots and provider historical schedule coverage remain unresolved; the historical suite retains two unrelated date/rate-limit assertion failures.",
+    "primary-admin-change-request-visibility": "Implemented: the current primary business administrator receives a no-store read-only page and GET API with only business-facing titles and coarse status labels; developer IDs, descriptions, dependencies, timestamps, and private developer/identity requests are excluded. Current primary designation is checked for each request; anonymous and other-role sessions are denied. Developer routes and mutation controls are unchanged. The focused authorization/sanitization test and all 11 developer change-request tests passed. Awaiting user acceptance; browser role/viewport verification remains outstanding.",
+    "action-feedback-toasts": "Implemented: user action feedback now shows in a dismissible seven-second toast queue. The latest 20 items are retained in tab session storage and shown from the expanded header; new attendance and pending trade alerts toast once after initial polling without changing bell read/archive state. History and active toasts clear on sign-out. Node syntax, mocked queue/timer/history/sign-out checks, and mocked notification deduplication passed. Awaiting user acceptance; interactive browser and keyboard verification remain outstanding.",
+    "attendance-page-setup-and-reports": "Implemented: grouped BambooHR attendance sync, shift source, filters and rules under Setup, and snapshot/historical report mounts under Reports. Preserved report mount IDs, existing workflows and the always-visible live attendance/score tables. Awaiting user acceptance; browser fixture verification is blocked by its pre-existing historical seed-metrics assertion.",
     "historical-report-progressive-dashboard": "Implemented: new historical HTML uses snapshot-style cards and DC/role overview charts/tables, with employee/team comparisons, patterns and shift evidence hidden until employee or DC plus role selection. Coordinated keyboard/chart/table drill-down, scope labels, reset and print layouts; new reports capture business name/logo. Excel detail and previously saved HTML remain unchanged. Awaiting user acceptance; PostgreSQL checks deferred.",
     "historical-attendance-trend-reports": "Implemented: scoped historical weekly/monthly Excel and offline interactive HTML, saved history, employee/DC comparisons, charts and coordinated filters, incident dates, dated score overrides and conservative shift/day/post-day-off/leave pattern analysis. Confirmed policies: Monday weeks, selected-period patterns, minimum three eligible shifts, managers' current authorized teams with dated record attribution. Missing schedule continuity and history remain explicitly unavailable. Awaiting user acceptance; PostgreSQL validation deferred.",
     "unified-application-shell": "Implemented: shared /signin account/business selection and role-aware Access/Trades/Business/owner navigation, branding/themes, scoped alerts and preserved legacy/deep links. Administrator browser workspace remains at /. Existing MFA, role, tenant, team and idle-session guards are retained. Awaiting acceptance; prerequisite statuses are unchanged.",
@@ -6640,6 +6650,16 @@ def developer_change_requests_page():
     return send_from_directory(APP_DIRECTORY, "developer-change-requests.html")
 
 
+@app.get("/business/change-requests")
+def business_change_requests_page():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    response = send_from_directory(APP_DIRECTORY, "business-change-requests.html")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/api/developer/auth-state")
 def developer_auth_state():
     csrf_token = session.get("developer_csrf")
@@ -6930,6 +6950,47 @@ def list_developer_change_requests():
     return jsonify(requests=requests, nextEligible=eligible)
 
 
+@app.get("/api/business/change-requests")
+def list_business_change_requests():
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    private_requests = {
+        "developer-change-log",
+        "tenant-identity",
+        "primary-admin-change-request-visibility",
+    }
+    with closing(database_connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT request_id, title, status FROM developer_change_requests
+            WHERE status != 'rejected'
+            ORDER BY CASE status WHEN 'in_progress' THEN 0
+                WHEN 'pending' THEN 1 WHEN 'blocked' THEN 2 ELSE 3 END,
+                title COLLATE NOCASE
+            """
+        ).fetchall()
+    status_labels = {
+        "done": "Completed",
+        "in_progress": "In progress",
+        "pending": "Planned",
+        "blocked": "Planned",
+    }
+    items = []
+    for request_id, title, status in rows:
+        if request_id in private_requests or status not in status_labels:
+            continue
+        display_status = (
+            "Awaiting acceptance"
+            if status == "pending" and request_id in WORKFORCE_IMPLEMENTATION_NOTES
+            else status_labels[status]
+        )
+        items.append({"title": title, "status": display_status})
+    response = jsonify(requests=items)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.put("/api/developer/change-requests/<path:request_id>")
 def update_developer_change_request(request_id: str):
     if not developer_authenticated():
@@ -7099,7 +7160,7 @@ def employee_id_in_use(
     return connection.execute(query, parameters).fetchone() is not None
 
 
-def fetch_bamboohr_employees() -> list[dict[str, str]]:
+def fetch_bamboohr_employees(*, require_employee_number: bool = True) -> list[dict[str, str]]:
     api_key = bamboohr_api_key()
     if not api_key:
         raise RuntimeError("The BambooHR API key is not configured for this business.")
@@ -7163,7 +7224,10 @@ def fetch_bamboohr_employees() -> list[dict[str, str]]:
             employee_number = item.get("employeeNumber")
             if not isinstance(bamboohr_id, (str, int)) or not str(bamboohr_id).strip():
                 raise RuntimeError("A BambooHR employee record is missing its BambooHR ID.")
-            if not isinstance(employee_number, (str, int)) or not str(employee_number).strip():
+            if require_employee_number and (
+                not isinstance(employee_number, (str, int))
+                or not str(employee_number).strip()
+            ):
                 raise RuntimeError(
                     f"BambooHR employee {bamboohr_id} is missing Employee #. Complete it in BambooHR before syncing."
                 )
@@ -7179,7 +7243,8 @@ def fetch_bamboohr_employees() -> list[dict[str, str]]:
             employees.append(
                 {
                     "bamboohrId": str(bamboohr_id).strip(),
-                    "id": str(employee_number).strip(),
+                    "id": str(employee_number).strip()
+                    if isinstance(employee_number, (str, int)) else "",
                     "name": name,
                     "bamboohrLocation": str(item.get("location") or "").strip(),
                 }
@@ -7201,7 +7266,12 @@ def fetch_bamboohr_employees() -> list[dict[str, str]]:
         )
     if len({employee["bamboohrId"] for employee in employees}) != len(employees):
         raise RuntimeError("BambooHR returned duplicate internal employee IDs; no changes were saved.")
-    if len({normalized_employee_id(employee["id"]) for employee in employees}) != len(employees):
+    employee_numbers = [
+        normalized_employee_id(employee["id"])
+        for employee in employees
+        if employee["id"]
+    ]
+    if len(set(employee_numbers)) != len(employee_numbers):
         raise RuntimeError("BambooHR returned duplicate Employee # values; no changes were saved.")
     return employees
 
@@ -8861,18 +8931,28 @@ def attendance_payload(
         else datetime.combine(report_end, time.max, tzinfo=ATTENDANCE_TIMEZONE)
     )
     tenant_id = active_tenant_id()
+    source = attendance_shift_source(connection)
     settings = attendance_settings(connection)
+    source_clause = (
+        "schedule_run_id LIKE 'bamboohr:%'"
+        if source == "bamboohr"
+        else "schedule_run_id NOT LIKE 'bamboohr:%' AND employee_id IN "
+             "(SELECT employee_id FROM employees WHERE tenant_id = ? AND active = 1)"
+    )
+    row_parameters = (tenant_id, report_start.isoformat(), report_end.isoformat())
+    if source == "app":
+        row_parameters += (tenant_id,)
     rows = connection.execute(
-        """
+        f"""
         SELECT schedule_run_id, employee_id, shift_date, shift_start, status,
                source, reason, employee_name, location, role, clock_in_at,
                clock_in_timezone, clock_out_at, worked_minutes, early_minutes,
              overtime_minutes, shift_end_at
         FROM attendance_shift_records
-        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ? AND {source_clause}
         ORDER BY shift_date, location, role, shift_start, employee_name
         """,
-        (tenant_id, report_start.isoformat(), report_end.isoformat()),
+        row_parameters,
     ).fetchall()
     employee_clock_ids = {
         str(row[0]): (str(row[1] or ""), bool(row[2]))
@@ -8890,6 +8970,9 @@ def attendance_payload(
         open_clock_entries.setdefault(str(bamboohr_id), []).append(
             {"id": str(entry_id), "start": str(started_at), "timezone": str(timezone_name)}
         )
+    if source == "bamboohr":
+        for employee_id in {str(row[1]) for row in rows if str(row[1]).startswith("bamboohr:")}:
+            employee_clock_ids[employee_id] = (employee_id.removeprefix("bamboohr:"), True)
     unresolved_clock_actions = {
         str(row[0]): str(row[1])
         for row in connection.execute(
@@ -8913,7 +8996,8 @@ def attendance_payload(
                 shift_end = None
         except (TypeError, ValueError):
             shift_end = None
-        bamboohr_id, employee_active = employee_clock_ids.get(str(row[1]), ("", False))
+        app_employee_mapping = employee_clock_ids.get(str(row[1]))
+        bamboohr_id, employee_active = app_employee_mapping or ("", False)
         employee_open_entries = open_clock_entries.get(bamboohr_id, [])
         unresolved_action = unresolved_clock_actions.get(bamboohr_id)
         if shift_end is not None:
@@ -8933,6 +9017,7 @@ def attendance_payload(
         clocked_in_for_shift = len(matching_open_entries) == 1 and len(employee_open_entries) == 1
         eligible_clock_action = (
             clock_actions_enabled
+            and app_employee_mapping is not None
             and employee_active
             and re.fullmatch(r"[0-9]+", bamboohr_id) is not None
             and shift_end is not None
@@ -8980,13 +9065,16 @@ def attendance_payload(
         elif row[4] == "absent":
             absent += 1
 
+    score_parameters = (tenant_id, report_start.isoformat(), report_end.isoformat())
+    if source == "app":
+        score_parameters += (tenant_id,)
     score_rows = connection.execute(
-        """
+        f"""
         SELECT employee_id, shift_date, shift_start, status
         FROM attendance_shift_records
-        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ?
+        WHERE tenant_id = ? AND shift_date >= ? AND shift_date <= ? AND {source_clause}
         """,
-        (tenant_id, report_start.isoformat(), report_end.isoformat()),
+        score_parameters,
     ).fetchall()
     totals: dict[str, list[int]] = {}
     for employee_id, shift_text, shift_start, status in score_rows:
@@ -9009,14 +9097,23 @@ def attendance_payload(
             (tenant_id,),
         )
     }
-    employees = connection.execute(
-        """
-        SELECT employee_id, name, location, role, active
-        FROM employees WHERE tenant_id = ?
-        ORDER BY name
-        """,
-        (tenant_id,),
-    ).fetchall()
+    if source == "bamboohr":
+        employee_profiles = {}
+        for row in rows:
+            employee_profiles[str(row[1])] = (row[7], row[8], row[9])
+        employees = [
+            (employee_id, name, location, role, True)
+            for employee_id, (name, location, role) in employee_profiles.items()
+        ]
+    else:
+        employees = connection.execute(
+            """
+            SELECT employee_id, name, location, role, active
+            FROM employees WHERE tenant_id = ? AND active = 1
+            ORDER BY name
+            """,
+            (tenant_id,),
+        ).fetchall()
     scores = []
     for employee_id, name, location, role, active in employees:
         attended_count, scheduled_count = totals.get(employee_id, (0, 0))
@@ -9035,8 +9132,8 @@ def attendance_payload(
                 "attended": attended_count,
                 "scheduled": scheduled_count,
                 "computedScore": computed,
-                "score": overrides.get(employee_id, computed),
-                "manualOverride": employee_id in overrides,
+                "score": overrides.get(employee_id, computed) if source == "app" else computed,
+                "manualOverride": source == "app" and employee_id in overrides,
             }
         )
     percentage = round(clocked_in * 100 / expected, 2) if expected else None
@@ -9066,7 +9163,7 @@ def attendance_payload(
         "scores": scores,
         "settings": settings,
         "shiftSource": {
-            "selected": attendance_shift_source(connection),
+            "selected": source,
             "bamboohrAvailable": None,
             "unresolvedDiscrepancies": None,
         },
@@ -9138,11 +9235,17 @@ def parse_bamboohr_scheduled_shifts(
             raise AttendanceIntegrationError(
                 "BambooHR returned a scheduled shift with invalid dates, time zone, or employee IDs."
             ) from error
-        mapped_employees = [
-            employees_by_bamboo_id[employee_id]
-            for employee_id in employee_ids
-            if employee_id in employees_by_bamboo_id
-        ]
+        mapped_employees = []
+        for employee_id in employee_ids:
+            employee = employees_by_bamboo_id.get(employee_id)
+            if employee:
+                mapped_employees.append(
+                    {
+                        **employee,
+                        "location": employee.get("location") or location["location"],
+                        "role": employee.get("role") or location.get("roleGroup", ""),
+                    }
+                )
         parsed.append(
             {
                 "id": shift_id,
@@ -9162,41 +9265,80 @@ def parse_bamboohr_scheduled_shifts(
 
 
 def fetch_bamboohr_scheduled_shifts(
-    connection: DatabaseConnection, period_start: date, period_end: date
+    connection: DatabaseConnection,
+    period_start: date,
+    period_end: date,
+    *,
+    attendance_mode: bool = False,
 ) -> list[dict[str, object]]:
     api_key = bamboohr_api_key()
     if not api_key:
         raise AttendanceIntegrationError("The BambooHR API key is not configured for this business.")
-    employee_rows = connection.execute(
-        """
-        SELECT employee_id, bamboohr_id, name, location, role
-        FROM employees
-        WHERE tenant_id = ? AND bamboohr_id IS NOT NULL AND bamboohr_id != ''
-        """,
-        (active_tenant_id(),),
-    ).fetchall()
-    employees_by_bamboo_id = {
-        str(row[1]): {
-            "employeeId": str(row[0]),
-            "bamboohrId": str(row[1]),
-            "name": str(row[2]),
-            "location": str(row[3]),
-            "role": str(row[4]),
+    if attendance_mode:
+        try:
+            remote_employees = fetch_bamboohr_employees(require_employee_number=False)
+        except RuntimeError as error:
+            raise AttendanceIntegrationError(str(error)) from error
+        app_employee_rows = connection.execute(
+            """
+            SELECT employee_id, bamboohr_id, role FROM employees
+            WHERE tenant_id = ? AND bamboohr_id IS NOT NULL AND bamboohr_id != ''
+            """,
+            (active_tenant_id(),),
+        ).fetchall()
+        app_employees_by_bamboo_id = {
+            str(row[1]): {"employeeId": str(row[0]), "role": str(row[2] or "")}
+            for row in app_employee_rows
         }
-        for row in employee_rows
-        if re.fullmatch(r"[0-9]+", str(row[1])) is not None
-    }
+        employees_by_bamboo_id = {}
+        for employee in remote_employees:
+            bamboohr_id = employee["bamboohrId"]
+            app_employee = app_employees_by_bamboo_id.get(bamboohr_id)
+            employees_by_bamboo_id[bamboohr_id] = {
+                "employeeId": (
+                    app_employee["employeeId"]
+                    if app_employee else f"bamboohr:{bamboohr_id}"
+                ),
+                "bamboohrId": bamboohr_id,
+                "name": employee["name"],
+                "location": "",
+                "role": app_employee["role"] if app_employee else "",
+            }
+    else:
+        employee_rows = connection.execute(
+            """
+            SELECT employee_id, bamboohr_id, name, location, role
+            FROM employees
+            WHERE tenant_id = ? AND bamboohr_id IS NOT NULL AND bamboohr_id != ''
+            """,
+            (active_tenant_id(),),
+        ).fetchall()
+        employees_by_bamboo_id = {
+            str(row[1]): {
+                "employeeId": str(row[0]),
+                "bamboohrId": str(row[1]),
+                "name": str(row[2]),
+                "location": str(row[3]),
+                "role": str(row[4]),
+            }
+            for row in employee_rows
+            if re.fullmatch(r"[0-9]+", str(row[1])) is not None
+        }
     if not employees_by_bamboo_id:
         return []
     location_rows = connection.execute(
         """
-        SELECT bamboo_schedule_id, name, location
+        SELECT bamboo_schedule_id, name, location, role_group
         FROM schedule_locations WHERE tenant_id = ?
         """,
         (active_tenant_id(),),
     ).fetchall()
     locations_by_schedule_id = {
-        str(row[0]): {"name": str(row[1]), "location": str(row[2])}
+        str(row[0]): {
+            "name": str(row[1]),
+            "location": str(row[2]),
+            "roleGroup": str(row[3] or ""),
+        }
         for row in location_rows
     }
     local_start = datetime.combine(period_start, time.min, tzinfo=ATTENDANCE_TIMEZONE)
@@ -9762,18 +9904,29 @@ def sync_attendance_data(
             "name": row[2],
             "location": row[3],
             "role": row[4],
+            "active": bool(row[5]),
         }
         for row in connection.execute(
             """
-            SELECT employee_id, bamboohr_id, name, location, role
+            SELECT employee_id, bamboohr_id, name, location, role, active
             FROM employees WHERE tenant_id = ?
             """,
             (tenant_id,),
         )
     }
-    bamboo_ids = {
-        record["bamboohrId"] for record in employees.values() if record["bamboohrId"]
-    }
+    selected_source = attendance_shift_source(connection)
+    if selected_source == "bamboohr":
+        bamboo_ids = {
+            str(employee.get("bamboohrId") or "")
+            for shift in bamboo_shifts or []
+            for employee in shift.get("employees", [])
+            if employee.get("bamboohrId")
+        }
+    else:
+        bamboo_ids = {
+            record["bamboohrId"] for record in employees.values()
+            if record["active"] and record["bamboohrId"]
+        }
     clock_entries = [
         entry for entry in clock_entries if entry["bamboohrId"] in bamboo_ids
     ]
@@ -9828,7 +9981,7 @@ def sync_attendance_data(
     }
     active_keys: set[tuple[str, str, str]] = set()
     changed = 0
-    if attendance_shift_source(connection) == "bamboohr":
+    if selected_source == "bamboohr":
         if bamboo_shifts is None:
             raise RuntimeError("BambooHR shifts must be fetched before attendance can be synced.")
         scheduled = []
@@ -9907,6 +10060,10 @@ def sync_attendance_data(
                 )
             employee_id = str(scheduled_employee.get("id", ""))
             employee = employees.get(employee_id)
+            if selected_source == "app" and (not employee or not employee["active"]):
+                continue
+            if selected_source == "bamboohr" and not employee:
+                employee = scheduled_employee
             if not employee:
                 continue
             bamboohr_id = (
@@ -10044,9 +10201,13 @@ def sync_attendance_data(
                     ),
                     shift_end_at=shift_end.isoformat(),
                     existing=existing,
+                    preserve_manual=selected_source == "app",
                     timesheet=timesheet,
                 )
     for key in existing.keys() - active_keys:
+        record_is_bamboohr = str(key[0]).startswith("bamboohr:")
+        if record_is_bamboohr != (selected_source == "bamboohr"):
+            continue
         connection.execute(
             """
             DELETE FROM attendance_shift_records
@@ -10243,7 +10404,7 @@ def get_attendance():
             report_end = period_end or selected_date or date.fromisoformat(result["periodEnd"])
             try:
                 bamboo_shifts = fetch_bamboohr_scheduled_shifts(
-                    connection, report_start, report_end
+                    connection, report_start, report_end, attendance_mode=True
                 )
                 discrepancies = attendance_shift_discrepancies(
                     connection, report_start, report_end, bamboo_shifts
@@ -10311,7 +10472,9 @@ def refresh_attendance_after_clock_action(shift_date: date, now: datetime):
     with closing(database_connect()) as connection, connection:
         source = attendance_shift_source(connection)
         bamboo_shifts = (
-            fetch_bamboohr_scheduled_shifts(connection, history_start, history_end)
+            fetch_bamboohr_scheduled_shifts(
+                connection, history_start, history_end, attendance_mode=True
+            )
             if source == "bamboohr" else None
         )
         sync_attendance_data(
@@ -10590,7 +10753,7 @@ def update_attendance_shift_source():
         with closing(database_connect()) as connection:
             try:
                 bamboo_shifts = fetch_bamboohr_scheduled_shifts(
-                    connection, period_start, period_end
+                    connection, period_start, period_end, attendance_mode=True
                 )
                 discrepancies = attendance_shift_discrepancies(
                     connection, period_start, period_end, bamboo_shifts
@@ -10675,7 +10838,7 @@ def sync_attendance():
         if source == "bamboohr":
             with closing(database_connect()) as connection:
                 bamboo_shifts = fetch_bamboohr_scheduled_shifts(
-                    connection, history_start, history_end
+                    connection, history_start, history_end, attendance_mode=True
                 )
                 discrepancies = attendance_shift_discrepancies(
                     connection, history_start, history_end, bamboo_shifts
@@ -10735,7 +10898,7 @@ def resolve_attendance_shift_discrepancy():
             return jsonify(error="Select BambooHR shifts before resolving a discrepancy."), 409
         try:
             bamboo_shifts = fetch_bamboohr_scheduled_shifts(
-                connection, shift_date, shift_date
+                connection, shift_date, shift_date, attendance_mode=True
             )
             discrepancies = attendance_shift_discrepancies(
                 connection, shift_date, shift_date, bamboo_shifts
