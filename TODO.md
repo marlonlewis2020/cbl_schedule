@@ -993,6 +993,18 @@ Requests below remain pending unless implementation evidence is explicitly noted
   an offline fallback is separately implemented.
 - Recording only: no runtime feature or environment-file change made yet.
 
+## Timed action-feedback toasts (`action-feedback-toasts`) - low priority, approved for recording only
+
+- Show user-action feedback in a nonblocking top-right toast for seven seconds,
+  with a close button and accessible status announcements. Queue or stack rapid
+  messages rather than silently overwriting them.
+- Keep expired and dismissed feedback in a bounded, current-session history
+  available by expanding the header, so users can review missed feedback.
+- Toast newly received header alert events once; do not replay existing alerts
+  during polling or change the notification bell's durable read/archive state.
+- Verify timing, dismissal, rapid actions, history, alert deduplication,
+  accessibility, keyboard use and responsive layouts. No implementation yet.
+
 ## Change request visibility (`primary-admin-change-request-visibility`) - approved, implementation pending
 
 - Only the business's designated primary administrator sees the business-user
