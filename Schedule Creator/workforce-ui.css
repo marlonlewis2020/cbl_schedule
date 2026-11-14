@@ -83,7 +83,7 @@
 .schedule-register table{border-collapse:separate;border-spacing:0}
 .schedule-register thead th{position:sticky;top:0;z-index:1}
 .schedule-register:focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:3px}
-.live-attendance-dashboard{margin:18px 0 24px;padding-top:16px;border-top:1px solid var(--line,#dce6eb);color:var(--ink,#183044)}
+.live-attendance-dashboard{margin:18px 0 24px;color:var(--ink,#183044)}
 .live-attendance-dashboard h2{margin:0 0 6px;font-size:20px}
 .live-attendance-dashboard h3{margin:18px 0 8px;font-size:16px}
 .live-attendance-dashboard h4{margin:14px 0 6px;font-size:15px}

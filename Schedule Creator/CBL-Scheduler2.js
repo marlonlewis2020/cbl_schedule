@@ -3276,7 +3276,9 @@ function employeeRoleOptions(employee){
     return [['','Assign role'],...roles.sort().map(role=>[role,role])]
 }
 function scheduleLocationRoleOptions(locationName){
-    return [...new Set(model.pools.filter(pool=>pool.location===locationName).map(pool=>pool.role))].sort((first,second)=>first.localeCompare(second))
+    let roles=model.pools.filter(pool=>pool.location===locationName).map(pool=>pool.role);
+    scheduleLocations.filter(location=>location.location===locationName).forEach(location=>roles.push(...(location.roles||[])));
+    return [...new Set(roles)].sort((first,second)=>first.localeCompare(second))
 }
 function rosterEmployeeMatchesStatus(employee,status){
     return status==='All'||(status==='Active'?employee.active!==false:employee.active===false)
@@ -3541,7 +3543,45 @@ function scheduleLocationsPage(){
     return heading('PEOPLE / SCHEDULE LOCATIONS','Connect app locations to BambooHR schedules.','Each schedule location maps a name and app location to one BambooHR schedule ID. Employees can be assigned to only one schedule location at a time.')+
         (directoryError?panel('Schedule location directory unavailable',`<p class="badtext">${esc(directoryError)}</p><button type="button" data-action="reloadDirectory">Retry</button>`):'')+
         `<div class="toolbar"><span>${scheduleLocations.length} schedule locations</span><button type="button" class="primary" data-action="addScheduleLocation">Add schedule location</button></div>`+
-        panel('Schedule location directory',`<div class="tablewrap"><table><thead><tr><th>Schedule name</th><th>BambooHR schedule ID</th><th>App location</th><th>Confirmation manager</th><th>Employees</th><th>Actions</th></tr></thead><tbody>${scheduleLocations.map(location=>`<tr><td>${esc(location.name)}<small>${esc(location.roleGroup)}</small></td><td>${esc(location.bambooScheduleId)}</td><td>${esc(location.location)}</td><td>${esc(location.managerName||'Manager not set')}<small>${esc(location.managerEmail||'')}</small></td><td>${location.employeeCount}</td><td><div class="actions"><button type="button" data-action="assignEmployees" data-location-id="${esc(location.id)}">Assign employees</button><button type="button" data-action="editScheduleLocation" data-location-id="${esc(location.id)}">Edit</button><button type="button" class="danger" data-action="deleteScheduleLocation" data-location-id="${esc(location.id)}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`,'The manager receives schedule confirmation drafts for this schedule location. Enter manager contact details before preparing emails. Employees moved to a schedule location inherit its app location; their required role is preserved. A schedule location with assigned employees cannot be deleted.')
+        panel('Schedule location directory',`<div class="tablewrap"><table><thead><tr><th>Schedule name</th><th>BambooHR schedule ID</th><th>App location</th><th>Roles</th><th>Confirmation manager</th><th>Employees</th><th>Actions</th></tr></thead><tbody>${scheduleLocations.map(location=>`<tr><td>${esc(location.name)}<small>${esc(location.roleGroup)}</small></td><td>${esc(location.bambooScheduleId)}</td><td>${esc(location.location)}</td><td>${(location.roles||[]).map(esc).join(', ')||'None'}</td><td>${esc(location.managerName||'Manager not set')}<small>${esc(location.managerEmail||'')}</small></td><td>${location.employeeCount}</td><td><div class="actions"><button type="button" data-action="addScheduleLocationRole" data-location-id="${esc(location.id)}" ${model.locked||!tenantAuthPrimaryAdmin?'disabled':''}>Add role</button><button type="button" data-action="assignEmployees" data-location-id="${esc(location.id)}">Assign employees</button><button type="button" data-action="editScheduleLocation" data-location-id="${esc(location.id)}">Edit</button><button type="button" class="danger" data-action="deleteScheduleLocation" data-location-id="${esc(location.id)}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`,'Roles are scoped to this schedule location and tenant. A role is also added to the app location’s Location Roles pool when possible. The manager receives schedule confirmation drafts for this schedule location. Employees moved to a schedule location inherit its app location; their required role is preserved. A schedule location with assigned employees cannot be deleted.')
+}
+function openScheduleLocationRoleDialog(locationId){
+    if(model.locked)throw Error('Unlock settings in Controls before adding a role.');
+    if(!tenantAuthPrimaryAdmin)throw Error('Only the primary administrator can add roles to a schedule location.');
+    const location=scheduleLocations.find(item=>item.id===locationId);
+    if(!location)throw Error('The schedule location could not be found.');
+    if(sharedRoster?.configured&&sharedRoster.locked)throw Error('Unlock shared roster settings before adding a location-role pool.');
+    const dialog=workflowDialog('scheduleLocationRoleDialog');
+    dialog.innerHTML=`<form id="scheduleLocationRoleForm"><div class="dialoghead"><div><div class="eyebrow">${esc(location.name)}</div><h2>Add role</h2></div><button type="button" data-dialog-close="scheduleLocationRoleDialog" aria-label="Close">Close</button></div><p>${esc(location.location)}</p><label>Role name<input name="role" maxlength="240" required></label><div class="actions"><button type="button" data-dialog-close="scheduleLocationRoleDialog">Cancel</button><button type="submit" class="primary">Create role</button></div></form>`;
+    dialog.querySelector('#scheduleLocationRoleForm').addEventListener('submit',async event=>{
+        event.preventDefault();
+        try{
+            const role=String(new FormData(event.currentTarget).get('role')||'').trim();
+            if(!role||role.length>240||/[\\u0000-\\u001f\\u007f]/.test(role))throw Error('Enter a role name of 1 to 240 characters without control characters.');
+            if((location.roles||[]).some(existing=>existing.toLocaleLowerCase()===role.toLocaleLowerCase()))throw Error('That role already exists for this schedule location.');
+            const result=await directoryRequest('/schedule-locations/'+encodeURIComponent(location.id)+'/roles',{
+                method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify({role})
+            });
+            let poolSyncError='';
+            const pool={location:location.location,role,starts:[...STARTS]};
+            const sharedPoolExists=sharedRoster?.pools.some(item=>item.location.toLocaleLowerCase()===location.location.toLocaleLowerCase()&&item.role.toLocaleLowerCase()===role.toLocaleLowerCase());
+            if(sharedRoster?.configured&&!sharedPoolExists){
+                try{await saveSharedRosterConfiguration(false,[...sharedRoster.pools.map(item=>clone(item)),pool])}
+                catch(error){poolSyncError=error.message}
+            }
+            if(!model.pools.some(item=>item.location.toLocaleLowerCase()===location.location.toLocaleLowerCase()&&item.role.toLocaleLowerCase()===role.toLocaleLowerCase())){
+                model.pools.push({id:key(location.location,role),location:location.location,role,shiftStarts:[...STARTS],shares:[1,0,0,0],enabled:false,row:model.pools.length+7});
+            }
+            model.controls.location=location.location;
+            model.controls.role=role;
+            await loadDirectoryData();
+            await saveState();
+            dialog.close();
+            render(true);
+            message(poolSyncError?`Role ${result.role} was added to ${location.name}, but the shared roster pool could not be updated: ${poolSyncError}`:`Role ${result.role} added to ${location.name}.`,!!poolSyncError)
+        }catch(error){message(error.message,true)}
+    });
+    if(!dialog.open)dialog.showModal()
 }
 function openAppLocationDialog(){
     if(model.locked)throw Error('Unlock settings in Controls before adding a location.');
@@ -4827,6 +4867,10 @@ async function action(a,element=null){
         }
         if(a==='addScheduleLocation'){
             openScheduleLocationForm();
+            return
+        }
+        if(a==='addScheduleLocationRole'){
+            openScheduleLocationRoleDialog(element.dataset.locationId);
             return
         }
         if(a==='editScheduleLocation'){

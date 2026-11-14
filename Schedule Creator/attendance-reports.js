@@ -44,11 +44,24 @@
         const data=await response.json();if(!response.ok)throw Error(data.error||'Report request failed.');return data;
     }
     async function requestExecutive(method='GET',body){
-        const state=method==='GET'?null:await (await fetch('/api/tenant-auth/state',{cache:'no-store'})).json();
+        const state=method==='GET'?null:await jsonResponse(await fetch('/api/tenant-auth/state',{cache:'no-store'}),'Tenant authentication');
         const response=await fetch('/api/attendance/executive-reports',{method,cache:'no-store',
             headers:{'Content-Type':'application/json',...(state?{'X-CSRF-Token':state.csrfToken}:{})},
             ...(body===undefined?{}:{body:JSON.stringify(body)})});
-        const data=await response.json();if(!response.ok)throw Error(data.error||'Executive report request failed.');return data;
+        return jsonResponse(response,'Executive report request');
+    }
+    async function jsonResponse(response,label){
+        const contentType=response.headers.get('content-type')||'';
+        let data;
+        try{data=await response.json();}
+        catch{
+            const message=response.redirected||contentType.includes('text/html')
+                ?`${label} returned an HTML page instead of JSON. Reload the page; if this continues, restart Schedule Creator to load the report API.`
+                :`${label} returned an invalid response (HTTP ${response.status}).`;
+            const error=Error(message);error.status=response.status;throw error;
+        }
+        if(!response.ok){const error=Error(data.error||`${label} failed (HTTP ${response.status}).`);error.status=response.status;throw error;}
+        return data;
     }
     async function mount(node){
         active=node;
@@ -61,7 +74,8 @@
         const list=document.createElement('div');list.className='tablewrap';
         const emailPanel=document.createElement('section');emailPanel.hidden=true;
         const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('div');
-        const executivePanel=document.createElement('section');executivePanel.className='executive-report-settings';
+        const executivePanel=document.createElement('section');executivePanel.className='executive-report-settings panel collapsible';
+        const executiveDetails=document.createElement('details'),executiveSummary=document.createElement('summary'),executiveBody=document.createElement('div');executiveBody.className='panel-body';
         const executiveTitle=document.createElement('h3');executiveTitle.textContent='Executive end-of-day report';
         const executiveIntro=document.createElement('p');executiveIntro.textContent='Download a location-level attendance summary after each reporting day. Reports use shifts attributed to their start date; no employee register is included.';
         const executiveControls=document.createElement('div');executiveControls.className='formgrid';
@@ -73,16 +87,20 @@
         const executiveStatus=document.createElement('p');executiveStatus.setAttribute('role','status');
         const executiveHistory=document.createElement('div');executiveHistory.className='tablewrap';
         executiveControls.append(executiveEnabledLabel,delayLabel,executiveSave);
-        executivePanel.append(executiveTitle,executiveIntro,executiveControls,executiveStatus,executiveHistory);
+        executiveSummary.append(executiveTitle);
+        executiveBody.append(executiveIntro,executiveControls,executiveStatus,executiveHistory);
+        executiveDetails.append(executiveSummary,executiveBody);
+        executivePanel.append(executiveDetails);
         node.classList.add('collapsible');body.className='panel-body';
         summary.append(heading);body.append(intro,actions,status,list,emailPanel);
         details.append(summary,body);
-        actions.append(capture,refresh,toggle,remove);node.replaceChildren(details,executivePanel);
+        actions.append(capture,refresh,toggle,remove);node.replaceChildren(details);node.after(executivePanel);
         const selected=new Set();
         const updateSelection=()=>{remove.disabled=busy||!selected.size;remove.textContent=`Delete selected (${selected.size})`;};
         async function loadExecutive(){
             try{
                 const data=await requestExecutive();
+                executiveEnabled.disabled=delay.disabled=executiveSave.disabled=false;
                 executiveEnabled.checked=data.enabled;delay.value=String(data.delayHours);
                 executiveStatus.textContent=`Worker last seen: ${data.heartbeat?new Date(data.heartbeat).toLocaleString():'not yet connected'}. Reports run independently of an open browser.`;
                 const table=document.createElement('table'),thead=document.createElement('thead'),header=document.createElement('tr');table.dataset.excelDownload='true';
@@ -101,7 +119,7 @@
                 }
                 if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=5;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
                 table.append(tbody);executiveHistory.replaceChildren(table);
-            }catch(error){executiveStatus.textContent=error.message;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=true;}
+            }catch(error){executiveStatus.textContent=error.message;const denied=error.status===403;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=denied;}
         }
         async function showEmail(id){
             const response=await fetch(`/api/attendance/reports/${encodeURIComponent(id)}/email`,{cache:'no-store'});

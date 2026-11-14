@@ -1,5 +1,6 @@
 (function(){
     "use strict";
+    let liveDashboardExpanded=true;
 
     const node=(tag,text,className)=>{
         const value=document.createElement(tag);
@@ -9,23 +10,31 @@
     };
     const count=value=>Number(value||0).toLocaleString();
     const percent=value=>value===null||value===undefined?"N/A":`${Number(value).toFixed(1)}%`;
+    document.addEventListener("toggle",event=>{
+        if(event.target?.dataset?.dashboardDisclosure==="true")liveDashboardExpanded=event.target.open;
+    },true);
 
     window.renderLiveAttendanceDashboard=function(target,data,audience,error,filters={}){
         if(!target)return;
+        const wasOpen=target.querySelector("details[data-dashboard-disclosure]")?.open??liveDashboardExpanded;
+        liveDashboardExpanded=wasOpen;
+        target.classList.add("panel","collapsible");
         target.replaceChildren();
-        const heading=node("h2","Live attendance dashboard");
-        target.append(heading);
+        const details=node("details"),summary=node("summary"),content=node("div",undefined,"panel-body");
+        details.dataset.dashboardDisclosure="true";details.open=wasOpen;
+        summary.append(node("h2","Live attendance dashboard"));
+        details.append(summary,content);target.append(details);
         if(error){
-            target.append(node("p",error,"attendance-dashboard-error"));
+            content.append(node("p",error,"attendance-dashboard-error"));
             return;
         }
         if(!data){
-            target.append(node("p","Waiting for attendance data.","note"));
+            content.append(node("p","Waiting for attendance data.","note"));
             return;
         }
         const reportDate=data.date||"Unavailable";
-        target.append(node("p",`${reportDate} · Reported ${data.reportedAt||"Unavailable"} · ${data.timezone||"America/Jamaica"} · Source: ${data.shiftSource||"Unavailable"}`,"attendance-dashboard-meta"));
-        if(data.lastSyncedAt)target.append(node("p",`Source refreshed ${data.lastSyncedAt}`,"note"));
+        content.append(node("p",`${reportDate} · Reported ${data.reportedAt||"Unavailable"} · ${data.timezone||"America/Jamaica"} · Source: ${data.shiftSource||"Unavailable"}`,"attendance-dashboard-meta"));
+        if(data.lastSyncedAt)content.append(node("p",`Source refreshed ${data.lastSyncedAt}`,"note"));
 
         const allLocationGroups=Array.isArray(data.locations)?data.locations:[];
         const locationGroups=allLocationGroups.filter(location=>!filters.location||filters.location==="All"||location.location===filters.location);
@@ -43,16 +52,19 @@
         for(const [label,value] of [
             ["Expected shifts",count(metrics.expected)],
             ["Clock-in evidence",count(metrics.clockedIn)],
-            ["Current / open",`${count(metrics.currentShifts)} / ${count(metrics.openClocks)}`],
+            ["On shift now",count(metrics.currentShifts)],
+            ["Open clock entries",count(metrics.openClocks)],
             ["Attendance",percent(metrics.attendancePercent)],
             ["Late / absent",`${count(metrics.late)} / ${count(metrics.absent)}`],
             ["Leave / sick / vacation",`${count(metrics.approvedLeave)} / ${count(metrics.sick)} / ${count(metrics.vacation)}`],
         ]){
             const item=node("div",undefined,"attendance-dashboard-kpi");
+            if(label==="On shift now")item.title="Shifts in progress with one matching open clock entry.";
+            if(label==="Open clock entries")item.title="Shifts with a clock-in recorded and no clock-out; some may no longer be current.";
             item.append(node("span",label),node("strong",value));
             cards.append(item);
         }
-        target.append(cards);
+        content.append(cards);
 
         if(audience==="employee"){
             const team=node("section",undefined,"attendance-dashboard-team");
@@ -72,7 +84,7 @@
                 }
             }
             if(!locationGroups.length)team.append(node("p","No team shifts have started for this date.","note"));
-            target.append(team);
+            content.append(team);
             return;
         }
 
@@ -105,7 +117,7 @@
             }
         }
         if(!locationGroups.length)breakdown.append(node("p","No shifts have started for this date.","note"));
-        target.append(breakdown);
+        content.append(breakdown);
 
         const exceptions=(Array.isArray(data.exceptions)?data.exceptions:[]).filter(item=>
             (!filters.location||filters.location==="All"||item.location===filters.location)&&
@@ -124,6 +136,6 @@
             }
             section.append(table);
         }
-        target.append(section);
+        content.append(section);
     };
 })();

@@ -922,6 +922,13 @@ def initialize_database() -> None:
             else "FOREIGN KEY (schedule_location_id) "
             "REFERENCES schedule_locations (id) ON DELETE SET NULL"
         )
+        schedule_role_location_reference = (
+            "FOREIGN KEY (tenant_id, schedule_location_id) "
+            "REFERENCES schedule_locations (tenant_id, id) ON DELETE CASCADE"
+            if DATABASE_URL
+            else "FOREIGN KEY (schedule_location_id) "
+            "REFERENCES schedule_locations (id) ON DELETE CASCADE"
+        )
         connection.execute(
             f"""
             CREATE TABLE IF NOT EXISTS accepted_schedules (
@@ -949,6 +956,17 @@ def initialize_database() -> None:
                 manager_name TEXT NOT NULL DEFAULT '',
                 manager_email TEXT NOT NULL DEFAULT '',
                 {schedule_location_keys}
+            );
+            CREATE TABLE IF NOT EXISTS schedule_location_roles (
+                id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL DEFAULT {tenant_default},
+                schedule_location_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                role_key TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, id),
+                UNIQUE (tenant_id, schedule_location_id, role_key),
+                {schedule_role_location_reference}
             );
             CREATE TABLE IF NOT EXISTS employees (
                 employee_id TEXT NOT NULL,
@@ -1519,6 +1537,7 @@ def initialize_database() -> None:
         for table_name in (
             "accepted_schedules",
             "schedule_locations",
+            "schedule_location_roles",
             "employees",
             "roster_configurations",
             "roster_employee_settings",
@@ -1690,6 +1709,7 @@ def initialize_database() -> None:
             for table_name in (
                 "accepted_schedules",
                 "schedule_locations",
+                "schedule_location_roles",
                 "employees",
                 "roster_configurations",
                 "roster_employee_settings",
@@ -3928,6 +3948,7 @@ def hub_delete_business(tenant_id: str):
         for table_name in (
             "employees",
             "accepted_schedules",
+            "schedule_location_roles",
             "schedule_locations",
             "application_settings",
             "tenant_audit_events",
@@ -8348,6 +8369,18 @@ def list_schedule_locations():
             ORDER BY s.name COLLATE NOCASE
             """
         ).fetchall()
+        role_rows = connection.execute(
+            """
+            SELECT schedule_location_id, role
+            FROM schedule_location_roles
+            WHERE tenant_id = ?
+            ORDER BY role COLLATE NOCASE
+            """,
+            (active_tenant_id(),),
+        ).fetchall()
+    roles_by_location: dict[str, list[str]] = {}
+    for location_id, role in role_rows:
+        roles_by_location.setdefault(location_id, []).append(role)
     return jsonify(
         scheduleLocations=[
             {
@@ -8359,10 +8392,48 @@ def list_schedule_locations():
                 "managerName": row[5],
                 "managerEmail": row[6],
                 "employeeCount": row[7],
+                "roles": roles_by_location.get(row[0], []),
             }
             for row in rows
         ]
     )
+
+
+@app.post("/api/schedule-locations/<path:location_id>/roles")
+def create_schedule_location_role(location_id: str):
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    role = payload.get("role") if isinstance(payload, dict) else None
+    if (
+        not isinstance(role, str)
+        or not role.strip()
+        or len(role.strip()) > 240
+        or any(ord(character) < 32 or ord(character) == 127 for character in role)
+    ):
+        return jsonify(error="Enter a role name of 1 to 240 characters without control characters."), 400
+    role = role.strip()
+    with closing(database_connect()) as connection, connection:
+        exists = connection.execute(
+            "SELECT 1 FROM schedule_locations WHERE tenant_id = ? AND id = ?",
+            (active_tenant_id(), location_id),
+        ).fetchone()
+        if not exists:
+            return jsonify(error="Schedule location was not found."), 404
+        role_id = os.urandom(16).hex()
+        try:
+            connection.execute(
+                """
+                INSERT INTO schedule_location_roles
+                    (id, tenant_id, schedule_location_id, role, role_key)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (role_id, active_tenant_id(), location_id, role, role.casefold()),
+            )
+        except database_integrity_errors():
+            return jsonify(error="That role already exists for this schedule location."), 409
+    return jsonify(id=role_id, scheduleLocationId=location_id, role=role), 201
 
 
 def valid_schedule_location(payload: object) -> bool:
@@ -9522,14 +9593,15 @@ def attendance_dashboard_payload(
                 metrics["vacation"] += 1
             return
         metrics["expected"] += 1
-        if status in {"attended", "late"}:
+        has_clock_in_evidence = status in {"attended", "late"} or bool(row.get("clockIn"))
+        if has_clock_in_evidence:
             metrics["actual"] += 1
-        if row.get("clockIn"):
             metrics["clockedIn"] += 1
-            if not row.get("clockOut"):
-                metrics["openClocks"] += 1
         else:
             metrics["missingClockIns"] += 1
+        if row.get("clockIn"):
+            if not row.get("clockOut"):
+                metrics["openClocks"] += 1
         if row.get("isClockedInForShift"):
             metrics["currentShifts"] += 1
         if status == "late":

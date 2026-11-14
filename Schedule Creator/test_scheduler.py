@@ -2780,6 +2780,60 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         missing_manager = {key: value for key, value in payload.items() if key != "managerName"}
         self.assertEqual(self.client.post("/api/schedule-locations", json=missing_manager).status_code, 400)
 
+    def test_schedule_location_roles_are_persistent_and_location_scoped(self):
+        location_ids = []
+        for suffix in ("One", "Two"):
+            created = self.client.post(
+                "/api/schedule-locations",
+                json={
+                    "name": f"Role Registry {suffix}",
+                    "bambooScheduleId": f"role-registry-{suffix.lower()}",
+                    "location": "Kingston",
+                    "roleGroup": f"Role Registry {suffix}",
+                    "managerName": "Registry Manager",
+                    "managerEmail": "registry.manager@example.com",
+                },
+            )
+            self.assertEqual(created.status_code, 201)
+            location_ids.append(created.get_json()["id"])
+
+        path = f"/api/schedule-locations/{location_ids[0]}/roles"
+        headers = {"X-CSRF-Token": "test-csrf-token"}
+        self.assertEqual(self.client.post(path, json={"role": "Cashier"}).status_code, 400)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenant_admins SET is_primary = 0 WHERE id = 'test-admin'"
+            )
+        self.assertEqual(
+            self.client.post(path, json={"role": "Cashier"}, headers=headers).status_code,
+            403,
+        )
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenant_admins SET is_primary = 1 WHERE id = 'test-admin'"
+            )
+        created_role = self.client.post(
+            path, json={"role": "Cashier"}, headers=headers
+        )
+        self.assertEqual(created_role.status_code, 201)
+        self.assertEqual(
+            self.client.post(path, json={"role": "cashier"}, headers=headers).status_code,
+            409,
+        )
+        second_role = self.client.post(
+            f"/api/schedule-locations/{location_ids[1]}/roles",
+            json={"role": "Cashier"},
+            headers=headers,
+        )
+        self.assertEqual(second_role.status_code, 201)
+
+        locations = {
+            item["id"]: item
+            for item in self.client.get("/api/schedule-locations").get_json()["scheduleLocations"]
+        }
+        self.assertIn("Cashier", locations[location_ids[0]]["roles"])
+        self.assertIn("Cashier", locations[location_ids[1]]["roles"])
+
     def test_bamboo_time_off_endpoint_filters_approved_period_records(self):
         class FakeResponse:
             def __enter__(self):
@@ -6066,15 +6120,37 @@ class AttendanceDashboardAccessTests(unittest.TestCase):
     def test_dashboard_silver_gate_and_admin_location_hierarchy(self):
         response = self.admin.get("/api/attendance/dashboard?date=2026-11-02")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["summary"]["expected"], 2)
+        data = response.get_json()
+        self.assertEqual(data["summary"]["expected"], 2)
+        self.assertEqual(data["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(data["summary"]["clockedIn"], 2)
         self.assertEqual(
-            [row["location"] for row in response.get_json()["locations"]],
+            [row["location"] for row in data["locations"]],
             ["Kingston", "Montego Bay"],
         )
-        kingston_shift = response.get_json()["locations"][0]["roles"][0]["shifts"][0]
+        kingston = data["locations"][0]
+        kingston_role = kingston["roles"][0]
+        kingston_shift = kingston_role["shifts"][0]
         self.assertEqual(kingston_shift["shiftStart"], "01:00")
+        self.assertEqual(kingston["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(kingston_role["summary"]["attendancePercent"], 100.0)
         self.assertEqual(kingston_shift["summary"]["attendancePercent"], 100.0)
         self.assertEqual(kingston_shift["summary"]["late"], 1)
+
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE attendance_shift_records SET status='absent'
+                WHERE tenant_id=? AND schedule_run_id='run-1' AND employee_id='emp-b'
+                """,
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        mixed = self.admin.get("/api/attendance/dashboard?date=2026-11-02").get_json()
+        self.assertEqual(mixed["summary"]["attendancePercent"], 50.0)
+        self.assertEqual(mixed["locations"][0]["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(mixed["locations"][0]["roles"][0]["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(mixed["locations"][0]["roles"][0]["shifts"][0]["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(mixed["locations"][1]["summary"]["attendancePercent"], 0.0)
         with closing(scheduler.database_connect()) as connection, connection:
             connection.execute(
                 "UPDATE tenants SET membership_tier='bronze' WHERE tenant_id=?",

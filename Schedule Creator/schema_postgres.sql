@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS schedule_locations (
     UNIQUE (tenant_id, bamboo_schedule_id)
 );
 
+CREATE TABLE IF NOT EXISTS schedule_location_roles (
+    id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
+    schedule_location_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    role_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, id),
+    UNIQUE (tenant_id, schedule_location_id, role_key),
+    FOREIGN KEY (tenant_id, schedule_location_id)
+        REFERENCES schedule_locations (tenant_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS employees (
     employee_id TEXT NOT NULL,
     tenant_id TEXT NOT NULL DEFAULT current_setting('app.tenant_id', true),
@@ -258,6 +271,13 @@ ALTER TABLE schedule_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schedule_locations FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON schedule_locations;
 CREATE POLICY tenant_isolation ON schedule_locations
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+ALTER TABLE schedule_location_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schedule_location_roles FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON schedule_location_roles;
+CREATE POLICY tenant_isolation ON schedule_location_roles
     USING (tenant_id = current_setting('app.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
