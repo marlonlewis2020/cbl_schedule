@@ -3064,12 +3064,9 @@ def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
     g.tenant_status = None
     g.tenant_membership_status = None
-    if DATABASE_URL and not http_allowed_for_client(): # and 
+    if DATABASE_URL and not http_allowed_for_client(): 
         if not request.is_secure:
-            return (
-                "Request is not secure.",
-                400,
-            )
+            pass
         return (
             "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
             400,
