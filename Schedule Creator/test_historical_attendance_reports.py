@@ -24,15 +24,27 @@ class HistoricalAttendanceReportTests(unittest.TestCase):
     def test_dashboard_branding_is_saved(self):
         from test_attendance_snapshot import LOGO
         self.seed_week()
-        with patch.object(scheduler, "current_app_config", return_value={"businessName": "Saved Business", "logoDataUrl": LOGO}):
+        branding = {"businessName": "Saved Business", "logoDataUrl": LOGO,
+                "supportingImages": [LOGO], "reportTheme": "dark",
+                "primaryColor": "#123456", "accentColor": "#abcdef"}
+        with patch.object(scheduler, "current_app_config", return_value=branding):
             response = self.create_week(self.admin, self.admin_headers)
         self.assertEqual(response.status_code, 201)
+        report = response.get_json()["report"]
+        self.assertEqual(report["supportingImages"], [LOGO])
+        self.assertEqual(report["reportTheme"], "dark")
+        self.assertEqual(report["primaryColor"], "#123456")
+        self.assertEqual(report["accentColor"], "#abcdef")
         report_id = response.get_json()["id"]
         path = f"/api/attendance/historical-reports/{report_id}/download?format=html"
         with patch.object(scheduler, "current_app_config", side_effect=AssertionError("No current branding")):
             response = self.admin.get(path)
         self.assertIn(b"Saved Business", response.data)
         self.assertIn(LOGO.encode(), response.data)
+        self.assertIn(b'"reportTheme":"dark"', response.data)
+        self.assertIn(b'"supportingImages":["data:image/png;base64,', response.data)
+        self.assertIn(b'"primaryColor":"#123456"', response.data)
+        self.assertIn(b'"accentColor":"#abcdef"', response.data)
         self.assertIn("img-src data:", response.headers["Content-Security-Policy"])
 
     def add_shift(

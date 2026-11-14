@@ -42,12 +42,24 @@ details summary{cursor:pointer;font-weight:600}details p{margin-top:10px}#printS
 @media(max-width:1000px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){main{padding:14px}.panel{padding:16px}header{align-items:flex-start;flex-direction:column}.kpis{gap:10px}.kpi{padding:14px}.kpi strong{font-size:25px}.risks{grid-template-columns:1fr}.filters label{min-width:120px}.donut-layout{gap:12px}.panel-head{align-items:flex-start;flex-direction:column}}
 @media print{body{background:white;color:#111}main{padding:0;max-width:none}.toolbar,.filters,.chart-hint{display:none}#printScope{display:block}.panel,.kpi{box-shadow:none;break-inside:avoid}.grid{display:block}.kpis{grid-template-columns:repeat(4,1fr)}.tablewrap{max-height:none;overflow:visible}th{position:static}thead{display:table-header-group}tr{break-inside:avoid}.risks{grid-template-columns:repeat(3,1fr)}a{color:inherit}footer{padding:10px 0}}
+:root[data-report-theme="dark"]{color-scheme:dark;--bg:#101820;--surface:#18252f;--ink:#e7edf1;--muted:#a9bac5;--line:#344650;--blue:#69b5ff;--teal:#4dd0c2;--amber:#ffd166;--red:#ff758f;--soft:#23333e}
+:root[data-report-theme="dark"] body{background:var(--bg)}
+:root[data-report-theme="dark"] .notice{background:#173b39;color:#dbf6f1}
+:root[data-report-theme="dark"] .notice.warning{background:#423617;color:#ffe8a6}
+:root[data-report-theme="dark"] .notice.error{background:#411f2a;color:#ffdce3}
+:root[data-report-theme="dark"] .badge{background:#203e58;color:#b9ddff}
+:root[data-report-theme="dark"] .badge.warn{background:#493b1e;color:#ffe0a0}
+:root[data-report-theme="dark"] .badge.bad{background:#4b222b;color:#ffc3ce}
+:root[data-report-theme="dark"] .badge.good{background:#173d3a;color:#b4f1e8}
+:root[data-report-theme="dark"] button:hover{background:#273c4b}
+#supportingImages{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#supportingImages img{max-width:100px;max-height:56px;object-fit:contain}
 </style>
 </head>
 <body>
 <main>
 <header>
- <div class="brand"><img id="companyLogo" hidden alt=""><div><p class="eyebrow" id="business"></p><h1>Workforce interval snapshot</h1><p class="subtle">A clear view of attendance. A focused view of what needs action.</p></div></div>
+ <div class="brand"><img id="companyLogo" hidden alt=""><div><p class="eyebrow" id="business"></p><h1>Workforce interval snapshot</h1><p class="subtle">A clear view of attendance. A focused view of what needs action.</p><div id="supportingImages"></div></div></div>
  <div class="toolbar"><button id="reset">Reset filters</button><button id="print" class="primary">Print / Save PDF</button></div>
 </header>
 <div class="metadata" id="metadata"></div>
@@ -168,9 +180,18 @@ try{
  options('shift',all.map(shiftKey));
  for(const value of [...new Set(all.map(r=>r.status))].sort()){const opt=element('option',labels[value]||value);opt.value=value;$('status').append(opt);}
  $('business').textContent=data.businessName;
+ document.documentElement.dataset.reportTheme=data.reportTheme==='dark'?'dark':'light';
+ const colorPattern=/^#[0-9a-fA-F]{6}$/;
+ document.documentElement.style.setProperty('--blue',colorPattern.test(data.primaryColor)?data.primaryColor:'#176bd5');
+ document.documentElement.style.setProperty('--teal',colorPattern.test(data.accentColor)?data.accentColor:'#079998');
  if(data.logoDataUrl){
   if(!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(data.logoDataUrl))throw Error('Saved company logo is invalid');
   $('companyLogo').src=data.logoDataUrl;$('companyLogo').alt=data.businessName+' logo';$('companyLogo').hidden=false;
+ }
+ const imagePattern=/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+ for(const [index,image] of (Array.isArray(data.supportingImages)?data.supportingImages:[]).entries()){
+  if(!imagePattern.test(image))throw Error('Saved supporting image is invalid');
+  const supporting=document.createElement('img');supporting.src=image;supporting.alt=data.businessName+' supporting image '+(index+1);$('supportingImages').append(supporting);
  }
  document.title=data.businessName+' | Workforce snapshot | '+fmt(data.cutoff);
  for(const [label,value] of [['Snapshot cutoff',fmt(data.cutoff)],['Generated',fmt(data.generatedAt)],['Source refreshed',fmt(data.lastSyncedAt)],['Shift source',data.shiftSource]]){

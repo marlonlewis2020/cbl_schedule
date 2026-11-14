@@ -929,8 +929,22 @@ def register(app, s):
                 logo = s.validate_logo_data_url(branding.get("logoDataUrl", ""))
                 if logo is None:
                     return jsonify(error="The saved business logo is invalid. Update branding before generating a report."), 400
+                raw_images = branding.get("supportingImages", [])
+                if not isinstance(raw_images, list) or len(raw_images) > 2:
+                    return jsonify(error="Business supporting images are invalid. Update branding before generating a report."), 400
+                supporting_images = [s.validate_logo_data_url(image) for image in raw_images if image]
+                if any(image is None for image in supporting_images):
+                    return jsonify(error="A business supporting image is invalid. Update branding before generating a report."), 400
                 report["businessName"] = branding["businessName"]
                 report["logoDataUrl"] = logo
+                report["supportingImages"] = supporting_images
+                report_theme = branding.get("reportTheme", "light")
+                report["reportTheme"] = (
+                    report_theme if isinstance(report_theme, str) and report_theme in {"light", "dark"}
+                    else "light"
+                )
+                report["primaryColor"] = branding.get("primaryColor", "#176bd5")
+                report["accentColor"] = branding.get("accentColor", "#079998")
                 run_key = _scope_run_key_prefix(context) + secrets.token_urlsafe(24)
                 cutoff = datetime.combine(
                     min(end, now.date()), time.max, tzinfo=s.ATTENDANCE_TIMEZONE

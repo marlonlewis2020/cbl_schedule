@@ -1550,6 +1550,19 @@ class TenantAuthenticationTests(unittest.TestCase):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
 
+    def test_workspace_readiness_flag_is_presentation_only_and_validated(self):
+        with patch.dict(os.environ, {"SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED": "0"}):
+            state = self.client.get("/api/tenant-auth/state").get_json()
+            self.assertFalse(state["workspaceReadinessEnabled"])
+            self.assertFalse(state["authenticated"])
+            self.assertEqual(self.client.get("/api/attendance").status_code, 401)
+        with patch.dict(os.environ, {"SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED": "yes"}):
+            self.assertTrue(
+                self.client.get("/api/tenant-auth/state").get_json()["workspaceReadinessEnabled"]
+            )
+        with patch.dict(os.environ, {"SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED": "invalid"}):
+            self.assertTrue(scheduler.workspace_readiness_enabled())
+
     def test_existing_scrypt_password_support_preserves_mfa_and_stored_hash(self):
         import hashlib
 
@@ -1852,6 +1865,8 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         self.assertEqual(defaults["businessName"], "Celebration Brands Limited")
         self.assertEqual(defaults["teamName"], "Schedule Management")
         self.assertEqual(defaults["tenantId"], "cbljm")
+        self.assertEqual(defaults["supportingImages"], [])
+        self.assertEqual(defaults["reportTheme"], "light")
 
         logo = "data:image/png;base64," + base64.b64encode(
             b"\x89PNG\r\n\x1a\n"
@@ -1861,6 +1876,8 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
             "teamName": "Operations",
             "tenantId": "acme-hr",
             "logoDataUrl": logo,
+            "supportingImages": [logo, logo],
+            "reportTheme": "dark",
             "primaryColor": "#123456",
             "accentColor": "#abcdef",
         }
@@ -1868,6 +1885,8 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.get_json()["tenantId"], "acme-hr")
         self.assertEqual(saved.get_json()["teamName"], "Operations")
+        self.assertEqual(saved.get_json()["supportingImages"], [logo, logo])
+        self.assertEqual(saved.get_json()["reportTheme"], "dark")
         with closing(scheduler.database_connect()) as connection:
             business_name = connection.execute(
                 "SELECT business_name FROM tenants WHERE tenant_id = ?",
@@ -1881,6 +1900,12 @@ class DirectoryAndBambooApiTests(unittest.TestCase):
         self.assertEqual(self.client.put("/api/app-config", json=config).status_code, 400)
         config["tenantId"] = "acme-hr"
         config["logoDataUrl"] = "data:image/png;base64,SGVsbG8="
+        self.assertEqual(self.client.put("/api/app-config", json=config).status_code, 400)
+        config["logoDataUrl"] = logo
+        config["supportingImages"] = [logo, logo, logo]
+        self.assertEqual(self.client.put("/api/app-config", json=config).status_code, 400)
+        config["supportingImages"] = [logo]
+        config["reportTheme"] = "auto"
         self.assertEqual(self.client.put("/api/app-config", json=config).status_code, 400)
 
     def test_bamboo_key_requires_successful_tenant_validation_before_promotion(self):

@@ -18,6 +18,53 @@ body{
     color:var(--ink);
     background:var(--bg)
 }
+.workspace-readiness{
+    position:fixed;
+    inset:0;
+    z-index:2000;
+    display:grid;
+    place-items:center;
+    padding:24px;
+    background:var(--bg);
+    color:var(--ink)
+}
+.workspace-readiness[hidden]{display:none}
+.workspace-readiness-panel{
+    width:min(560px,100%);
+    padding:24px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    box-shadow:0 10px 32px #15374620
+}
+.workspace-readiness-panel h2{margin:8px 0;font-size:20px}
+.workspace-readiness-panel p{line-height:1.55}
+.workspace-readiness-panel ul{padding-left:22px;line-height:1.6}
+.workspace-readiness-panel .actions{margin-top:16px}
+.workspace-readiness-spinner{
+    width:30px;
+    height:30px;
+    border:3px solid var(--line);
+    border-top-color:#087f5b;
+    border-radius:50%;
+    animation:readiness-spin .8s linear infinite
+}
+@keyframes readiness-spin{to{transform:rotate(360deg)}}
+.readiness-limited{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:10px 14px;
+    border:1px solid #d59b23;
+    border-radius:6px;
+    background:#fff5d8;
+    color:#4b390b
+}
+.readiness-limited[hidden]{display:none}
+.readiness-limited button{flex:0 0 auto}
+@media(prefers-reduced-motion:reduce){.workspace-readiness-spinner{animation:none;border-top-color:var(--line);border-right-color:#087f5b}}
+@media(max-width:600px){.workspace-readiness{padding:14px}.workspace-readiness-panel{padding:18px}.readiness-limited{align-items:flex-start;flex-direction:column}}
 button,input,select{
     font:inherit;
     color:inherit
@@ -385,6 +432,26 @@ select,input{
     border-radius:13px;
     margin-bottom:20px;
     min-width:0
+}
+.supporting-image-settings{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:14px;
+    margin:10px 0
+}
+.supporting-image-setting{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:end;
+    gap:8px;
+    padding:10px 0;
+    border-top:1px solid var(--line)
+}
+.supporting-image-setting img{
+    grid-column:1/-1;
+    max-width:180px;
+    max-height:96px;
+    object-fit:contain
 }
 .attendance-group{
     margin-bottom:24px

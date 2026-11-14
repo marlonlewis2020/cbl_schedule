@@ -157,8 +157,20 @@ def capture(s, tenant, cutoff, run_key, missed=False, now=None):
         logo = s.validate_logo_data_url(branding.get("logoDataUrl", ""))
         if logo is None:
             raise ValueError("The saved business logo is invalid. Update branding before capturing a report.")
+        raw_images = branding.get("supportingImages", [])
+        if not isinstance(raw_images, list) or len(raw_images) > 2:
+            raise ValueError("Business supporting images are invalid. Update branding before capturing a report.")
+        supporting_images = [s.validate_logo_data_url(image) for image in raw_images if image]
+        if any(image is None for image in supporting_images):
+            raise ValueError("A business supporting image is invalid. Update branding before capturing a report.")
+        report_theme = branding.get("reportTheme", "light")
+        if not isinstance(report_theme, str) or report_theme not in {"light", "dark"}:
+            report_theme = "light"
         payload = {"cutoff": cutoff.isoformat(), "generatedAt": now.isoformat(),
                    "businessName": branding["businessName"], "logoDataUrl": logo,
+                   "supportingImages": supporting_images, "reportTheme": report_theme,
+                   "primaryColor": branding.get("primaryColor", "#176bd5"),
+                   "accentColor": branding.get("accentColor", "#079998"),
                    "refreshError": refresh_error, "attendance": data}
         payload["workbook"] = base64.b64encode(workbook(payload)).decode("ascii")
         payload["html"] = attendance_snapshot.render(payload)

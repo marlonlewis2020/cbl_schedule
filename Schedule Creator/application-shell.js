@@ -16,12 +16,15 @@
         catch(error){
             if(section==='trades'&&!params.has('view')&&!params.has('adminView')){
                 try{profile=await api('/api/application/state');}catch{location.replace('/signin');return;}
+            }else if(section==='help'){
+                try{profile=await api('/api/access/application-state');}
+                catch{location.replace('/signin?'+new URLSearchParams({experience:'admin',next:location.pathname+location.search}));return;}
             }else if(section==='hub'){return;}
             else{location.replace('/signin?'+new URLSearchParams({experience:owner?'owner':workforce?'workforce':'admin',next:location.pathname+location.search}));return;}
         }
         let nav=profile.role==='owner'?[['Business','/app/owner'],['Billing','/app/billing?view=owner']]:
-            profile.role==='admin'?[['Scheduling','/'],['Trade approvals','/app/trades?adminView=1'],['Business','/app/business'],['Billing','/app/billing']]:
-            [['My workspace','/app/access'],['Shift trades','/app/trades'+(params.get('view')==='employee'?'?view=employee':'')]];
+            profile.role==='admin'?[['Scheduling','/'],['Trade approvals','/app/trades?adminView=1'],['Business','/app/business'],['Billing','/app/billing'],['Help & knowledge base','/app/help']]:
+            [['My workspace','/app/access'],['Shift trades','/app/trades'+(params.get('view')==='employee'?'?view=employee':'')],['Help & knowledge base','/app/help']];
         if(profile.role==='admin'&&!profile.isPrimaryAdmin)nav=nav.filter(([,url])=>url!=='/app/billing');
         if(profile.role==='manager'&&profile.hasPersonalView){
             nav.push(['Personal view','/app/access?view=employee'],['Management view','/app/access']);

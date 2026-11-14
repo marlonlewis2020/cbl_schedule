@@ -32,6 +32,13 @@ authentication API is responding, and opens the app in Chrome. If port 5001 is
 already occupied, close the other server before starting this one. The app is
 available at <http://127.0.0.1:5001/>.
 
+The workspace readiness loading and recovery presentation is enabled by
+default. Set `SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED=0` in the server
+environment to restore the previous startup presentation; accepted values are
+`1`/`true`/`yes`/`on` and `0`/`false`/`no`/`off`. Restart the server after
+changing the setting. This flag only controls the presentation and never
+disables authentication, authorization, or data validation.
+
 ## Administrator sign-in and storage
 
 The app requires a business administrator to sign in before accessing scheduling

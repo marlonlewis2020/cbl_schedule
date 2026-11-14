@@ -654,10 +654,13 @@ function appSettings(){
 }
 let businessConfig={
     businessName:'Celebration Brands Limited',teamName:'Schedule Management',logoDataUrl:'',
+    supportingImages:[],reportTheme:'light',
     primaryColor:'#159bd5',accentColor:'#74bf16',tenantId:'cbljm',apiKeyConfigured:'false'
 },bambooPromotionToken='',defaultBusinessLogos=new WeakMap();
 async function loadBusinessConfig(){
     businessConfig=await directoryRequest('/app-config');
+    if(!Array.isArray(businessConfig.supportingImages))businessConfig.supportingImages=[];
+    if(!['light','dark'].includes(businessConfig.reportTheme))businessConfig.reportTheme='light';
 }
 function applyBranding(){
     let business=businessConfig.businessName||'Celebration Brands Limited';
@@ -676,7 +679,8 @@ function applyBranding(){
 }
 function businessSettingsPanel(){
     let c=businessConfig;
-    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs read-only requests to the tenant’s time-off and time-tracking endpoints. Only after both requests succeed can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business membership & administrators',`<p>Manage your business membership and administrators.</p><a class="button" href="/business">Manage membership &amp; administrators</a>`)
+    let imageControls=[0,1].map(index=>`<div class="supporting-image-setting"><label>Supporting image ${index+1}<input type="file" accept="image/png,image/jpeg,image/webp" data-supporting-image="${index}"></label><button type="button" data-action="removeSupportingImage" data-index="${index}" ${c.supportingImages?.[index]?'':'disabled'}>Remove</button>${c.supportingImages?.[index]?`<img src="${esc(c.supportingImages[index])}" alt="Supporting image ${index+1} preview">`:''}</div>`).join('');
+    return panel('Business branding',`<div class="grid"><label>Business name<input id="businessNameSetting" maxlength="120" value="${esc(c.businessName)}"></label><label>Team name<input id="teamNameSetting" maxlength="120" value="${esc(c.teamName)}"></label><label>BambooHR tenant ID<input id="tenantIdSetting" maxlength="63" pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-)*" value="${esc(c.tenantId)}"><small class="note">Used for all BambooHR operations. Saving a different tenant changes the app’s production API URL.</small></label><label>Primary color<input id="primaryColorSetting" type="color" value="${esc(c.primaryColor)}"></label><label>Accent color<input id="accentColorSetting" type="color" value="${esc(c.accentColor)}"></label><label>Generated report theme${select([['light','Light'],['dark','Dark']],c.reportTheme,'id="reportThemeSetting"')}</label></div><div class="actions"><button type="button" data-action="pickBusinessLogo">Choose business logo</button><button type="button" data-action="removeBusinessLogo">Remove uploaded logo</button><button class="primary" type="button" data-action="saveBusinessSettings">Save business settings</button><input id="businessLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="note">${c.logoDataUrl?'A custom logo is saved.':'No custom logo uploaded; the default logo is shown.'} PNG, JPEG, or WebP · maximum 2 MB. The default team name is Schedule Management.</p><h3>Supporting report images</h3><div class="supporting-image-settings">${imageControls}</div><p class="note">Add up to two PNG, JPEG, or WebP images, each no larger than 2 MB. New HTML reports embed saved images and use the selected report theme; existing reports remain unchanged.</p>`)+panel('BambooHR API key',`<p>Operational API key: <b>${c.apiKeyConfigured==='true'?'configured':'not configured'}</b>. A tested key is never saved automatically.</p><label>API key for testing<input id="bambooTestApiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a key to test"></label><div class="actions"><button type="button" data-action="testBambooKey">Test key for saved tenant</button><button type="button" class="primary" id="promoteBambooKey" data-action="promoteBambooKey" hidden>Use as app API key</button></div><p id="businessKeyStatus" role="status" aria-live="polite"></p><p class="note">Testing performs read-only requests to the tenant’s time-off and time-tracking endpoints. Only after both requests succeed can you explicitly promote the key; it is then stored encrypted for this business only and never shown again.</p>`)+panel('Business membership & administrators',`<p>Manage your business membership and administrators.</p><a class="button" href="/business">Manage membership &amp; administrators</a>`)
 }
 function pageAllowed(p){
     if(['source','meta'].includes(p)&&!tenantAuthPrimaryAdmin)return false;
@@ -4145,6 +4149,28 @@ function editChange(event){
 }
 document.addEventListener('change',editChange);
 document.addEventListener('change',e=>{
+    let supportingIndex=Number(e.target.dataset.supportingImage);
+    if(Number.isInteger(supportingIndex)&&supportingIndex>=0&&supportingIndex<2){
+        let file=e.target.files?.[0];
+        if(!file)return;
+        if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){
+            message('Choose a PNG, JPEG, or WebP supporting image no larger than 2 MB.',true);
+            e.target.value='';
+            return
+        }
+        let reader=new FileReader();
+        reader.onload=()=>{
+            let images=Array.isArray(businessConfig.supportingImages)?[...businessConfig.supportingImages]:[];
+            while(images.length<2)images.push('');
+            images[supportingIndex]=String(reader.result||'');
+            businessConfig.supportingImages=images;
+            render(true);
+            message('Supporting image selected. Save business settings to apply it.')
+        };
+        reader.onerror=()=>message('The selected supporting image could not be read.',true);
+        reader.readAsDataURL(file);
+        return
+    }
     if(e.target.id!=='businessLogoFile')return;
     let file=e.target.files?.[0];
     if(!file)return;
@@ -4232,6 +4258,14 @@ document.addEventListener('click',async e=>{
 }
 );
 async function action(a,element=null){
+    if(a==='retryWorkspaceReadiness'){
+        window.location.reload();
+        return
+    }
+    if(a==='continueWorkspaceReadiness'){
+        continueWorkspaceReadinessLimited();
+        return
+    }
     if(a==='toggleFeedbackHistory'){
         toggleFeedbackHistory();
         return
@@ -4272,6 +4306,16 @@ async function action(a,element=null){
             message('Logo removed from the pending settings. Save business settings to apply the default logo.');
             return
         }
+        if(a==='removeSupportingImage'){
+            let index=Number(element?.dataset.index),images=Array.isArray(businessConfig.supportingImages)?[...businessConfig.supportingImages]:[];
+            if(!Number.isInteger(index)||index<0||index>=2)throw Error('Choose a valid supporting image.');
+            while(images.length<2)images.push('');
+            images[index]='';
+            businessConfig.supportingImages=images;
+            render(true);
+            message('Supporting image removed from the pending settings. Save business settings to apply.');
+            return
+        }
         if(a==='saveBusinessSettings'){
             let config={
                 businessName:$('businessNameSetting')?.value.trim(),
@@ -4279,7 +4323,9 @@ async function action(a,element=null){
                 tenantId:$('tenantIdSetting')?.value.trim(),
                 primaryColor:$('primaryColorSetting')?.value,
                 accentColor:$('accentColorSetting')?.value,
-                logoDataUrl:businessConfig.logoDataUrl||''
+                logoDataUrl:businessConfig.logoDataUrl||'',
+                supportingImages:Array.isArray(businessConfig.supportingImages)?businessConfig.supportingImages:[],
+                reportTheme:$('reportThemeSetting')?.value||'light'
             };
             bambooPromotionToken='';
             let saved=await directoryRequest('/app-config',{method:'PUT',body:JSON.stringify(config)});
@@ -5713,8 +5759,48 @@ $('themeButton').onclick=()=>{
     queueSave()
 }
 ;
+let workspaceReadinessEnabled=true,workspaceReadinessTimer=null,workspaceReadinessLimited=false;
+function setWorkspaceReadiness(title,text,issues=[],state='loading'){
+    let overlay=$('workspaceReadinessOverlay');
+    if(!overlay)return;
+    $('workspaceReadinessTitle').textContent=title;
+    $('workspaceReadinessMessage').textContent=text;
+    let list=$('workspaceReadinessIssues');
+    list.replaceChildren();
+    for(let issue of issues){let item=document.createElement('li');item.textContent=issue;list.append(item)}
+    list.hidden=!issues.length;
+    $('workspaceReadinessSpinner').hidden=state!=='loading';
+    $('workspaceReadinessRetry').hidden=state==='loading';
+    $('workspaceReadinessContinue').hidden=state!=='optional';
+    $('workspaceReadinessSignIn').hidden=state!=='fatal';
+    $('workspaceReadinessReference').hidden=state!=='fatal';
+    $('workspaceReadinessSupport').hidden=state!=='fatal';
+    if(state==='fatal')$('workspaceReadinessReference').textContent='Reference: '+(window.crypto?.randomUUID?.()||Date.now().toString(36));
+    overlay.hidden=false
+}
+function finishWorkspaceReadiness(){
+    clearTimeout(workspaceReadinessTimer);
+    if($('workspaceReadinessOverlay'))$('workspaceReadinessOverlay').hidden=true
+}
+function continueWorkspaceReadinessLimited(){
+    workspaceReadinessLimited=true;
+    if($('content'))$('content').inert=true;
+    if($('notificationButton'))$('notificationButton').disabled=true;
+    if($('profileButton'))$('profileButton').disabled=true;
+    if($('readinessLimitedNotice'))$('readinessLimitedNotice').hidden=false;
+    finishWorkspaceReadiness()
+}
 async function init(){
     try{
+        let authResponse=await fetch('/api/tenant-auth/state'),authState=await authResponse.json();
+        if(!authResponse.ok||!authState.authenticated)throw Error(authState.error||'Your administrator session has expired.');
+        workspaceReadinessEnabled=authState.workspaceReadinessEnabled!==false;
+        if(!workspaceReadinessEnabled)finishWorkspaceReadiness();
+        tenantAuthCsrfToken=authState.csrfToken;
+        tenantAuthTenantId=authState.tenantId;
+        tenantAuthPrimaryAdmin=authState.isPrimaryAdmin===true;
+        if($('businessChangeRequestsLink'))$('businessChangeRequestsLink').hidden=!tenantAuthPrimaryAdmin;
+        tenantMembership=authState.membership;
         let encoded=atob($('payload').textContent.trim()),data=JSON.parse(new TextDecoder().decode(await inflate(Uint8Array.from(encoded,c=>c.charCodeAt(0)),'gzip')));
         model=migrateScheduleWeeks(data);
         if(document.querySelector('meta[name="cbl-empty-bootstrap"]')){
@@ -5748,13 +5834,6 @@ async function init(){
         await loadAcceptedSchedules();
         await loadDirectoryData();
         await loadBambooPublishStatus();
-        let authResponse=await fetch('/api/tenant-auth/state'),authState=await authResponse.json();
-        if(!authResponse.ok||!authState.authenticated)throw Error(authState.error||'Your administrator session has expired.');
-        tenantAuthCsrfToken=authState.csrfToken;
-        tenantAuthTenantId=authState.tenantId;
-        tenantAuthPrimaryAdmin=authState.isPrimaryAdmin===true;
-        if($('businessChangeRequestsLink'))$('businessChangeRequestsLink').hidden=!tenantAuthPrimaryAdmin;
-        tenantMembership=authState.membership;
         await loadSharedRosterSettings();
         await loadSharedMetaSettings();
         model.user={firstName:authState.displayName||'',email:authState.email||''};
@@ -5767,14 +5846,37 @@ async function init(){
         render();
         startAttendancePolling();
         startNotificationPolling();
+        let optionalIssues=[
+            acceptedScheduleError&&'Accepted schedules: '+acceptedScheduleError,
+            directoryError&&'Employee directory or schedule locations: '+directoryError,
+            publishError&&'BambooHR publishing status: '+publishError,
+            sharedRosterError&&'Shared roster settings: '+sharedRosterError,
+            sharedMetaError&&'Shared META settings: '+sharedMetaError,
+            attendanceSyncStatus&&'Attendance data: '+attendanceSyncStatus,
+            storageMode==='session'&&'Browser storage is session-only; changes may not survive closing this tab.'
+        ].filter(Boolean);
+        if(workspaceReadinessEnabled&&optionalIssues.length){
+            setWorkspaceReadiness('Some connections are unavailable','Loaded schedules and pages remain available to browse. Continue read-only to disable edits, generation, attendance corrections, and publishing until integrations recover.',optionalIssues,'optional')
+        }
+        else finishWorkspaceReadiness()
     }
     catch(err){
-        $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'
+        if(workspaceReadinessEnabled){
+            setWorkspaceReadiness('Workspace could not be opened',err.message+' Protected workspace actions are unavailable until initialization succeeds.',[],'fatal')
+        }
+        else $('content').innerHTML='<div class="empty">Unable to open workspace: '+esc(err.message)+'</div>'
     }
 
 }
 if(!globalThis.TEST_MODE){
     if(typeof globalThis.CBL_STORAGE_BRIDGE==='function')globalThis.CBL_STORAGE_BRIDGE();
+    workspaceReadinessTimer=setTimeout(()=>{
+        if(workspaceReadinessEnabled&&!$('workspaceReadinessOverlay')?.hidden){
+            $('workspaceReadinessTitle').textContent='Still preparing your workspace';
+            $('workspaceReadinessMessage').textContent='This is taking longer than usual. Retry or wait while essential data loads.';
+            $('workspaceReadinessRetry').hidden=false
+        }
+    },20000);
     init().finally(initHeaderCollapse)
 }
 else initHeaderCollapse();

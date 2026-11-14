@@ -40,11 +40,30 @@ button{cursor:pointer}button:hover{background:#eaf3ff}button:focus-visible,selec
 @media(max-width:900px){.overview-grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){body{padding:14px}main{padding:0}section{padding:16px}.kpi{padding:12px}.kpi b{font-size:24px}}
 @media print{body{background:white;padding:0}section{box-shadow:none;break-inside:avoid}.filters,#printReport{display:none}.overview-grid{display:block}.scroll{max-height:none;overflow:visible}thead{display:table-header-group}}
+:root[data-report-theme="dark"]{color-scheme:dark;color:#e7edf1;background:#101820}
+:root[data-report-theme="dark"] body{background:#101820;color:#e7edf1}
+:root[data-report-theme="dark"] main{background:transparent}
+:root[data-report-theme="dark"] section{background:#18252f;border-color:#344650;box-shadow:none}
+:root[data-report-theme="dark"] .subtle,:root[data-report-theme="dark"] .note,:root[data-report-theme="dark"] #scope{color:#a9bac5}
+:root[data-report-theme="dark"] th{background:#203946;color:#dcebf3}
+:root[data-report-theme="dark"] td{border-color:#344650}
+:root[data-report-theme="dark"] select,:root[data-report-theme="dark"] input,:root[data-report-theme="dark"] button{background:#213b4b;color:#e7edf1;border-color:#45606f}
+:root[data-report-theme="dark"] .warning{background:#423617;color:#ffe8a6}
+.supporting-image-strip{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.supporting-image-strip img{max-width:100px;max-height:56px;object-fit:contain}
+:root{--report-primary:#176bd5;--report-accent:#079998}
+th{background:var(--report-primary);color:#fff}
+.kpi{border-left-color:var(--report-primary)}
+.kpi:nth-child(3n){border-left-color:var(--report-accent)}
+.detail-heading{color:var(--report-primary)}
+.chart-legend span:before{background:var(--report-primary)}
+:root[data-report-theme="dark"] th{background:var(--report-primary);color:#fff}
+:root[data-report-theme="dark"] .chart-caption{fill:#e7edf1}
 </style>
 </head>
 <body>
 <main>
-<header><img id="companyLogo" hidden alt=""><p class="subtle" id="business">Attendance insights · America/Jamaica</p><h1>Historical attendance trends</h1><p id="period"></p><p id="generated" class="subtle"></p></header>
+<header><img id="companyLogo" hidden alt=""><p class="subtle" id="business">Attendance insights · America/Jamaica</p><div id="supportingImages" class="supporting-image-strip"></div><h1>Historical attendance trends</h1><p id="period"></p><p id="generated" class="subtle"></p></header>
 <p class="warning">This report contains only saved attendance evidence for the selected period. Missing records are not treated as verified shifts, days off, assignments, or approved leave.</p>
 <section><h2>Report filters and controls</h2><p class="note">Selections update summary counts, comparisons, charts, patterns, and shift details. Select a distribution-center or employee row to drill down; clear filters to restore full scope.</p><div class="filters">
 <label>Distribution center<select id="locationFilter"><option value="">All in this report</option></select></label>
@@ -65,9 +84,18 @@ button{cursor:pointer}button:hover{background:#eaf3ff}button:focus-visible,selec
 (()=>{"use strict";
 const data=JSON.parse(document.getElementById("report-data").textContent);
 const $=id=>document.getElementById(id);
+document.documentElement.dataset.reportTheme=data.reportTheme==='dark'?'dark':'light';
+const validReportColor=value=>typeof value==='string'&&/^#[0-9a-fA-F]{6}$/.test(value)?value:null;
+document.documentElement.style.setProperty('--report-primary',validReportColor(data.primaryColor)||'#176bd5');
+document.documentElement.style.setProperty('--report-accent',validReportColor(data.accentColor)||'#079998');
 if(data.businessName)$("business").textContent=data.businessName+" · Attendance insights · America/Jamaica";
 if(data.logoDataUrl&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(data.logoDataUrl)){
  $("companyLogo").src=data.logoDataUrl;$("companyLogo").alt=(data.businessName||"Business")+" logo";$("companyLogo").hidden=false;
+}
+const supportingPattern=/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+for(const [index,image] of (Array.isArray(data.supportingImages)?data.supportingImages:[]).entries()){
+ if(!supportingPattern.test(image))throw Error("Saved supporting image is invalid");
+ const supporting=document.createElement("img");supporting.src=image;supporting.alt=(data.businessName||"Business")+" supporting image "+(index+1);$("supportingImages").append(supporting);
 }
 const detailSections=[$("employees").closest("section"),$("times").closest("section"),$("records").closest("section")];
 detailSections.forEach(section=>{section.hidden=true;section.dataset.selectionDetail="true";});
@@ -130,7 +158,7 @@ function drawBars(id,items,previousKey,currentKey,nameKey){
  const svg=$(id);svg.replaceChildren();const width=1000,rowHeight=30,height=Math.max(180,items.length*rowHeight+45);svg.setAttribute("viewBox",`0 0 ${width} ${height}`);
  if(!items.length){const empty=svgElement("text",{x:12,y:28,class:"chart-caption"});empty.textContent="No comparison data for these filters.";svg.append(empty);return;}
  items.forEach((item,index)=>{const y=24+index*rowHeight,label=text(item[nameKey]);const title=svgElement("text",{x:0,y:y+11,class:"chart-caption"});title.textContent=label.length>24?`${label.slice(0,21)}…`:label;svg.append(title);
-  for(const [value,offset,color] of [[item[currentKey],255,"#086fa0"],[item[previousKey],width-510,"#9eafbb"]]){if(value===null||value===undefined)continue;const barWidth=Math.max(1,Math.min(100,Number(value))*(width-570)/100);const rect=svgElement("rect",{x:offset,y:y-1,width:barWidth,height:9,rx:2,fill:color});const barTitle=svgElement("title");barTitle.textContent=`${label}: ${rate(value)}`;rect.append(barTitle);svg.append(rect);}
+    for(const [value,offset,color] of [[item[currentKey],255,validReportColor(data.primaryColor)||"#086fa0"],[item[previousKey],width-510,"#9eafbb"]]){if(value===null||value===undefined)continue;const barWidth=Math.max(1,Math.min(100,Number(value))*(width-570)/100);const rect=svgElement("rect",{x:offset,y:y-1,width:barWidth,height:9,rx:2,fill:color});const barTitle=svgElement("title");barTitle.textContent=`${label}: ${rate(value)}`;rect.append(barTitle);svg.append(rect);}
   const value=svgElement("text",{x:width-245,y:y+10,class:"chart-caption"});value.textContent=`${rate(item[currentKey])} / ${rate(item[previousKey])}`;svg.append(value);
  });
 }

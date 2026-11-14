@@ -11,6 +11,8 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-13", "Business branding now supports a report-only light/dark theme and two supporting images; new offline HTML captures freeze the saved name, logo, colors, theme and images."),
+    ("2026-11-13", "Added role-scoped Help and knowledge base with searchable FAQs/glossary, manager location-scoped submissions, administrator review, feedback and published revision history."),
     ("2026-11-05", "Trade cards and before/after shift previews follow light/dark themes. Both employees must finish the selected week with at least five shifts; other scheduling violations become explicit warnings requiring both employees, manager and administrator acknowledgement. Manual assignment overrides remain separate."),
     ("2026-11-05", "Billing navigation and setup checklist; tier feature dropdowns replace JSON entry, business selectors and Jamaica date/time controls simplify manual credits, and subscription status/history are displayed in readable fields."),
     ("2026-11-05", "Restored the previous access/hub/inbox appearance and administrator light/dark palettes. Shared trade styles are scoped to the popup, which follows the administrator's selected theme; trade and schedule-selection functionality is unchanged."),
@@ -75,7 +77,7 @@ SECTIONS = [
             ("p", "Data & settings (Source & backups and META operating days) is available only to the designated primary business administrator. The separate Settings page remains available to other business administrators. Source uploads and portable-workspace exports duplicated in Settings follow the same primary-admin restriction. Ordinary scheduling, schedule downloads and sharing are unchanged."),
             ("table", ["Group", "Pages"], [
                 ["Workspace", "Overview"],
-                ["People", "Employees, Schedule locations, Attendance"],
+                ["People", "Employees, Schedule locations, Attendance, Help & knowledge base"],
                 ["Integrations", "Publish to BambooHR, Workforce Links"],
                 ["Plan schedules", "Location roles, Roster settings, Controls & lock, Weekly schedules"],
                 ["Data & settings", "Source & backups, META · operating days (primary administrator only)"],
@@ -201,7 +203,7 @@ SECTIONS = [
                     ("h3", "BambooHR attendance sync"),
                     ("p", "Select Sync selected period to fetch time tracking and leave for the selected period (historical selections fetch up to 365 inclusive days). Polling pauses while the browser tab is hidden or closed."),
                     ("h3", "Historical weekly and monthly reports"),
-                    ("p", "New historical HTML reports use the snapshot-style executive overview: four KPI cards with DC and role comparison charts/tables. Detailed employee comparisons, patterns and shift evidence remain hidden until an employee or both a Distribution Centre and role are selected. Select chart labels/table rows or filters to drill down; Clear filters restores the overview. The active scope is always displayed. Print / Save PDF respects the selected view. Saved reports are unchanged and Excel retains full detail."),
+                    ("p", "New historical HTML reports use the snapshot-style executive overview: four KPI cards with DC and role comparison charts/tables. Detailed employee comparisons, patterns and shift evidence remain hidden until an employee or both a Distribution Centre and role are selected. Select chart labels/table rows or filters to drill down; Clear filters restores the overview. The active scope is always displayed. Print / Save PDF respects the selected view. New HTML reports capture saved branding, report theme and supporting images; saved reports are unchanged and Excel retains full detail."),
                     ("p", "Administrators and managers can generate historical Excel and interactive HTML reports from their attendance views. Weeks start Monday in America/Jamaica; monthly reports cover previous months. Admins can restrict location and role; managers see only currently authorized teams and records attributed to those teams in the reporting period. Saved historical report history is separate from point-in-time snapshot history and is not removed by snapshot deletion."),
                     ("p", "Reports compare the selected period with the preceding week/month and list employee/DC attendance, incident counts and dates. Pattern analysis uses the selected period only and needs at least three eligible shifts per pattern. Missing history or assignment evidence is unavailable, not zero. Missing schedules never prove days off. Patterns are observed associations, not causes or automatic disciplinary recommendations. Share report copies only with authorized recipients."),
                     ("h3", "Attendance snapshot downloads"),
@@ -209,7 +211,7 @@ SECTIONS = [
                     ("p", "Generate email body creates an executive subject, formatted preview and plain-text body from the selected snapshot's saved evidence, with location/role summaries and source warnings. Copy the subject and desired body, or manually select/copy text if browser clipboard support is unavailable, then attach the downloaded HTML yourself. No email is sent."),
                     ("p", "On Silver and above, Capture now refreshes BambooHR and saves immutable HTML and XLSX snapshots. Refresh history lists ready, stale, failed and missed captures, with View HTML, Download HTML and Download XLSX for available reports. Stale source explicitly means the source refresh failed or overnight boundaries were unavailable; inspect the warning and freshness timestamp. Workbooks include blue location/role/shift summaries and employee clock details; late names are amber and absent names red. Future shifts are excluded; approved leave is excluded from the denominator. The reporting day's shifts include verified overnight carry-in."),
                     ("p", "The interactive HTML dashboard presents executive KPI cards first, location/role/shift charts and summaries next, then employee exceptions and operational attention. Filter by location, role, Jamaica shift-start time, attendance status or employee/reason search; select chart groups to drill down, sort employee columns, reset filters or use Print / Save PDF. Exceptions only changes the detail register, not executive metrics. Confirmed attendance distinguishes matching clock-ins from worked-time validation: a late record without a matching punch or the required worked time is not confirmed. No expected shifts shows N/A. Missing punches and absences overlap; do not add them. Counts are shift records, not unique people or demand forecasts."),
-                    ("p", "New captures embed the company logo and business name saved in branding settings, with all data and charts included for offline use. Later branding changes do not rewrite a captured report. Older snapshots show only their saved evidence, without adding current branding. Downloaded reports contain employee information: share only with authorized recipients. Offline copies cannot be revoked when your app session expires."),
+                    ("p", "New captures embed the saved business name, logo, colors, report theme and up to two supporting images, with all data, charts and image assets included for offline use. Later branding changes do not rewrite a captured report. Older snapshots show only their saved evidence, without adding current branding. Downloaded reports contain employee information: share only with authorized recipients. Offline copies cannot be revoked when your app session expires."),
                     ("p", "The primary administrator may enable captures at 7 AM, 3 PM and 11 PM Jamaica time. Run Run Attendance Reports Worker.bat separately with the same database/environment as the app and use a supervisor for continuous deployment. The worker runs without a browser, exposes a last-seen heartbeat and records missed cutoffs rather than backfilling later evidence. Wait one minute between on-demand requests. Automatic email, recipient lists and delivery are deferred; no messages are sent. Staffing-vs-demand interval analytics remain separate Gold/Platinum work."),
                     ("h3", "Attendance shift source"),
                     ("ul", [
@@ -275,7 +277,7 @@ SECTIONS = [
                 "title": "5.13 Settings",
                 "blocks": [
                     ("ul", [
-                        "Business branding: business name, team name (default Schedule Management), logo (PNG/JPEG/WebP up to 2 MB), colours and the BambooHR tenant ID. Branding appears throughout the app and in the email signature.",
+                        "Business branding: business name, team name (default Schedule Management), logo (PNG/JPEG/WebP up to 2 MB), primary/accent colours, BambooHR tenant ID, a light/dark theme for generated reports, and up to two supporting report images (PNG/JPEG/WebP up to 2 MB each). These report settings are separate from your personal app theme. New HTML reports embed the saved settings for offline use; changes apply to future reports only.",
                         "BambooHR API key: Test key for saved tenant runs a read-only check. Use as app API key explicitly promotes a successfully tested key to the server.",
                         "Business membership & administrators: view the tier and manage administrators (see section 8).",
                         "Manager & employee access: create manager and employee sign-in accounts, reset passwords (optionally MFA) and disable or enable accounts (see section 5.14).",
@@ -439,6 +441,26 @@ SECTIONS = [
                 "Run python build_user_manual.py to regenerate docs/User-Manual.html and docs/User-Manual.docx.",
                 "Run the test suite; it fails if the committed HTML is out of date.",
             ]),
+        ],
+    },
+    {
+        "id": "help-knowledge",
+        "title": "14. Help and knowledge base",
+        "blocks": [
+            ("p", "Open Help & knowledge base from shared application navigation. Search the FAQ, glossary and business-approved knowledge bites by topic, or open the full user manual for role-based page guidance and step-by-step procedures."),
+            ("h3", "Manager submissions"),
+            ("ol", [
+                "Managers can submit a new FAQ, guide, tutorial, glossary entry or concise knowledge bite only for a Schedule Location assigned to their manager account.",
+                "Choose the intended audience and provide the complete title and content. To suggest an edit, select the published article; the system records the version you based the edit on.",
+                "A submission remains private and unpublished while pending. Check Your submissions for its status and administrator feedback.",
+            ]),
+            ("h3", "Administrator review"),
+            ("ul", [
+                "Business administrators review pending submissions and provide feedback when approving or rejecting them.",
+                "Only approved submissions are published. Approving an edit creates a new revision and retains the previously published version.",
+                "Submissions based on a superseded article revision cannot be published; ask the manager to refresh the article and resubmit.",
+            ]),
+            ("note", "Content is plain text. The application does not permit manager self-publication; tenant, role and Schedule Location scope are checked by the server."),
         ],
     },
 ]

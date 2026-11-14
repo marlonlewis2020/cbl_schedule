@@ -18,6 +18,11 @@ def render(payload: dict) -> str:
         "version": 1,
         "businessName": payload.get("businessName", "Workforce"),
         "logoDataUrl": payload.get("logoDataUrl", ""),
+        "supportingImages": payload.get("supportingImages", []),
+        "reportTheme": payload.get("reportTheme", "light")
+        if payload.get("reportTheme") in {"light", "dark"} else "light",
+        "primaryColor": payload.get("primaryColor", "#176bd5"),
+        "accentColor": payload.get("accentColor", "#079998"),
         "cutoff": payload["cutoff"],
         "generatedAt": payload["generatedAt"],
         "refreshError": payload.get("refreshError", ""),

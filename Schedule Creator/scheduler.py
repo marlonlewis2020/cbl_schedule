@@ -52,6 +52,7 @@ import session_idle
 import attendance_reports
 import historical_attendance_reports
 import application_shell
+import knowledge_base
 import meta_settings
 import roster_settings
 
@@ -88,6 +89,8 @@ DEFAULT_APP_CONFIG = {
     "businessName": "Celebration Brands Limited",
     "teamName": "Schedule Management",
     "logoDataUrl": "",
+    "supportingImages": [],
+    "reportTheme": "light",
     "primaryColor": "#159bd5",
     "accentColor": "#74bf16",
     "tenantId": "cbljm",
@@ -374,6 +377,9 @@ DEVELOPER_REQUESTS = (
     ),
 )
 WORKFORCE_IMPLEMENTATION_NOTES = {
+    "shared-html-report-branding": "Implemented: Business Settings now validates/saves a report-only light/dark theme and up to two PNG/JPEG/WebP supporting images (each <=2 MB) alongside existing name/logo/colors. Snapshot and historical report captures freeze name, logo, colors, theme and supporting images; both offline HTML templates embed images safely and apply the captured theme/brand colors. Existing saved reports are unchanged. Branding config, snapshot and historical capture tests, manual freshness, syntax and whitespace checks passed. Awaiting user acceptance; interactive browser/mobile/print verification remains outstanding.",
+    "faq-guides-knowledge-base": "Implemented: added a shared role-aware Help page with searchable built-in FAQs, glossary, step-by-step tutorial and plain-text index of the user manual. Tenant knowledge articles publish only after business-admin approval; manager submissions are location-scoped, audience-filtered, auditable, editable as drafts/resubmissions, and guarded against stale revisions. Published versions are immutable history; admin review and manager feedback/status are surfaced in Help. Notification policy is page-based only (no email/push): admins see the pending queue on Help and managers see status/feedback there. Added PostgreSQL RLS, tenant-scoped schema, safe text rendering, manual navigation and role/page tests. Five knowledge workflow tests, manual freshness, shared route test, syntax and whitespace checks passed. Awaiting user acceptance; interactive browser/mobile verification remains outstanding.",
+    "workspace-readiness": "Implemented: startup now has a default-on readiness overlay with a 20-second slow-load message, fatal recovery/sign-in path, optional-degraded read-only continuation, Retry via reload, and a validated SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED presentation-only flag. Limited mode inerts workspace content and disables profile/notification actions while preserving sign-out, navigation, theme and retry. Focused flag/auth test, Python/JavaScript syntax and DOM-stub optional/fatal/read-only transitions passed. Awaiting user acceptance; interactive browser/network-failure and viewport verification remain outstanding.",
     "attendance-source-specific-populations-and-history": "In progress: BambooHR attendance fetch now uses the provider's active employee directory, includes app-inactive and unregistered employees via BambooHR-namespaced IDs, and counts clock activity independent of approval. App mode filters to active app employees. Attendance/history queries are source-filtered; switching sources preserves the other source's rows. HTML/XLSX snapshots and historical reports identify their shift source; app overrides do not affect BambooHR-source history. Verified 27 attendance, 12 snapshot/report, source-population and provenance checks. Historical BambooHR active-status snapshots and provider historical schedule coverage remain unresolved; the historical suite retains two unrelated date/rate-limit assertion failures.",
     "primary-admin-change-request-visibility": "Implemented: the current primary business administrator receives a no-store read-only page and GET API with only business-facing titles and coarse status labels; developer IDs, descriptions, dependencies, timestamps, and private developer/identity requests are excluded. Current primary designation is checked for each request; anonymous and other-role sessions are denied. Developer routes and mutation controls are unchanged. The focused authorization/sanitization test and all 11 developer change-request tests passed. Awaiting user acceptance; browser role/viewport verification remains outstanding.",
     "action-feedback-toasts": "Implemented: user action feedback now shows in a dismissible seven-second toast queue. The latest 20 items are retained in tab session storage and shown from the expanded header; new attendance and pending trade alerts toast once after initial polling without changing bell read/archive state. History and active toasts clear on sign-out. Node syntax, mocked queue/timer/history/sign-out checks, and mocked notification deduplication passed. Awaiting user acceptance; interactive browser and keyboard verification remain outstanding.",
@@ -794,6 +800,7 @@ def initialize_database() -> None:
         connection.executescript(attendance_reports.SCHEMA)
         connection.executescript(roster_settings.SCHEMA)
         connection.executescript(meta_settings.SCHEMA)
+        connection.executescript(knowledge_base.SCHEMA)
         if "plan_id" not in {row[1] for row in connection.execute("PRAGMA table_info(billing_accounts)")}:
             connection.execute("ALTER TABLE billing_accounts ADD COLUMN plan_id TEXT NOT NULL DEFAULT ''")
         tenant_default = (
@@ -1613,6 +1620,9 @@ def initialize_database() -> None:
                 "attendance_reports",
                 "attendance_report_settings",
                 "billing_events",
+                "business_knowledge_articles",
+                "business_knowledge_submissions",
+                "business_knowledge_revisions",
             ):
                 connection.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
                 connection.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
@@ -1644,7 +1654,10 @@ def initialize_database() -> None:
                 (setting_key, setting_value, tenant_id)
             VALUES (?, ?, ?)
             """,
-            [(key, value, DEFAULT_TENANT_ID) for key, value in DEFAULT_APP_CONFIG.items()],
+            [
+                (key, json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value), DEFAULT_TENANT_ID)
+                for key, value in DEFAULT_APP_CONFIG.items()
+            ],
         )
         if DATABASE_URL:
             tenant_rows = connection.execute(
@@ -2428,13 +2441,21 @@ def valid_schedule(payload: object) -> bool:
     )
 
 
-def current_app_config() -> dict[str, str]:
+def current_app_config() -> dict[str, object]:
     with closing(database_connect()) as connection:
         rows = connection.execute(
             "SELECT setting_key, setting_value FROM application_settings WHERE tenant_id = ?",
             (active_tenant_id(),),
         ).fetchall()
     config = DEFAULT_APP_CONFIG | dict(rows)
+    if isinstance(config.get("supportingImages"), str):
+        try:
+            parsed_images = json.loads(config["supportingImages"])
+            config["supportingImages"] = parsed_images if isinstance(parsed_images, list) else []
+        except (TypeError, ValueError):
+            config["supportingImages"] = []
+    if config.get("reportTheme") not in {"light", "dark"}:
+        config["reportTheme"] = "light"
     config["apiKeyConfigured"] = str(bool(bamboohr_api_key())).lower()
     return config
 
@@ -2517,7 +2538,7 @@ def validate_logo_data_url(value: object) -> str | None:
     return value if valid_signature else None
 
 
-def valid_app_config(payload: object) -> dict[str, str] | None:
+def valid_app_config(payload: object) -> dict[str, object] | None:
     if not isinstance(payload, dict):
         return None
     business_name = payload.get("businessName")
@@ -2526,6 +2547,16 @@ def valid_app_config(payload: object) -> dict[str, str] | None:
     primary_color = payload.get("primaryColor")
     accent_color = payload.get("accentColor")
     logo_data_url = validate_logo_data_url(payload.get("logoDataUrl", ""))
+    supporting_images = payload.get("supportingImages", [])
+    report_theme = payload.get("reportTheme", "light")
+    if (
+        not isinstance(supporting_images, list)
+        or len(supporting_images) > 2
+        or any(validate_logo_data_url(image) is None for image in supporting_images)
+        or not isinstance(report_theme, str)
+        or report_theme not in {"light", "dark"}
+    ):
+        return None
     if (
         not isinstance(business_name, str)
         or not business_name.strip()
@@ -2545,6 +2576,8 @@ def valid_app_config(payload: object) -> dict[str, str] | None:
         "businessName": business_name.strip(),
         "teamName": team_name.strip(),
         "logoDataUrl": logo_data_url,
+        "supportingImages": supporting_images,
+        "reportTheme": report_theme,
         "primaryColor": primary_color.lower(),
         "accentColor": accent_color.lower(),
         "tenantId": tenant_id.lower(),
@@ -2555,7 +2588,7 @@ class BambooDomainConflict(Exception):
     pass
 
 
-def save_app_config(config: dict[str, str]) -> None:
+def save_app_config(config: dict[str, object]) -> None:
     with closing(database_connect()) as connection, connection:
         tenant_id = active_tenant_id()
         if "tenantId" in config:
@@ -2575,7 +2608,10 @@ def save_app_config(config: dict[str, str]) -> None:
             ON CONFLICT(tenant_id, setting_key)
             DO UPDATE SET setting_value = excluded.setting_value
             """,
-            [(key, value, active_tenant_id()) for key, value in config.items()],
+            [
+                (key, json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value), active_tenant_id())
+                for key, value in config.items()
+            ],
         )
         if "businessName" in config or "tenantId" in config:
             fields = []
@@ -2929,6 +2965,7 @@ def enforce_tenant_authentication():
         request.path.startswith("/api/developer/")
         or request.path.startswith("/api/tenant-auth/")
         or request.path.startswith("/api/access/")
+        or request.path.startswith("/api/help/")
     ):
         return None
     if request.path.startswith("/api/"):
@@ -3029,6 +3066,7 @@ def tenant_auth_state():
         isPrimaryAdmin=bool(profile and profile[1]),
         businessStatus=g.tenant_status if authenticated else None,
         membership=membership,
+        workspaceReadinessEnabled=workspace_readiness_enabled(),
         csrfToken=csrf_token,
         canBootstrap=(
             not DATABASE_URL
@@ -3036,6 +3074,18 @@ def tenant_auth_state():
             and request.remote_addr in {"127.0.0.1", "::1"}
         ),
     )
+
+
+def workspace_readiness_enabled() -> bool:
+    value = os.environ.get("SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED", "1").strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    app.logger.warning(
+        "Invalid SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED value; defaulting to enabled."
+    )
+    return True
 
 
 @app.post("/api/workspace/schedule-deletions")
@@ -11321,6 +11371,7 @@ billing_provider = membership_billing.register(app, sys.modules[__name__])
 attendance_reports.register(app, sys.modules[__name__])
 historical_attendance_reports.register(app, sys.modules[__name__])
 application_shell.register(app, sys.modules[__name__])
+knowledge_base.register(app, sys.modules[__name__])
 
 
 def main() -> None:

@@ -21,13 +21,15 @@ def register(app, s):
     @app.get("/app/<section>")
     def application_page(section):
         pages = {"access": "access.html", "trades": "trades.html", "business": "business-status.html",
-                 "owner": "hub.html", "billing": "billing.html"}
+             "owner": "hub.html", "billing": "billing.html", "help": "help.html"}
         if section not in pages:
             s.abort(404)
         if section == "owner":
             valid = s.platform_owner_authenticated()
         elif section == "access":
             valid = bool(s.access_user())
+        elif section == "help":
+            valid = s.tenant_authenticated() or bool(s.access_user())
         elif section == "trades":
             valid = s.tenant_authenticated() if request.args.get("adminView") == "1" else bool(s.access_user()) or s.tenant_authenticated()
         elif section == "billing" and request.args.get("view") == "owner":

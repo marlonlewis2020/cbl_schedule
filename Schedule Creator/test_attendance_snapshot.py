@@ -131,7 +131,14 @@ class SnapshotHtmlTests(unittest.TestCase):
 
     def test_new_captures_persist_saved_logo_and_complete_html(self):
         with closing(scheduler.database_connect()) as c, c:
-            for key, value in (("logoDataUrl", LOGO), ("businessName", "Snapshot Business")):
+            for key, value in (
+                ("logoDataUrl", LOGO),
+                ("businessName", "Snapshot Business"),
+                ("supportingImages", json.dumps([LOGO])),
+                ("reportTheme", "dark"),
+                ("primaryColor", "#123456"),
+                ("accentColor", "#abcdef"),
+            ):
                 c.execute("INSERT INTO application_settings(tenant_id,setting_key,setting_value) VALUES(?,?,?) ON CONFLICT(tenant_id,setting_key) DO UPDATE SET setting_value=excluded.setting_value",
                           (scheduler.DEFAULT_TENANT_ID, key, value))
         with patch.object(scheduler, "bamboohr_api_key", return_value=""):
@@ -141,7 +148,12 @@ class SnapshotHtmlTests(unittest.TestCase):
             payload = json.loads(c.execute("SELECT payload FROM attendance_reports").fetchone()[0])
         self.assertEqual(payload["logoDataUrl"], LOGO)
         self.assertEqual(payload["businessName"], "Snapshot Business")
+        self.assertEqual(payload["supportingImages"], [LOGO])
+        self.assertEqual(payload["reportTheme"], "dark")
+        self.assertEqual(payload["primaryColor"], "#123456")
+        self.assertEqual(payload["accentColor"], "#abcdef")
         self.assertIn('"logoDataUrl": "' + LOGO + '"', payload["html"])
+        self.assertIn('"supportingImages": ["' + LOGO + '"]', payload["html"])
         self.assertIn("Source warning:", payload["html"])
 
     def test_inert_data_content_policy_and_self_contained_assets(self):

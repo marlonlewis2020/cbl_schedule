@@ -1006,27 +1006,21 @@ Requests below remain pending unless implementation evidence is explicitly noted
   submission recheck current assignments, including linked-manager personal mode.
   Management choices remain editable and scoped.
 
-## Workspace readiness (`workspace-readiness`) - approved, implementation pending
+## Workspace readiness (`workspace-readiness`) - implemented, awaiting acceptance
 
-- Hide the scheduling workspace until essential initialization, authentication,
-  permissions and core data are ready. Use a branded, theme-aware spinner screen,
-  accessible status announcements and reduced-motion support.
-- Bound long waits; show a polished recovery page explaining the failure and
-  which functions remain available or unavailable. Offer Retry loading, safe
-  limited-functionality continuation and Contact support/helpdesk.
-- Essential failures block access. Optional integration failures need not block
-  safe local workflows; never disguise missing data or stale evidence as current.
-  Preserve saved workspace data and avoid duplicate writes when retrying.
-- Add the documented environment-file toggle
-  `SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED` (default enabled). Disabling
-  restores the existing startup presentation, not weaker authentication,
-  authorization or data-safety checks. Validate configuration values and document
-  the restart required to apply changes.
-- Cover successful/slow loading, essential/optional failures, continuation,
-  retry, accessibility, desktop/mobile themes, toggle-off behavior and saved-data
-  preservation. Browser-level network errors remain outside this feature unless
-  an offline fallback is separately implemented.
-- Recording only: no runtime feature or environment-file change made yet.
+- Startup uses a default-on, theme-aware readiness overlay. It shows a
+  slow-load state after 20 seconds, fatal recovery with sign-in/support reference,
+  or optional-integration recovery with explicitly read-only continuation.
+- Retry reloads the app to avoid duplicate initialization listeners or writes.
+  Limited mode makes `#content` inert and disables profile/notification actions;
+  sign-out, navigation, theme and retry remain available.
+- `SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED` accepts documented boolean
+  values, defaults on, and logs invalid values before safely defaulting on. It
+  only controls presentation; authentication and authorization remain enforced.
+  Restart the server after changing the environment setting.
+- Verified the focused flag/auth test, syntax, whitespace and DOM-stub loading,
+  optional, fatal and read-only transitions. Awaiting user acceptance;
+  interactive browser/network-failure and viewport checks remain outstanding.
 
 ## Timed action-feedback toasts (`action-feedback-toasts`) - low priority, implemented, awaiting acceptance
 
@@ -1128,46 +1122,34 @@ Requests below remain pending unless implementation evidence is explicitly noted
   rollback and saved-data preservation. Depends on `manager-employee-access`.
 - Recording only; implementation pending.
 
-## Help and knowledge base (`faq-guides-knowledge-base`) - approved, implementation pending
+## Help and knowledge base (`faq-guides-knowledge-base`) - implemented, awaiting acceptance
 
-- Dedicated FAQ/help page with user guide, full step-by-step tutorials,
-  glossaries and searchable, categorized knowledge bites. Keep existing manual
-  guidance consistent; provide accessible, role-aware, responsive navigation.
-- Managers submit new knowledge bites or edits within their business scope.
-  Authorized admins approve/reject with feedback; only approved versions publish.
-  Retain the current published version while changes await review.
-- Track submission/review states, authorship, reviewers, timestamps and revision
-  history; support resubmission and prevent conflicting/stale edits.
-- Enforce tenant/role/audience/submission/review permissions server-side.
-  Manager permissions cannot approve or self-publish submissions.
-- Separate shared product guidance from tenant operational knowledge; business
-  approval cannot overwrite platform documentation or expose other tenants.
-  Validate/sanitize content and preserve CSRF/audit protections.
-- Agree content formats, audiences, shared-document ownership and notifications
-  before implementation. Verify navigation/search, approval/rejection/feedback,
-  publication isolation, revisions, scoped access and safe rendering.
-- Separate request; depends on `manager-employee-access`. Recording only.
+- Added role-aware Help navigation/page with searchable built-in FAQs, glossary,
+  a step-by-step tutorial, and a plain-text index of the generated user manual.
+- Managers submit new/edit content only for their assigned Schedule Locations,
+  choose an audience, save drafts, and resubmit drafts/rejections. Server-side
+  role, tenant, location, CSRF, stale-revision and reviewer checks are enforced.
+- Business admins approve/reject with required feedback. Only approval publishes;
+  previous versions remain in immutable revision history. Content renders as
+  plain text, so submitted markup is never executed. PostgreSQL RLS is enabled.
+- Notification policy: no email/push notifications. Admin pending queue and
+  manager submission status/feedback appear in the Help page.
+- Five workflow tests, manual freshness, shared route test, syntax and whitespace
+  checks passed. Awaiting user acceptance; interactive browser/mobile checks
+  remain outstanding.
 
-## Shared HTML report branding (`shared-html-report-branding`) - approved, implementation pending
+## Shared HTML report branding (`shared-html-report-branding`) - implemented, awaiting acceptance
 
-- Every business may upload up to two supporting images in addition to its
-  logo. Authorized admins can preview, replace and remove images; validate safe
-  types, size and dimensions and enforce tenant/admin permissions server-side.
-- All generated HTML reports use consistent business name, logo, colors, images
-  and business-configured report theme through shared branding logic. Personal
-  browser theme preferences do not determine report styling.
-- Embed assets for offline use and freeze branding at generation. Changes affect
-  new reports only; never rewrite saved reports or borrow current branding for
-  historical captures.
-- Keep charts/tables/warnings readable, retain semantic attendance/warning
-  colors and accessible contrast, and provide responsive/print-friendly layouts
-  and attractive defaults when supporting images are absent.
-- Available to all businesses without changing report-generation entitlements.
-  Reuse existing logo validation/capture and cover every HTML report generator.
-- Agree image limits, placement and theme options before implementation. Verify
-  upload limits/validation, image management, scoped access, report consistency,
-  immutable/offline assets, defaults, contrast and mobile/print output.
-- Depends on `interactive-attendance-snapshot`. Recording only.
+- Business Settings supports a report-only light/dark theme and up to two
+  supporting PNG/JPEG/WebP images, each limited to 2 MB, with preview, replace
+  and remove controls. Existing server-side logo signature/type validation is
+  reused; app personal theme remains separate.
+- New snapshot and historical HTML/XLSX captures freeze business name, logo,
+  primary/accent colors, report theme and validated support images. Offline HTML
+  embeds the assets; saved captures are not rewritten after branding changes.
+- Existing report entitlements are unchanged. Snapshot/historical capture and
+  config tests, manual freshness, syntax and whitespace checks passed. Awaiting
+  user acceptance; interactive browser/mobile/print verification remains open.
 
 ## Historical report dashboard redesign (`historical-report-progressive-dashboard`) - implemented, awaiting acceptance
 

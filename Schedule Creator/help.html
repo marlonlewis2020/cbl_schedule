@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Help and knowledge base</title>
+    <link rel="stylesheet" href="/CBL-Scheduler2.css">
+    <link rel="stylesheet" href="/application-shell.css">
+    <script src="/session-idle.js"></script>
+    <script src="/application-shell.js" defer></script>
+    <style>
+        .help-page{max-width:1180px;margin:24px auto;padding:0 20px 36px}
+        .help-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:20px}
+        .help-heading h1{margin:0 0 6px;font-size:22px}
+        .help-heading p{margin:0;color:var(--muted)}
+        .help-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.8fr);gap:28px;align-items:start}
+        .help-section{margin:0 0 24px;min-width:0}
+        .help-section h2{margin:0 0 12px;font-size:17px}
+        .help-toolbar{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:12px 0}
+        .help-toolbar label{flex:1 1 260px}
+        .help-toolbar input,.help-form input,.help-form select,.help-form textarea,.review-feedback{width:100%;padding:9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink)}
+        .help-form label{display:block;margin:12px 0;font-weight:600}
+        .help-form textarea{min-height:160px;resize:vertical}
+        .help-list,.review-list{list-style:none;padding:0;margin:0}
+        .help-item,.review-item{border-top:1px solid var(--line);padding:14px 0}
+        .help-item h3,.review-item h3{margin:0;font-size:15px}
+        .help-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:6px 0}
+        .help-body{white-space:pre-wrap;line-height:1.55;margin:8px 0}
+        .review-item .actions{margin-top:10px}
+        .review-feedback{min-height:72px;resize:vertical}
+        .help-status{display:block;margin:8px 0;color:var(--muted)}
+        .help-link{display:inline-block;margin:4px 0}
+        .help-empty{color:var(--muted)}
+        @media(max-width:850px){.help-layout{grid-template-columns:1fr}.help-page{padding:0 12px 24px}}
+        @media(max-width:560px){.help-heading{display:block}.help-heading a{margin-top:12px}}
+    </style>
+</head>
+<body>
+    <main class="help-page">
+        <header class="help-heading">
+            <div><h1>Help and knowledge base</h1><p>Search practical answers and business-approved guidance.</p></div>
+            <a class="help-link" href="/user-manual" target="_blank" rel="noopener noreferrer">Open full user manual</a>
+        </header>
+        <output id="helpStatus" class="help-status" aria-live="polite">Loading help content...</output>
+        <div class="help-layout">
+            <div>
+                <section class="help-section" aria-labelledby="helpLibraryHeading">
+                    <h2 id="helpLibraryHeading">Help library</h2>
+                    <div class="help-toolbar">
+                        <label>Search help<input id="helpSearch" type="search" placeholder="Search topics, terms, or answers"></label>
+                        <label>Topic<select id="helpCategory"><option value="">All topics</option></select></label>
+                    </div>
+                    <ul id="helpArticleList" class="help-list"></ul>
+                </section>
+                <section id="managerSubmissionSection" class="help-section" aria-labelledby="submitKnowledgeHeading" hidden>
+                    <h2 id="submitKnowledgeHeading">Suggest a knowledge bite</h2>
+                    <form id="knowledgeSubmissionForm" class="help-form">
+                        <label>Suggest an edit to an existing article<select name="articleId" id="knowledgeArticleSelect"><option value="">New knowledge bite</option></select></label>
+                        <input type="hidden" name="baseRevision">
+                        <input type="hidden" name="submissionId">
+                        <label>Title<input name="title" minlength="3" maxlength="160" required></label>
+                        <label>Category<select name="category" required><option>FAQ</option><option>User guide</option><option>Tutorial</option><option>Glossary</option><option>Knowledge bite</option></select></label>
+                        <label>Audience<select name="audience" required><option value="all">All users</option><option value="manager">Managers</option><option value="employee">Employees</option></select></label>
+                        <label>Schedule location<select name="locationId" id="knowledgeLocation" required></select></label>
+                        <label>Content<textarea name="body" maxlength="8000" required></textarea></label>
+                        <div class="actions"><button type="submit" name="state" value="draft">Save draft</button><button type="submit" name="state" value="pending" class="primary">Submit for administrator review</button></div>
+                    </form>
+                    <output id="submissionStatus" class="help-status" aria-live="polite"></output>
+                    <h3>Your submissions</h3>
+                    <ul id="mySubmissionList" class="help-list"></ul>
+                </section>
+            </div>
+            <section id="adminReviewSection" class="help-section" aria-labelledby="reviewKnowledgeHeading" hidden>
+                <h2 id="reviewKnowledgeHeading">Administrator review</h2>
+                <p class="note">Only approved versions are published. Earlier published versions remain in history.</p>
+                <ul id="knowledgeReviewList" class="review-list"></ul>
+                <h3>Published revision history</h3>
+                <ul id="knowledgeHistoryList" class="help-list"></ul>
+            </section>
+        </div>
+    </main>
+    <script>
+        (()=>{
+            const status=document.getElementById('helpStatus');
+            const list=document.getElementById('helpArticleList');
+            const categoryFilter=document.getElementById('helpCategory');
+            const search=document.getElementById('helpSearch');
+            const managerSection=document.getElementById('managerSubmissionSection');
+            const adminSection=document.getElementById('adminReviewSection');
+            let data={role:'',articles:[],locations:[],submissions:[],revisions:[]},csrf='';
+            let manualEntries=[];
+            const builtIns=[
+                {category:'FAQ',title:'How do I publish a schedule?',body:'Accept the schedule first. Open Publish to BambooHR, choose the accepted shifts, review the preview, then explicitly confirm posting.'},
+                {category:'FAQ',title:'Which shifts determine Attendance?',body:'Attendance shift source selects accepted app schedules or BambooHR schedules. BambooHR clock activities provide attendance evidence in both modes.'},
+                {category:'Glossary',title:'Accepted schedule',body:'A saved schedule version explicitly accepted for use. It is distinct from an editable generated result and from shifts already published to BambooHR.'},
+                {category:'Glossary',title:'Schedule Location',body:'A configured BambooHR schedule mapping used to associate provider schedules with an app location and manager scope.'},
+                {category:'Glossary',title:'Location × Role pool',body:'A location and role combination configured for schedule generation, with its own staffing demand and shift requirements.'},
+                {category:'Glossary',title:'META',body:'The operating-day and intensity settings used to define location demand across the week.'},
+                {category:'Tutorial',title:'Generate and publish a weekly schedule',body:'1. Review Location roles, roster availability, and Controls & lock.\n2. Validate and lock the configuration.\n3. Generate the selected weeks and review coverage, constraints, and warnings.\n4. Accept the reviewed schedule.\n5. Open Publish to BambooHR, select accepted shifts, inspect the preview, and confirm the provider update.'},
+                {category:'Knowledge bite',title:'Where can I find the complete procedures?',body:'Open the full user manual for role-based navigation and step-by-step instructions. Business-approved knowledge bites appear here after administrator review.'}
+            ];
+            async function api(url,options={}){
+                const response=await fetch(url,{credentials:'same-origin',cache:'no-store',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+                const result=await response.json().catch(()=>({}));
+                if(!response.ok)throw Error(result.error||'Help request failed.');
+                return result
+            }
+            function node(tag,text,className){
+                const element=document.createElement(tag);
+                if(text!==undefined)element.textContent=text;
+                if(className)element.className=className;
+                return element
+            }
+            async function loadManualIndex(){
+                try{
+                    const response=await fetch('/user-manual',{credentials:'same-origin',cache:'no-store'});
+                    if(!response.ok)return [];
+                    const manual=new DOMParser().parseFromString(await response.text(),'text/html');
+                    return [...manual.querySelectorAll('main > section')].map(section=>{
+                        const heading=section.querySelector(':scope > h2');
+                        if(!heading)return null;
+                        const body=[...section.children].filter(child=>child!==heading).map(child=>child.textContent.trim()).filter(Boolean).join('\n');
+                        return {category:'User guide',title:heading.textContent.trim(),body}
+                    }).filter(item=>item&&item.body)
+                }catch{return []}
+            }
+            function renderArticles(){
+                const query=search.value.trim().toLocaleLowerCase(),category=categoryFilter.value;
+                const library=[...builtIns,...manualEntries,...data.articles];
+                const articles=library.filter(article=>(!category||article.category===category)&&(!query||`${article.title} ${article.body} ${article.category}`.toLocaleLowerCase().includes(query)));
+                list.replaceChildren();
+                for(const article of articles){
+                    const item=node('li',undefined,'help-item'),heading=node('h3',article.title),meta=node('div',`${article.category}${article.locationName&&article.locationName!=='All locations'?' · '+article.locationName:''}${article.revision?' · revision '+article.revision:''}`,'help-meta'),body=node('p',article.body,'help-body');
+                    item.append(heading,meta,body);
+                    if(data.role==='admin'&&article.id){
+                        const history=data.revisions.filter(revision=>revision.articleId===article.id);
+                        if(history.length){
+                            const details=document.createElement('details'),summary=node('summary','Revision history');
+                            details.append(summary);
+                            for(const revision of history){details.append(node('p',`Revision ${revision.revision} · ${revision.publishedAt} · ${revision.authorEmail} · reviewed by ${revision.reviewerEmail}`,'help-meta'),node('p',revision.body,'help-body'))}
+                            item.append(details)
+                        }
+                    }
+                    list.append(item)
+                }
+                if(!articles.length)list.append(node('li','No help articles match this search.','help-empty'))
+                categoryFilter.replaceChildren(node('option','All topics'));
+                categoryFilter.options[0].value='';
+                [...new Set(library.map(article=>article.category))].sort().forEach(value=>{const option=node('option',value);option.value=value;categoryFilter.append(option)});
+                categoryFilter.value=category
+            }
+            function renderSubmissions(){
+                const mine=document.getElementById('mySubmissionList');mine.replaceChildren();
+                for(const submission of data.submissions){
+                    const item=node('li',undefined,'help-item');
+                    item.append(node('h3',submission.title),node('p',`${submission.category} · ${submission.status}`,'help-meta'));
+                    if(submission.feedback)item.append(node('p',`Administrator feedback: ${submission.feedback}`,'help-body'));
+                    if(['draft','rejected'].includes(submission.status)){
+                        const edit=node('button','Edit / resubmit');edit.type='button';
+                        edit.addEventListener('click',()=>{
+                            const form=document.getElementById('knowledgeSubmissionForm');
+                            form.elements.submissionId.value=submission.id;
+                            form.elements.articleId.value=submission.articleId||'';
+                            form.elements.baseRevision.value=submission.baseRevision??'';
+                            form.elements.title.value=submission.title;
+                            form.elements.body.value=submission.body;
+                            form.elements.category.value=submission.category;
+                            form.elements.audience.value=submission.audience;
+                            form.elements.locationId.value=submission.locationId;
+                            form.scrollIntoView({block:'nearest'});
+                        });
+                        item.append(edit)
+                    }
+                    mine.append(item)
+                }
+                if(!data.submissions.length)mine.append(node('li','No submissions yet.','help-empty'))
+            }
+            function renderReviews(){
+                const review=document.getElementById('knowledgeReviewList');review.replaceChildren();
+                for(const submission of data.submissions){
+                    const item=node('li',undefined,'review-item'),heading=node('h3',submission.title),meta=node('p',`${submission.category} · ${submission.submittedRole} · ${submission.submittedEmail} · ${submission.submittedAt}`,'help-meta'),body=node('p',submission.body,'help-body'),feedback=document.createElement('textarea');
+                    feedback.className='review-feedback';feedback.maxLength=2000;feedback.placeholder='Required feedback for the submitter';feedback.setAttribute('aria-label',`Review feedback for ${submission.title}`);
+                    const actions=node('div',undefined,'actions');
+                    for(const [decision,label] of [['approved','Approve and publish'],['rejected','Reject with feedback']]){
+                        const button=node('button',label);button.type='button';button.dataset.reviewId=submission.id;button.dataset.decision=decision;button.addEventListener('click',async()=>{
+                            try{await api(`/api/help/submissions/${encodeURIComponent(submission.id)}/review`,{method:'POST',headers:{'X-CSRF-Token':csrf},body:JSON.stringify({decision,feedback:feedback.value})});status.textContent='Review saved.';await load()}
+                            catch(error){status.textContent=error.message}
+                        });actions.append(button)
+                    }
+                    item.append(heading,meta,body,feedback,actions);review.append(item)
+                }
+                if(!data.submissions.length)review.append(node('li','No submissions are awaiting review.','help-empty'))
+            }
+            async function load(){
+                try{
+                    let auth;
+                    try{auth=await api('/api/application/state')}
+                    catch{auth=await api('/api/access/application-state')}
+                    csrf=auth.csrfToken;
+                    data=await api('/api/help/knowledge');
+                    manualEntries=await loadManualIndex();
+                    managerSection.hidden=data.role!=='manager';adminSection.hidden=data.role!=='admin';
+                    const form=document.getElementById('knowledgeSubmissionForm');
+                    const location=document.getElementById('knowledgeLocation');
+                    if(data.role==='manager'){
+                        location.replaceChildren();
+                        for(const item of data.locations){const option=node('option',`${item.name} · ${item.location}`);option.value=item.id;location.append(option)}
+                        const edit=document.getElementById('knowledgeArticleSelect'),chosen=edit.value;edit.replaceChildren(node('option','New knowledge bite'));edit.options[0].value='';
+                        data.articles.filter(article=>article.locationId&&data.locations.some(item=>item.id===article.locationId)).forEach(article=>{const option=node('option',article.title);option.value=article.id;edit.append(option)});edit.value=chosen
+                    }
+                    renderArticles();renderSubmissions();renderReviews();
+                    status.textContent='';
+                }catch(error){status.textContent=error.message;status.className='help-status badtext'}
+            }
+            document.getElementById('knowledgeArticleSelect').addEventListener('change',event=>{
+                const article=data.articles.find(item=>item.id===event.target.value),form=document.getElementById('knowledgeSubmissionForm');
+                form.elements.submissionId.value='';
+                if(!article){form.elements.articleId.value='';form.elements.baseRevision.value='';return}
+                form.elements.title.value=article.title;form.elements.body.value=article.body;form.elements.category.value=article.category;form.elements.audience.value=article.audience;form.elements.locationId.value=article.locationId;form.elements.baseRevision.value=article.revision;
+            });
+            document.getElementById('knowledgeSubmissionForm').addEventListener('submit',async event=>{
+                event.preventDefault();const form=event.currentTarget,values=Object.fromEntries(new FormData(form));
+                values.articleId=values.articleId||null;values.baseRevision=values.baseRevision?Number(values.baseRevision):null;
+                values.state=event.submitter?.value||'pending';
+                try{await api('/api/help/submissions',{method:'POST',headers:{'X-CSRF-Token':csrf},body:JSON.stringify(values)});form.reset();status.textContent=values.state==='draft'?'Draft saved.':'Submitted for administrator review.';await load()}
+                catch(error){document.getElementById('submissionStatus').textContent=error.message}
+            });
+            search.addEventListener('input',renderArticles);categoryFilter.addEventListener('change',renderArticles);
+            load()
+        })();
+    </script>
+</body>
+</html>
