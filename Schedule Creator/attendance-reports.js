@@ -43,6 +43,13 @@
             ...(body===undefined?{}:{body:JSON.stringify(body)})});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Report request failed.');return data;
     }
+    async function requestExecutive(method='GET',body){
+        const state=method==='GET'?null:await (await fetch('/api/tenant-auth/state',{cache:'no-store'})).json();
+        const response=await fetch('/api/attendance/executive-reports',{method,cache:'no-store',
+            headers:{'Content-Type':'application/json',...(state?{'X-CSRF-Token':state.csrfToken}:{})},
+            ...(body===undefined?{}:{body:JSON.stringify(body)})});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Executive report request failed.');return data;
+    }
     async function mount(node){
         active=node;
         const heading=document.createElement('h3');heading.textContent='Attendance snapshots';
@@ -54,12 +61,48 @@
         const list=document.createElement('div');list.className='tablewrap';
         const emailPanel=document.createElement('section');emailPanel.hidden=true;
         const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('div');
+        const executivePanel=document.createElement('section');executivePanel.className='executive-report-settings';
+        const executiveTitle=document.createElement('h3');executiveTitle.textContent='Executive end-of-day report';
+        const executiveIntro=document.createElement('p');executiveIntro.textContent='Download a location-level attendance summary after each reporting day. Reports use shifts attributed to their start date; no employee register is included.';
+        const executiveControls=document.createElement('div');executiveControls.className='formgrid';
+        const executiveEnabledLabel=document.createElement('label'),executiveEnabled=document.createElement('input');
+        executiveEnabled.type='checkbox';executiveEnabledLabel.append(executiveEnabled,document.createTextNode(' Enable automatic generation'));
+        const delayLabel=document.createElement('label');delayLabel.append(document.createTextNode('Hours after day end'));
+        const delay=document.createElement('input');delay.type='number';delay.min='0';delay.max='24';delay.step='1';delay.value='0';delay.setAttribute('aria-label','Hours after reporting day ends');delayLabel.append(delay);
+        const executiveSave=document.createElement('button');executiveSave.type='button';executiveSave.textContent='Save executive report settings';
+        const executiveStatus=document.createElement('p');executiveStatus.setAttribute('role','status');
+        const executiveHistory=document.createElement('div');executiveHistory.className='tablewrap';
+        executiveControls.append(executiveEnabledLabel,delayLabel,executiveSave);
+        executivePanel.append(executiveTitle,executiveIntro,executiveControls,executiveStatus,executiveHistory);
         node.classList.add('collapsible');body.className='panel-body';
         summary.append(heading);body.append(intro,actions,status,list,emailPanel);
         details.append(summary,body);
-        actions.append(capture,refresh,toggle,remove);node.replaceChildren(details);
+        actions.append(capture,refresh,toggle,remove);node.replaceChildren(details,executivePanel);
         const selected=new Set();
         const updateSelection=()=>{remove.disabled=busy||!selected.size;remove.textContent=`Delete selected (${selected.size})`;};
+        async function loadExecutive(){
+            try{
+                const data=await requestExecutive();
+                executiveEnabled.checked=data.enabled;delay.value=String(data.delayHours);
+                executiveStatus.textContent=`Worker last seen: ${data.heartbeat?new Date(data.heartbeat).toLocaleString():'not yet connected'}. Reports run independently of an open browser.`;
+                const table=document.createElement('table'),thead=document.createElement('thead'),header=document.createElement('tr');table.dataset.excelDownload='true';
+                for(const text of ['Reporting day','Scheduled cutoff (Jamaica)','Generated','State','Report']){const th=document.createElement('th');th.textContent=text;header.append(th);}
+                thead.append(header);table.append(thead);
+                const tbody=document.createElement('tbody');
+                for(const report of data.reports){
+                    const row=document.createElement('tr');
+                    for(const value of [report.reportDate,report.cutoff,report.createdAt,report.error?`${report.state}: ${report.error}`:report.state]){const cell=document.createElement('td');cell.textContent=value||'';row.append(cell);}
+                    const output=document.createElement('td');
+                    if(['ready','stale'].includes(report.state)){
+                        const link=document.createElement('a');link.textContent=report.state==='stale'?'Download HTML (source warning)':'Download HTML';
+                        link.href=`/api/attendance/executive-reports/${encodeURIComponent(report.id)}/download`;output.append(link);
+                    }
+                    row.append(output);tbody.append(row);
+                }
+                if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=5;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
+                table.append(tbody);executiveHistory.replaceChildren(table);
+            }catch(error){executiveStatus.textContent=error.message;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=true;}
+        }
         async function showEmail(id){
             const response=await fetch(`/api/attendance/reports/${encodeURIComponent(id)}/email`,{cache:'no-store'});
             const data=await response.json();if(!response.ok)throw Error(data.error||'Email generation failed.');
@@ -127,12 +170,23 @@
         capture.onclick=()=>void action(async()=>{status.textContent='Refreshing source and capturing snapshot...';await request('POST',{});await load();});
         refresh.onclick=()=>void action(load);
         toggle.onclick=()=>void action(async()=>{await request('PUT',{enabled:!enabled});await load();});
+        executiveSave.onclick=async()=>{
+            const delayHours=Number(delay.value);
+            if(!Number.isInteger(delayHours)||delayHours<0||delayHours>24){executiveStatus.textContent='Choose a whole-hour delay from 0 to 24.';return;}
+            executiveSave.disabled=true;
+            try{
+                await requestExecutive('PUT',{enabled:executiveEnabled.checked,delayHours});
+                executiveStatus.textContent='Executive report settings saved.';
+                await loadExecutive();
+            }catch(error){executiveStatus.textContent=error.message;}
+            finally{executiveSave.disabled=false;}
+        };
         remove.onclick=()=>{
             const ids=[...selected];
             if(!ids.length||!window.confirm(`Permanently delete ${ids.length} selected snapshot(s), including HTML, XLSX and saved history? Attendance/schedules are unchanged. Downloaded or emailed copies cannot be recalled. Scheduled cutoffs will not regenerate.`))return;
             void action(async()=>{await request('DELETE',{ids,confirm:true});emailPanel.replaceChildren();emailPanel.hidden=true;await load();status.textContent=`Deleted ${ids.length} snapshot(s).`;});
         };
-        try{await load();}catch(error){status.textContent=error.message;capture.disabled=toggle.disabled=true;}
+        try{await Promise.all([load(),loadExecutive()]);}catch(error){status.textContent=error.message;capture.disabled=toggle.disabled=true;}
     }
     new MutationObserver(()=>{
         const node=document.getElementById('attendanceReports');

@@ -250,6 +250,8 @@ class TradeWorkflowTests(unittest.TestCase):
         self.assertEqual(manager.post(f"/api/access/trades/{trade}/action", headers=self.csrf,json=action).status_code, 200)
         admin_record = self.admin.get("/api/shift-trades").get_json()["trades"][0]
         self.assertEqual(admin_record["state"], "manager_accepted")
+        self.assertTrue(admin_record["createdAt"])
+        self.assertTrue(admin_record["updatedAt"])
         self.assertIn("approve", admin_record["actions"])
         self.assertTrue(admin_record["unread"])
         self.assertEqual(self.admin.post(f"/api/shift-trades/{trade}/read", headers=self.headers,

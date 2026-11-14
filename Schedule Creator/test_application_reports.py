@@ -22,6 +22,101 @@ class ApplicationReportTests(unittest.TestCase):
     portal_employee_client = test_scheduler.ManagerEmployeeAccessTests.portal_employee_client
     headers = {"X-CSRF-Token": "test-csrf-token"}
 
+    def test_executive_cutoff_uses_jamaica_day_end_and_exact_delay_bounds(self):
+        reporting_day = datetime(2026, 11, 9).date()
+        immediate = reports.executive_cutoff(reporting_day, 0, scheduler.ATTENDANCE_TIMEZONE)
+        delayed = reports.executive_cutoff(reporting_day, 24, scheduler.ATTENDANCE_TIMEZONE)
+        self.assertEqual(immediate, datetime(2026, 11, 10, 0, tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        self.assertEqual(delayed, datetime(2026, 11, 11, 0, tzinfo=scheduler.ATTENDANCE_TIMEZONE))
+        for invalid in (-1, 25, True):
+            with self.assertRaises(ValueError):
+                reports.executive_cutoff(reporting_day, invalid, scheduler.ATTENDANCE_TIMEZONE)
+
+    def test_executive_settings_are_gold_gated_and_validate_delay(self):
+        path = "/api/attendance/executive-reports"
+        self.assertEqual(self.admin.get(path).status_code, 403)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+        initial = self.admin.get(path)
+        self.assertEqual(initial.status_code, 200)
+        self.assertFalse(initial.get_json()["enabled"])
+        for value in (-1, 25, True, 1.5):
+            response = self.admin.put(path, headers=self.headers, json={"enabled": True, "delayHours": value})
+            self.assertEqual(response.status_code, 400)
+        saved = self.admin.put(path, headers=self.headers, json={"enabled": True, "delayHours": 24})
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(self.admin.get(path).get_json()["delayHours"], 24)
+
+    def test_executive_capture_is_aggregated_and_separate_from_snapshot_history(self):
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+            connection.executemany(
+                """
+                INSERT INTO attendance_shift_records
+                    (tenant_id,schedule_run_id,employee_id,shift_date,shift_start,status,source,reason,
+                     employee_name,location,role,clock_in_at,clock_in_timezone,worked_minutes,
+                     early_minutes,overtime_minutes,shift_end_at,updated_at)
+                VALUES(?,?,?,?,?,?,'schedule','',?,?,?,?,'America/Jamaica',?,?,?,?,'2026-11-10T12:00:00-05:00')
+                """,
+                [
+                    (scheduler.DEFAULT_TENANT_ID,"exec-present","emp-a","2026-11-09",8,"attended",
+                     "Ann Kingston","Kingston","Cashier","2026-11-09T08:03:00-05:00",450,0,0,"2026-11-09T16:00:00-05:00"),
+                    (scheduler.DEFAULT_TENANT_ID,"exec-absent","emp-b","2026-11-09",9,"absent",
+                     "Bob Montego","Montego Bay","Cashier",None,None,0,0,"2026-11-09T17:00:00-05:00"),
+                    (scheduler.DEFAULT_TENANT_ID,"exec-leave","emp-a","2026-11-09",10,"approved_leave",
+                     "Ann Kingston","Kingston","Cashier",None,None,0,0,"2026-11-09T18:00:00-05:00"),
+                ],
+            )
+        report_date = datetime(2026, 11, 9).date()
+        generated = datetime(2026, 11, 10, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+        cutoff = reports.executive_cutoff(report_date, 1, scheduler.ATTENDANCE_TIMEZONE)
+        with scheduler.app.app_context(), \
+             patch.object(scheduler, "bamboohr_api_key", return_value="fixture"), \
+             patch.object(scheduler, "bamboohr_json", return_value=[]), \
+             patch.object(scheduler, "sync_attendance_data"):
+            report_id = reports.capture_executive(
+                scheduler, scheduler.DEFAULT_TENANT_ID, report_date, cutoff, 1, now=generated,
+            )
+        with closing(scheduler.database_connect()) as connection:
+            state, payload_text = connection.execute(
+                "SELECT state,payload FROM attendance_reports WHERE tenant_id=? AND id=?",
+                (scheduler.DEFAULT_TENANT_ID, report_id),
+            ).fetchone()
+        payload = json.loads(payload_text)
+        self.assertEqual(state, "ready")
+        self.assertEqual(payload["summary"]["planned"], 2)
+        self.assertEqual(payload["summary"]["actual"], 1)
+        self.assertEqual(payload["summary"]["attendancePercent"], 50.0)
+        self.assertEqual(payload["summary"]["leave"], 1)
+        self.assertNotIn("Ann Kingston", payload["html"])
+        self.assertIn("Kingston", payload["html"])
+        self.assertEqual(self.admin.get("/api/attendance/reports").get_json()["reports"], [])
+        history = self.admin.get("/api/attendance/executive-reports")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.get_json()["reports"][0]["id"], report_id)
+        download = self.admin.get(f"/api/attendance/executive-reports/{report_id}/download")
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.mimetype, "text/html")
+
+    def test_executive_worker_generates_once_at_configured_day_end_delay(self):
+        report_date = datetime(2026, 11, 9).date()
+        cutoff = reports.executive_cutoff(report_date, 0, scheduler.ATTENDANCE_TIMEZONE)
+        now = cutoff + timedelta(seconds=30)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+            connection.execute(
+                "INSERT INTO executive_attendance_report_settings(tenant_id,enabled,delay_hours,checked_at) VALUES(?,1,0,?)",
+                (scheduler.DEFAULT_TENANT_ID, (cutoff - timedelta(minutes=1)).isoformat()),
+            )
+        with scheduler.app.app_context(), patch.object(reports, "capture_executive") as capture:
+            reports.run_executive_once(scheduler, now)
+            reports.run_executive_once(scheduler, now)
+        self.assertEqual(capture.call_count, 1)
+        args, kwargs = capture.call_args
+        self.assertEqual(args[2], report_date)
+        self.assertEqual(args[3], cutoff)
+        self.assertFalse(kwargs["missed"])
+
     def test_shared_routes_keep_admin_workspace_and_assets(self):
         anon = scheduler.app.test_client()
         for client, path, text in (

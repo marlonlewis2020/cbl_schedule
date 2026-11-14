@@ -8,7 +8,8 @@ import secrets
 import zipfile
 from collections import defaultdict
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from html import escape as html_escape
 from xml.sax.saxutils import escape
 
 from flask import Response, g, jsonify, request, session
@@ -26,7 +27,21 @@ CREATE TABLE IF NOT EXISTS attendance_report_settings (
     tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
     checked_at TEXT NOT NULL, heartbeat TEXT
 );
+CREATE TABLE IF NOT EXISTS executive_attendance_report_settings (
+    tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+    delay_hours INTEGER NOT NULL DEFAULT 0 CHECK(delay_hours BETWEEN 0 AND 24),
+    checked_at TEXT NOT NULL, heartbeat TEXT
+);
 """
+
+EXECUTIVE_REPORT_PREFIX = "executive:"
+
+
+def executive_cutoff(report_date: date, delay_hours: int, timezone) -> datetime:
+    if not isinstance(report_date, date) or isinstance(delay_hours, bool) or not isinstance(delay_hours, int) or not 0 <= delay_hours <= 24:
+        raise ValueError("Choose a reporting-day delay from 0 to 24 whole hours.")
+    day_end = datetime.combine(report_date + timedelta(days=1), time.min, tzinfo=timezone)
+    return day_end + timedelta(hours=delay_hours)
 
 
 def workbook(payload):
@@ -188,6 +203,227 @@ def capture(s, tenant, cutoff, run_key, missed=False, now=None):
     return report_id
 
 
+def executive_report_metrics(shifts, report_date, generated_at):
+    leave_statuses = {"approved_leave", "sick", "vacation"}
+    locations = defaultdict(lambda: {
+        "planned": 0, "actual": 0, "late": 0, "absent": 0,
+        "missingClockIns": 0, "earlyDepartures": 0, "overtimeMinutes": 0,
+        "leave": 0,
+    })
+    totals = {
+        "planned": 0, "actual": 0, "late": 0, "absent": 0,
+        "missingClockIns": 0, "earlyDepartures": 0, "overtimeMinutes": 0,
+        "leave": 0, "incompleteOvernight": 0, "unknownShiftEnds": 0,
+    }
+    for row in shifts:
+        location = str(row.get("location") or "Unassigned")
+        values = locations[location]
+        if row.get("status") in leave_statuses:
+            values["leave"] += 1
+            totals["leave"] += 1
+            continue
+        values["planned"] += 1
+        totals["planned"] += 1
+        if row.get("status") in {"attended", "late"}:
+            values["actual"] += 1
+            totals["actual"] += 1
+        if row.get("status") == "late":
+            values["late"] += 1
+            totals["late"] += 1
+        if row.get("status") == "absent":
+            values["absent"] += 1
+            totals["absent"] += 1
+        if not row.get("clockIn"):
+            values["missingClockIns"] += 1
+            totals["missingClockIns"] += 1
+        if row.get("earlyMinutes"):
+            values["earlyDepartures"] += 1
+            totals["earlyDepartures"] += 1
+        values["overtimeMinutes"] += int(row.get("overtimeMinutes") or 0)
+        totals["overtimeMinutes"] += int(row.get("overtimeMinutes") or 0)
+        shift_end = row.get("shiftEnd")
+        if shift_end and shift_end != "Unavailable":
+            try:
+                shift_end_at = datetime.fromisoformat(shift_end)
+                if shift_end_at.date() > report_date and shift_end_at > generated_at:
+                    totals["incompleteOvernight"] += 1
+            except (TypeError, ValueError):
+                totals["unknownShiftEnds"] += 1
+        else:
+            totals["unknownShiftEnds"] += 1
+    location_rows = []
+    for name, values in sorted(locations.items(), key=lambda item: item[0].casefold()):
+        location_rows.append({
+            "location": name,
+            **values,
+            "attendancePercent": round(100 * values["actual"] / values["planned"], 2)
+            if values["planned"] else None,
+        })
+    totals["attendancePercent"] = round(100 * totals["actual"] / totals["planned"], 2) if totals["planned"] else None
+    totals["locationCount"] = len(location_rows)
+    return totals, location_rows
+
+
+def executive_html(payload):
+    summary = payload["summary"]
+    number = lambda value: f"{int(value):,}"
+    percent = lambda value: f"{value:.1f}%" if value is not None else "N/A"
+    locations = "".join(
+        "<tr><td>" + html_escape(row["location"]) + "</td><td>" + number(row["planned"])
+        + "</td><td>" + number(row["actual"]) + "</td><td>" + percent(row["attendancePercent"])
+        + "</td><td>" + number(row["late"]) + "</td><td>" + number(row["absent"])
+        + "</td><td>" + number(row["leave"]) + "</td></tr>"
+        for row in payload["locations"]
+    )
+    warning = (
+        "<p class=warning>Source warning: " + html_escape(payload["refreshError"]) + "</p>"
+        if payload["refreshError"] else ""
+    )
+    return """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>Executive attendance report</title><style>
+*{box-sizing:border-box}body{margin:0;background:#eef5f7;color:#173340;font:15px/1.5 Segoe UI,Arial,sans-serif}
+main{max-width:1180px;margin:auto;padding:28px}header{border-bottom:3px solid #087f8c;padding-bottom:18px;margin-bottom:22px}
+h1{font-size:30px;margin:0}h2{font-size:19px;margin:0 0 14px}.meta{color:#526a73}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:22px 0}
+.kpi,section{background:#fff;border:1px solid #d5e1e4;border-radius:8px;padding:18px}.kpi span{display:block;color:#526a73;font-size:13px}.kpi strong{display:block;font-size:28px;margin-top:8px}
+section{margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #d5e1e4}th{background:#f2f7f8;color:#405c65}
+.warning{border-left:4px solid #bd3045;background:#fff0f2;padding:12px}.note{color:#526a73;font-size:13px}
+@media(max-width:700px){main{padding:14px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}section{overflow-x:auto}}
+@media print{body{background:#fff}main{max-width:none;padding:0}.kpi,section{break-inside:avoid}}
+</style></head><body><main><header><p class=meta>""" + html_escape(payload["businessName"]) + "</p><h1>Executive end-of-day attendance</h1><p class=meta>Reporting day " + html_escape(payload["reportDate"]) + " · Generated " + html_escape(payload["generatedAt"]) + " · America/Jamaica</p><p class=meta>Shift source: " + html_escape(payload["shiftSource"]) + " · Source refreshed: " + html_escape(payload["lastSyncedAt"] or "Unavailable") + "</p></header>" + warning + "<div class=kpis><div class=kpi><span>Scheduled shifts</span><strong>" + number(summary["planned"]) + "</strong></div><div class=kpi><span>Attended / late</span><strong>" + number(summary["actual"]) + "</strong></div><div class=kpi><span>Attendance rate</span><strong>" + percent(summary["attendancePercent"]) + "</strong></div><div class=kpi><span>Late / absent</span><strong>" + number(summary["late"]) + " / " + number(summary["absent"]) + "</strong></div></div><section><h2>Location performance</h2><table><thead><tr><th>Location</th><th>Scheduled</th><th>Attended / late</th><th>Attendance</th><th>Late</th><th>Absent</th><th>Leave</th></tr></thead><tbody>" + locations + "</tbody></table></section><section><h2>Significant exceptions</h2><p>Late arrivals: <strong>" + number(summary["late"]) + "</strong> · Absences: <strong>" + number(summary["absent"]) + "</strong> · Missing clock-ins: <strong>" + number(summary["missingClockIns"]) + "</strong> · Early departures: <strong>" + number(summary["earlyDepartures"]) + "</strong> · Overtime: <strong>" + number(summary["overtimeMinutes"]) + " minutes</strong></p><p>Incomplete overnight shifts: <strong>" + number(summary["incompleteOvernight"]) + "</strong> · Unknown shift ends: <strong>" + number(summary["unknownShiftEnds"]) + "</strong></p><p class=note>Shifts are attributed to their start date; approved leave is excluded from expected staffing. This report aggregates by location and does not include an employee register.</p></section></main></body></html>"
+
+
+def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False, now=None):
+    now = now or datetime.now(s.ATTENDANCE_TIMEZONE)
+    report_id = secrets.token_urlsafe(18)
+    run_key = EXECUTIVE_REPORT_PREFIX + report_date.isoformat()
+    with closing(s.database_connect()) as connection, connection:
+        claimed = connection.execute(
+            "INSERT INTO attendance_reports(tenant_id,id,run_key,cutoff,created_at,state,error) "
+            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,run_key) DO NOTHING",
+            (tenant, report_id, run_key, cutoff.isoformat(), now.isoformat(),
+             "missed" if missed else "running",
+             "Scheduled executive report cutoff missed; no late capture fabricated." if missed else ""),
+        ).rowcount
+    if not claimed or missed:
+        return report_id if claimed else None
+    try:
+        refresh_error = ""
+        bamboo_shifts = None
+        api_key = s.bamboohr_api_key()
+        report_end = report_date + timedelta(days=1)
+        try:
+            if not api_key:
+                raise s.AttendanceIntegrationError("BambooHR API key is not configured.")
+            clocks = s.parse_bamboohr_clock_entries(s.bamboohr_json(
+                api_key, "time_tracking/timesheet_entries",
+                {"start": report_date.isoformat(), "end": report_end.isoformat()}, "time-tracking",
+            ))
+            leave = s.parse_bamboohr_time_off(s.bamboohr_json(
+                api_key, "time_off/whos_out",
+                {"start": report_date.isoformat(), "end": report_end.isoformat()}, "time-off",
+            ))
+            with closing(s.database_connect()) as connection, connection:
+                if s.attendance_shift_source(connection) == "bamboohr":
+                    bamboo_shifts = s.fetch_bamboohr_scheduled_shifts(
+                        connection, report_date, report_end, attendance_mode=True,
+                    )
+                s.sync_attendance_data(
+                    connection, clocks, leave, now=now, period_start=report_date,
+                    period_end=report_end, bamboo_shifts=bamboo_shifts,
+                )
+        except s.AttendanceIntegrationError as error:
+            refresh_error = str(error)
+            logging.warning("Executive attendance refresh failed for tenant %s: %s", tenant, error)
+        with closing(s.database_connect()) as connection:
+            attendance = s.attendance_payload(
+                connection, now=now, period_start=report_date, period_end=report_date,
+            )
+            spans = {}
+            for run_id, encoded in connection.execute(
+                "SELECT run_id,payload FROM accepted_schedules WHERE tenant_id=?", (tenant,),
+            ):
+                spans[run_id] = float(json.loads(encoded).get("controls", {}).get("span", 8))
+            for shift in bamboo_shifts or []:
+                spans["bamboohr:" + str(shift["id"])] = (
+                    datetime.fromisoformat(shift["end"]) - datetime.fromisoformat(shift["start"])
+                ).total_seconds() / 3600
+        for row in attendance["shifts"]:
+            if row.get("shiftEndAt"):
+                row["shiftEnd"] = row["shiftEndAt"]
+            else:
+                span = spans.get(row["runId"])
+                if span is not None:
+                    row["shiftEnd"] = (datetime.fromisoformat(row["shiftStart"]) + timedelta(hours=span)).isoformat()
+                else:
+                    row["shiftEnd"] = "Unavailable"
+        summary, locations = executive_report_metrics(attendance["shifts"], report_date, now)
+        branding = s.current_app_config()
+        payload = {
+            "reportType": "executive_end_of_day", "reportDate": report_date.isoformat(),
+            "cutoff": cutoff.isoformat(), "generatedAt": now.isoformat(),
+            "businessName": branding.get("businessName", "Workforce"),
+            "shiftSource": attendance.get("shiftSource", {}).get("selected", "Unavailable"),
+            "lastSyncedAt": attendance.get("lastSyncedAt"), "refreshError": refresh_error,
+            "delayHours": delay_hours, "summary": summary, "locations": locations,
+        }
+        payload["html"] = executive_html(payload)
+        with closing(s.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE attendance_reports SET state=?,payload=?,error=? WHERE tenant_id=? AND id=? AND state='running'",
+                ("stale" if refresh_error else "ready", json.dumps(payload), refresh_error, tenant, report_id),
+            )
+    except Exception as error:
+        with closing(s.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE attendance_reports SET state='failed',error=? WHERE tenant_id=? AND id=? AND state='running'",
+                (str(error)[:1000], tenant, report_id),
+            )
+        raise
+    return report_id
+
+
+def run_executive_once(s, now=None):
+    now = now or datetime.now(s.ATTENDANCE_TIMEZONE)
+    with closing(s.database_connect()) as connection:
+        tenants = connection.execute(
+            "SELECT tenant_id FROM tenants WHERE status='active' AND membership_status='active'"
+        ).fetchall()
+    for (tenant,) in tenants:
+        g.tenant_id = tenant
+        with closing(s.database_connect()) as connection, connection:
+            setting = connection.execute(
+                "SELECT enabled,delay_hours,checked_at FROM executive_attendance_report_settings WHERE tenant_id=?",
+                (tenant,),
+            ).fetchone()
+            if not setting or not setting[0] or s.membership_billing.access_suspended(connection, tenant):
+                continue
+            tier = s.tenant_membership_tier(connection, tenant)
+            features = s.membership_billing.features(
+                connection, tier, s.MEMBERSHIP_TIERS[tier]["features"],
+            )
+            if not features.get("executiveEndOfDayReport"):
+                continue
+            delay_hours = int(setting[1])
+            previous = datetime.fromisoformat(setting[2])
+        cursor = previous.date() - timedelta(days=2)
+        while cursor <= now.date():
+            cutoff = executive_cutoff(cursor, delay_hours, s.ATTENDANCE_TIMEZONE)
+            if previous < cutoff <= now:
+                missed = now - cutoff > timedelta(minutes=2)
+                try:
+                    capture_executive(s, tenant, cursor, cutoff, delay_hours, missed=missed, now=now)
+                except Exception:
+                    logging.exception("Executive attendance report failed for tenant %s, date %s", tenant, cursor)
+            cursor += timedelta(days=1)
+        with closing(s.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE executive_attendance_report_settings SET checked_at=?,heartbeat=? WHERE tenant_id=? AND checked_at=?",
+                (now.isoformat(), now.isoformat(), tenant, setting[2]),
+            )
+
+
 def run_once(s, now=None):
     now = now or datetime.now(s.ATTENDANCE_TIMEZONE)
     with closing(s.database_connect()) as c:
@@ -216,12 +452,13 @@ def run_once(s, now=None):
         with closing(s.database_connect()) as c, c:
             c.execute("UPDATE attendance_report_settings SET checked_at=?,heartbeat=? WHERE tenant_id=? AND checked_at=?",
                       (now.isoformat(), now.isoformat(), tenant, previous.isoformat()))
+    run_executive_once(s, now)
 
 
 def register(app, s):
     @app.after_request
     def report_cache_headers(response):
-        if request.path.startswith("/api/attendance/reports"):
+        if request.path.startswith(("/api/attendance/reports", "/api/attendance/executive-reports")):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -253,14 +490,14 @@ def register(app, s):
             return jsonify(saved=True)
         if request.method == "POST":
             with closing(s.database_connect()) as c:
-                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND created_at>? LIMIT 1",
-                                   (tenant, "historical:%", (now - timedelta(seconds=60)).isoformat())).fetchone()
+                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND created_at>? LIMIT 1",
+                                   (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%", (now - timedelta(seconds=60)).isoformat())).fetchone()
             if recent:
                 return jsonify(error="Wait one minute between report requests."), 429
             report_id = capture(s, tenant, now, "manual:" + secrets.token_urlsafe(18))
             return jsonify(id=report_id), 201
         with closing(s.database_connect()) as c:
-            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND state<>'deleted' ORDER BY created_at DESC LIMIT 100", (tenant, "historical:%")).fetchall()
+            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND state<>'deleted' ORDER BY created_at DESC LIMIT 100", (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%")).fetchall()
             setting = c.execute("SELECT enabled,heartbeat FROM attendance_report_settings WHERE tenant_id=?", (tenant,)).fetchone()
         return jsonify(reports=[dict(zip(("id", "cutoff", "createdAt", "state", "error"), row)) for row in rows],
                        enabled=bool(setting and setting[0]), heartbeat=setting[1] if setting else None,
@@ -280,14 +517,14 @@ def register(app, s):
         tenant = s.active_tenant_id()
         placeholders = ",".join("?" for _ in ids)
         with closing(s.database_connect()) as c, c:
-            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND id IN ({placeholders})", (tenant, "historical:%", *ids)).fetchall()
+            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND id IN ({placeholders})", (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%", *ids)).fetchall()
             if len(rows) != len(ids):
                 return jsonify(error="One or more snapshots are unavailable. Refresh history before deleting."), 404
             if any(state in {"running", "deleted"} for _, state in rows):
                 return jsonify(error="Running or already deleted snapshots cannot be deleted. Refresh history."), 409
             changed = c.execute(
-                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE ? AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
-                (tenant, "historical:%", *ids),
+                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
+                (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%", *ids),
             ).rowcount
             if changed != len(ids):
                 c.rollback()
@@ -303,8 +540,8 @@ def register(app, s):
         if denied:
             return None, denied
         with closing(s.database_connect()) as c:
-            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key NOT LIKE ?",
-                            (s.active_tenant_id(), report_id, "historical:%")).fetchone()
+            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ?",
+                            (s.active_tenant_id(), report_id, "historical:%", EXECUTIVE_REPORT_PREFIX + "%")).fetchone()
         if not row:
             return None, (jsonify(error="Snapshot not found."), 404)
         if row[1] not in {"ready", "stale"}:
@@ -342,3 +579,85 @@ def register(app, s):
         if denied:
             return denied
         return jsonify(attendance_email.generate(payload))
+
+    def executive_guard(write=False):
+        denied = s.membership_feature_denied("executiveEndOfDayReport")
+        if denied:
+            return denied
+        if write:
+            denied = s.primary_admin_guard()
+            if denied:
+                return denied
+            if not s.tenant_auth_csrf_valid():
+                return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+        return None
+
+    @app.route("/api/attendance/executive-reports", methods=["GET", "PUT"])
+    def executive_reports():
+        denied = executive_guard(write=request.method == "PUT")
+        if denied:
+            return denied
+        tenant = s.active_tenant_id()
+        with closing(s.database_connect()) as connection:
+            if request.method == "PUT":
+                payload = request.get_json(silent=True)
+                enabled = payload.get("enabled") if isinstance(payload, dict) else None
+                delay_hours = payload.get("delayHours") if isinstance(payload, dict) else None
+                if (
+                    type(enabled) is not bool
+                    or isinstance(delay_hours, bool)
+                    or not isinstance(delay_hours, int)
+                    or not 0 <= delay_hours <= 24
+                ):
+                    return jsonify(error="Enable or disable the report and choose a whole-hour delay from 0 to 24."), 400
+                now = datetime.now(s.ATTENDANCE_TIMEZONE).isoformat()
+                with connection:
+                    connection.execute(
+                        "INSERT INTO executive_attendance_report_settings(tenant_id,enabled,delay_hours,checked_at) VALUES(?,?,?,?) "
+                        "ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,delay_hours=excluded.delay_hours,checked_at=excluded.checked_at",
+                        (tenant, int(enabled), delay_hours, now),
+                    )
+                return jsonify(saved=True, enabled=enabled, delayHours=delay_hours)
+            setting = connection.execute(
+                "SELECT enabled,delay_hours,checked_at,heartbeat FROM executive_attendance_report_settings WHERE tenant_id=?",
+                (tenant,),
+            ).fetchone()
+            rows = connection.execute(
+                "SELECT id,run_key,cutoff,created_at,state,error FROM attendance_reports "
+                "WHERE tenant_id=? AND run_key LIKE ? AND state<>'deleted' "
+                "ORDER BY cutoff DESC LIMIT 100",
+                (tenant, EXECUTIVE_REPORT_PREFIX + "%"),
+            ).fetchall()
+        return jsonify(
+            enabled=bool(setting and setting[0]), delayHours=int(setting[1]) if setting else 0,
+            checkedAt=setting[2] if setting else None, heartbeat=setting[3] if setting else None,
+            reports=[{
+                "id": row[0], "reportDate": row[1].removeprefix(EXECUTIVE_REPORT_PREFIX),
+                "cutoff": row[2], "createdAt": row[3], "state": row[4], "error": row[5],
+            } for row in rows],
+        )
+
+    @app.get("/api/attendance/executive-reports/<report_id>/download")
+    def download_executive_report(report_id):
+        denied = executive_guard()
+        if denied:
+            return denied
+        with closing(s.database_connect()) as connection:
+            row = connection.execute(
+                "SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key LIKE ?",
+                (s.active_tenant_id(), report_id, EXECUTIVE_REPORT_PREFIX + "%"),
+            ).fetchone()
+        if not row:
+            return jsonify(error="Executive report not found."), 404
+        if row[1] not in {"ready", "stale"}:
+            return jsonify(error="This executive report has no downloadable file."), 409
+        payload = json.loads(row[0])
+        return Response(
+            payload["html"], mimetype="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="executive-attendance-{payload["reportDate"]}.html"',
+                "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )

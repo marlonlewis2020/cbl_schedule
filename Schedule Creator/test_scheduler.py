@@ -1276,6 +1276,7 @@ class MembershipEntitlementTests(unittest.TestCase):
             "workloadPlanning": (False, False, False, True),
             "historicalAttendanceReports": (False, False, False, True),
             "executiveEndOfDayReport": (False, False, True, True),
+            "attendanceDashboard": (False, True, True, True),
             "sourceSpecificAttendance": (False, True, True, True),
             "manualClockActions": (False, True, True, True),
             "helpKnowledgeBase": (True, True, True, True),
@@ -4719,6 +4720,7 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         self.assertIn("Membership assignment: Gold and Platinum", descriptions["executive-end-of-day-report"])
         self.assertIn("Membership assignment: Silver, Gold, and Platinum", descriptions["attendance-manual-clock-actions"])
         self.assertIn("Membership assignment: Available in all tiers", descriptions["faq-guides-knowledge-base"])
+        self.assertIn("Implemented: adds an active-list Clear all attendance action", descriptions["attendance-notifications-clear-all"])
 
     def test_primary_admin_change_request_view_is_sanitized_and_read_only(self):
         authenticate_test_admin(self.client)
@@ -5987,6 +5989,118 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
         listed = self.admin.get("/api/access-accounts").get_json()["accounts"]
         self.assertNotIn("passwordHash", listed[0])
         self.assertNotIn("temporaryPassword", listed[0])
+
+
+class AttendanceNotificationArchiveTests(unittest.TestCase):
+    setUp = ManagerEmployeeAccessTests.setUp
+    tearDown = ManagerEmployeeAccessTests.tearDown
+    create_account = ManagerEmployeeAccessTests.create_account
+    new_client = ManagerEmployeeAccessTests.new_client
+    sign_in_manager = ManagerEmployeeAccessTests.sign_in_manager
+
+    def test_archive_all_covers_more_than_50_and_is_per_reader_and_team_scoped(self):
+        tenant_id = scheduler.DEFAULT_TENANT_ID
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("DELETE FROM attendance_notification_reads")
+            connection.execute("DELETE FROM attendance_notifications")
+            connection.executemany(
+                """
+                INSERT INTO attendance_notifications
+                    (id, tenant_id, dedupe_key, kind, employee_id, employee_name,
+                     location, shift_date, message)
+                VALUES (?, ?, ?, 'late', ?, 'Test employee', ?, '2026-11-14', 'Late')
+                """,
+                [
+                    (f"team-alert-{index}", tenant_id, f"team-dedupe-{index}",
+                     "emp-a", "Kingston")
+                    for index in range(60)
+                ] + [("other-team-alert", tenant_id, "other-team-dedupe",
+                      "emp-b", "Montego Bay")],
+            )
+
+        manager, _, manager_account = self.sign_in_manager(employee_id="emp-a")
+        manager_clear = manager.post(
+            "/api/access/notifications/archive-all", headers=self.csrf, json={},
+        )
+        self.assertEqual(manager_clear.status_code, 200)
+        self.assertEqual(manager_clear.get_json()["archived"], 60)
+        manager_active = manager.get("/api/access/notifications").get_json()
+        self.assertEqual(manager_active["unread"], 0)
+        self.assertEqual(manager_active["notifications"], [])
+
+        admin_active = self.admin.get("/api/attendance/notifications").get_json()
+        self.assertEqual(admin_active["unread"], 61)
+        self.assertEqual(len(admin_active["notifications"]), 50)
+
+        admin_clear = self.admin.post(
+            "/api/attendance/notifications/archive",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={},
+        )
+        self.assertEqual(admin_clear.status_code, 200)
+        self.assertEqual(admin_clear.get_json()["archived"], 0)
+        admin_clear_all = self.admin.post(
+            "/api/attendance/notifications/archive-all",
+            headers={"X-CSRF-Token": "test-csrf-token"}, json={},
+        )
+        self.assertEqual(admin_clear_all.status_code, 200)
+        self.assertEqual(admin_clear_all.get_json()["archived"], 61)
+        self.assertEqual(
+            manager.get("/api/access/notifications?archived=1").get_json()["unread"], 0
+        )
+        with closing(scheduler.database_connect()) as connection:
+            rows = connection.execute(
+                "SELECT reader_key, COUNT(*) FROM attendance_notification_reads "
+                "WHERE archived=1 GROUP BY reader_key ORDER BY reader_key"
+            ).fetchall()
+        self.assertEqual(rows, [("admin:test-admin", 61), (f"user:{manager_account['account']['id']}", 60)])
+
+
+class AttendanceDashboardAccessTests(unittest.TestCase):
+    setUp = ManagerEmployeeAccessTests.setUp
+    tearDown = ManagerEmployeeAccessTests.tearDown
+    create_account = ManagerEmployeeAccessTests.create_account
+    new_client = ManagerEmployeeAccessTests.new_client
+    portal_employee_client = ManagerEmployeeAccessTests.portal_employee_client
+    sign_in_manager = ManagerEmployeeAccessTests.sign_in_manager
+
+    def test_dashboard_silver_gate_and_admin_location_hierarchy(self):
+        response = self.admin.get("/api/attendance/dashboard?date=2026-11-02")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["summary"]["expected"], 2)
+        self.assertEqual(
+            [row["location"] for row in response.get_json()["locations"]],
+            ["Kingston", "Montego Bay"],
+        )
+        kingston_shift = response.get_json()["locations"][0]["roles"][0]["shifts"][0]
+        self.assertEqual(kingston_shift["shiftStart"], "01:00")
+        self.assertEqual(kingston_shift["summary"]["attendancePercent"], 100.0)
+        self.assertEqual(kingston_shift["summary"]["late"], 1)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier='bronze' WHERE tenant_id=?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        denied = self.admin.get("/api/attendance/dashboard?date=2026-11-02")
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn("Silver", denied.get_json()["error"])
+
+    def test_manager_dashboard_is_limited_to_assigned_locations(self):
+        manager, _, _ = self.sign_in_manager()
+        response = manager.get("/api/access/manager/attendance/dashboard?date=2026-11-02")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["summary"]["expected"], 1)
+        self.assertEqual([row["location"] for row in data["locations"]], ["Kingston"])
+        self.assertEqual([row["name"] for row in data["exceptions"]], ["Ann Kingston"])
+
+    def test_employee_dashboard_is_simplified_to_own_location_role_team(self):
+        employee = self.portal_employee_client()
+        response = employee.get("/api/access/me/attendance/dashboard?date=2026-11-02")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["summary"]["expected"], 1)
+        self.assertEqual([row["location"] for row in data["locations"]], ["Kingston"])
+        self.assertEqual(data["exceptions"], [])
 
 
 class UserManualTests(unittest.TestCase):

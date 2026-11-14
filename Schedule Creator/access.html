@@ -62,6 +62,7 @@
   <link rel="stylesheet" href="workforce-ui.css">
   <script src="trade-picker.js"></script>
 <script src="/session-idle.js"></script>
+   <script src="/attendance-dashboard.js"></script>
 <script src="/historical-attendance-reports.js" defer></script>
 </head>
 <body>
@@ -126,6 +127,12 @@
       <h2>My team's attendance today</h2>
       <p id="teamSummary"></p>
       <p class="notice">Read-only counts for your current location and role, from recorded attendance. Future shifts are excluded; approved leave is excluded from the attendance percentage.</p>
+      <div id="teamDashboardGroups"></div>
+    </section>
+    <section id="managerDashboard" hidden aria-labelledby="managerDashboardTitle">
+      <h2 id="managerDashboardTitle">Team attendance dashboard</h2>
+      <p id="managerDashboardStatus" role="status"></p>
+      <div id="managerDashboardContent"></div>
     </section>
     <section id="historicalAccessReports" class="notice" hidden></section>
     <section id="rosterSettingsPanel" hidden aria-labelledby="rosterSettingsTitle">
@@ -165,6 +172,8 @@
     let csrfToken = "";
     let role = "";
     let timer = null;
+    let attendanceDashboardTimer = null;
+    let lastAttendanceDashboardLoad = 0;
     let portalSchedules = [];
     let accountRole = "";
     let personalMode = new URLSearchParams(location.search).get("view") === "employee";
@@ -232,6 +241,8 @@
       $("#teamSummary").textContent = `${result.date}: ${result.present} present of ${result.expected} expected; attendance ${result.attendancePercent === null ? "not available" : result.attendancePercent + "%"}. ` +
         Object.entries(result.counts).map(([status, count]) => `${count} ${status.replaceAll("_", " ")}`).join(", ") +
         ` · Recorded as of ${clockLabel(result.reportedAt)} Jamaica time.`;
+      const dashboard = await api(`/api/access/me/attendance/dashboard?date=${encodeURIComponent(result.date)}`);
+      window.renderLiveAttendanceDashboard?.($("#teamDashboardGroups"), dashboard, "employee");
     }
 
     async function api(path, method = "GET", payload) {
@@ -576,7 +587,23 @@
         ? `Showing ${result.start === result.end ? result.start : result.start + " to " + result.end} for ${result.scopeEmployees} employee(s) at your locations.`
         : `Your attendance from ${result.start} to ${result.end}: ` +
           (Object.entries(result.counts).map(([status, count]) => `${count} ${status.replace("_", " ")}`).join(", ") || "no shifts");
+      if (role === "manager") await loadManagerAttendanceDashboard();
       if (role === "employee") await loadTeamAttendance();
+      lastAttendanceDashboardLoad = Date.now();
+    }
+
+    async function loadManagerAttendanceDashboard() {
+      const date = $("#filterEnd").value || todayInJamaica();
+      const target = $("#managerDashboardContent");
+      $("#managerDashboardStatus").textContent = `Loading ${date} attendance…`;
+      try {
+        const dashboard = await api(`/api/access/manager/attendance/dashboard?date=${encodeURIComponent(date)}`);
+        window.renderLiveAttendanceDashboard?.(target, dashboard, "manager");
+        $("#managerDashboardStatus").textContent = `${date} · ${dashboard.reportedAt} · ${dashboard.timezone}`;
+      } catch (error) {
+        target.replaceChildren();
+        $("#managerDashboardStatus").textContent = error.message;
+      }
     }
 
     let notifications = [];
@@ -725,6 +752,7 @@
       $("#actionHead").hidden = role !== "manager";
       $("#bell").hidden = role !== "manager";
       $("#dateFilter").hidden = role !== "manager";
+      $("#managerDashboard").hidden = role !== "manager";
       $("#teamDashboard").hidden = role !== "employee";
       $("#historicalAccessReports").hidden = role !== "manager";
       $("#openRosterSettings").hidden = !["manager", "employee"].includes(role);
@@ -733,12 +761,16 @@
       $("#openMetaSettings").hidden = accountRole !== "manager" || personalMode;
       $("#metaSettingsPanel").hidden = true;
       clearInterval(timer);
+      clearInterval(attendanceDashboardTimer);
       if (role === "manager") {
         $("#filterStart").value = $("#filterEnd").value = todayInJamaica();
       }
       try {
         await loadData();
         await loadSchedules();
+        attendanceDashboardTimer = setInterval(() => {
+          if (!document.hidden) loadData().catch(error => { $("#appMessage").textContent = error.message; });
+        }, 5 * 60 * 1000);
         if (role === "manager") {
           await pollNotifications();
           timer = setInterval(pollNotifications, 30000);

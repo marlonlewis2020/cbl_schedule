@@ -101,14 +101,14 @@ def register(app, s):
         row = c.execute(
             "SELECT id,run_id,day,employee_a,employee_b,slot_a,slot_b,location_id,"
             "state,reason,created_by,version,created_at,override_reason,days,rest_warnings,"
-            "rest_acknowledged,initiated_role,target_confirmed,constraint_policy FROM shift_trades "
+            "rest_acknowledged,initiated_role,target_confirmed,constraint_policy,updated_at FROM shift_trades "
             "WHERE tenant_id=? AND id=?", (tenant, trade_id),
         ).fetchone()
         if not row:
             return None
         keys = ("id", "runId", "day", "employeeA", "employeeB", "slotA", "slotB",
                 "locationId", "state", "reason", "createdBy", "version", "createdAt", "overrideReason",
-                "days", "restWarnings", "restAcknowledged", "initiatedRole", "targetConfirmed", "constraintPolicy")
+                "days", "restWarnings", "restAcknowledged", "initiatedRole", "targetConfirmed", "constraintPolicy", "updatedAt")
         trade = dict(zip(keys, row))
         creator_table = "tenant_admins" if trade["initiatedRole"] == "admin" else "tenant_users"
         creator = c.execute(

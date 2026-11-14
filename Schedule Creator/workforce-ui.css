@@ -83,5 +83,21 @@
 .schedule-register table{border-collapse:separate;border-spacing:0}
 .schedule-register thead th{position:sticky;top:0;z-index:1}
 .schedule-register:focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:3px}
+.live-attendance-dashboard{margin:18px 0 24px;padding-top:16px;border-top:1px solid var(--line,#dce6eb);color:var(--ink,#183044)}
+.live-attendance-dashboard h2{margin:0 0 6px;font-size:20px}
+.live-attendance-dashboard h3{margin:18px 0 8px;font-size:16px}
+.live-attendance-dashboard h4{margin:14px 0 6px;font-size:15px}
+.live-attendance-dashboard h5{margin:10px 0 4px;font-size:14px}
+.attendance-dashboard-meta,.attendance-dashboard-error{margin:4px 0 10px;color:var(--muted,#52697a);font-size:13px}
+.attendance-dashboard-error{color:var(--red,#a12121)}
+.attendance-dashboard-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px;margin:12px 0 18px}
+.attendance-dashboard-kpi{padding:12px 14px;border:1px solid var(--line,#dce6eb);border-top:3px solid var(--blue,#159bd5);background:var(--surface,#fff);min-width:0}
+.attendance-dashboard-kpi span{display:block;color:var(--muted,#52697a);font-size:12px}
+.attendance-dashboard-kpi strong{display:block;margin-top:5px;font-size:21px}
+.attendance-dashboard-breakdown table,.attendance-dashboard-exceptions table,.attendance-dashboard-team table{width:100%;border-collapse:collapse;font-size:13px}
+.attendance-dashboard-breakdown th,.attendance-dashboard-breakdown td,.attendance-dashboard-exceptions th,.attendance-dashboard-exceptions td,.attendance-dashboard-team th,.attendance-dashboard-team td{padding:8px 10px;border-bottom:1px solid var(--line,#dce6eb);text-align:left;vertical-align:top}
+.attendance-dashboard-breakdown th,.attendance-dashboard-exceptions th,.attendance-dashboard-team th{background:var(--soft,#f2f7f8)}
+.attendance-dashboard-team{margin-top:14px}
+@media(max-width:600px){.attendance-dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.attendance-dashboard-breakdown,.attendance-dashboard-exceptions,.attendance-dashboard-team{overflow-x:auto}}
 @media(max-width:600px){.trade-page{margin:12px}.trade-page main,.trade-page .trade-card{padding:16px}.trade-page-header{flex-wrap:wrap}.trade-page .trade-swap-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.workforce-trade{padding:16px}.workforce-trade .trade-fields{grid-template-columns:1fr}.workforce-trade footer{flex-wrap:wrap}}

@@ -459,6 +459,11 @@ CREATE TABLE IF NOT EXISTS attendance_report_settings (
     tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
     checked_at TEXT NOT NULL, heartbeat TEXT
 );
+CREATE TABLE IF NOT EXISTS executive_attendance_report_settings (
+    tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+    delay_hours INTEGER NOT NULL DEFAULT 0 CHECK(delay_hours BETWEEN 0 AND 24),
+    checked_at TEXT NOT NULL, heartbeat TEXT
+);
 -- Contains no prices, payment details, credentials, employee or business names.
 CREATE TABLE IF NOT EXISTS billing_subscription_index (
     subscription_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL
@@ -471,7 +476,8 @@ DECLARE table_name TEXT;
 BEGIN
     FOREACH table_name IN ARRAY ARRAY[
         'shift_trades','shift_trade_events','shift_trade_reads','shift_trade_publish',
-        'billing_accounts','billing_events','attendance_reports','attendance_report_settings'
+        'billing_accounts','billing_events','attendance_reports','attendance_report_settings',
+        'executive_attendance_report_settings'
     ] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);

@@ -27,6 +27,14 @@ deployment acceptance. Keep them outstanding, not completed. Skip them during
 the current one-by-one walkthrough, alongside the previously excluded HTTPS/
 LAN-HTTP and PayPal TODOs. Completed PostgreSQL evidence remains unchanged.
 
+User-directed on 2026-11-14: defer `workload-fte-headcount-planning` during the
+current five-request walkthrough. Keep it approved and implementation pending;
+its assigned tier remains Platinum.
+
+User-directed on 2026-11-14: defer `development-mfa-bypass-env` during the
+current five-request walkthrough. Keep it low-priority and implementation
+pending; the retired general MFA bypass remains removed.
+
 ## Temporary LAN HTTP option (must be removed)
 
 - [ ] **Remove the temporary plain-HTTP option for PostgreSQL.** It is enabled by
@@ -313,6 +321,32 @@ remain for production use:
   focused attendance-source regression test passed. The browser fixture could
   not start because its historical seed-metrics assertion fails before serving
   the page; no browser verification was completed.
+
+## Live attendance and staffing dashboards (`workforce-dashboards`) — implemented, awaiting acceptance
+
+Tier: Silver+ for the live attendance dashboard (`attendanceDashboard`). The
+separate daily staffing-vs-demand interval snapshot remains Gold/Platinum and is
+not part of this implementation. Reuse the existing five-minute refresh while
+the authenticated page is visible; do not introduce a second poller.
+
+- Admins receive business-wide location → role → team → shift summaries and
+  exception detail; managers receive only their assigned employee data; employees
+  receive a simplified read-only dashboard for their own location × role team.
+- Preserve the selected date, expected/actual attendance definitions, approved
+  leave exclusions, current source population, Jamaica reporting time, and
+  existing attendance tables/actions. The dashboard API applies role/team scope
+  server-side. Historical intervals, automated staffing-demand snapshots and
+  new refresh intervals remain outside scope.
+- Implemented Silver+ feature gate on admin, manager and employee dashboard APIs.
+  Admin dashboard reuses Attendance Location/Role filters without flattening
+  location groups. Manager and employee pages use their authorized team scopes;
+  the employee view omits individual exception rows. Sick/vacation, open/current
+  shifts, clock evidence, late/absent, leave, early departure and overtime counts
+  are surfaced from the selected source's saved attendance records.
+- Validation: three focused admin/manager/employee scope tests, Silver+ benefit
+  matrix test, Python/JavaScript syntax and diff checks passed. Browser fixture
+  showed all three role views and the location×role→shift hierarchy; PostgreSQL
+  verification and full mobile/browser acceptance remain outstanding.
 
 ## Source-specific attendance populations and history (`attendance-source-specific-populations-and-history`) — in progress
 
@@ -1030,7 +1064,15 @@ Requests below remain pending unless implementation evidence is explicitly noted
   overnight shifts, and attribute shifts to their start date without duplicates.
   Run without an open browser and surface failures. Download only, no automatic
   emailing. Verify exact timing limits and day boundaries.
-  Depends on `snapshot-email-reports`. Approved; implementation pending.
+  Depends on `snapshot-email-reports`. Implemented, awaiting user acceptance:
+  primary admins configure automatic generation from 0–24 whole hours after
+  Jamaica day-end. The independent report worker saves immutable executive HTML
+  history, location-level scheduled/actual staffing and exception summaries,
+  source freshness and incomplete/unknown overnight boundaries. Shifts are
+  attributed to their start date; no employee register or email delivery is
+  included. The executive history/download API is tenant-scoped and Gold-gated,
+  and remains separate from interval snapshot history. Thirty report/action
+  tests passed; browser presentation and PostgreSQL verification remain.
 - **Lock employee trade location** (`employee-trade-location-lock`):
   automatically populate the initiating employee's current verified location
   and make it uneditable; include linked managers in personal employee mode.
@@ -1073,7 +1115,7 @@ Requests below remain pending unless implementation evidence is explicitly noted
   notification deduplication with Node checks. Awaiting user acceptance;
   interactive browser, keyboard and viewport verification remain outstanding.
 
-## Clear all active attendance notifications (`attendance-notifications-clear-all`) - approved, implementation pending
+## Clear all active attendance notifications (`attendance-notifications-clear-all`) - implemented, awaiting acceptance
 
 Tier: all tiers (`attendanceNotifications`).
 
@@ -1087,9 +1129,17 @@ Tier: all tiers (`attendanceNotifications`).
   alerts locally.
 - Verify empty/single/more-than-50 sets, per-reader and tenant isolation, archive
   restoration, retry/failure, and preservation of pending trade approvals.
-  Approved for recording only; implementation pending.
+- Implemented distinct archive-all APIs for administrator and manager readers.
+  The server processes every active attendance alert, not the current 50-item
+  display page; manager archives are limited to assigned employees. Existing
+  per-reader archive records are preserved, and pending shift-trade approvals
+  remain in the separate actionable list. The client clears locally only after
+  a successful response and refresh.
+- Verified a 60-alert API archive, manager-team scope, independent admin/manager
+  archive state, and 19 browser notification assertions including pending trade
+  approval visibility. Awaiting user acceptance.
 
-## Fresh notification toasts (`fresh-notification-toasts-only`) - approved, implementation pending
+## Fresh notification toasts (`fresh-notification-toasts-only`) - implemented, awaiting acceptance
 
 Tier: all tiers (`attendanceNotifications`).
 
@@ -1101,9 +1151,19 @@ Tier: all tiers (`attendanceNotifications`).
 - Do not suppress immediate action-feedback toasts generated by the current
   user's own actions. Define the freshness boundary and behavior for missing or
   invalid timestamps, especially for trade updates.
+- Implemented one silent baseline after page load. Later attendance events use
+  `createdAt`; pending trade updates use `updatedAt` (falling back to
+  `createdAt`) and version-aware per-session deduplication. Offset-bearing times
+  are preserved and timezone-naive server timestamps are treated as UTC. Events
+  with missing/invalid timestamps or timestamps outside the interval since the
+  previous successful poll fail closed. Failed polls do not advance the freshness
+  watermark; immediate action-feedback toasts are unchanged. Concurrent polling
+  is coalesced, and explicit post-action refreshes run after any in-flight poll.
 - Verify reload, polling delays, timestamp/time-zone boundaries, late delivery,
   duplicate IDs, newly created/resolved trades and accessible announcements.
-  Approved for recording only; implementation pending.
+- Verified with 23 browser assertions, including initial baseline, fresh and
+  stale/paginated alerts, invalid timestamps, same-trade version updates,
+  deduplication and failure handling. Awaiting user acceptance.
 
 ## Change request visibility (`primary-admin-change-request-visibility`) - implemented, awaiting acceptance
 

@@ -103,6 +103,7 @@ STATIC_ASSETS = {
     "CBL-Scheduler2.css",
     "CBL-Scheduler2.config.js",
     "CBL-Scheduler2.js",
+    "attendance-dashboard.js",
     "CBL-MicrosoftAuth.html",
     "workforce-ui.css",
     "trade-picker.js",
@@ -407,14 +408,18 @@ WORKFORCE_IMPLEMENTATION_NOTES = {
     "faq-guides-knowledge-base": "Implemented: added a shared role-aware Help page with searchable built-in FAQs, glossary, step-by-step tutorial and plain-text index of the user manual. Tenant knowledge articles publish only after business-admin approval; manager submissions are location-scoped, audience-filtered, auditable, editable as drafts/resubmissions, and guarded against stale revisions. Published versions are immutable history; admin review and manager feedback/status are surfaced in Help. Notification policy is page-based only (no email/push): admins see the pending queue on Help and managers see status/feedback there. Added PostgreSQL RLS, tenant-scoped schema, safe text rendering, manual navigation and role/page tests. Five knowledge workflow tests, manual freshness, shared route test, syntax and whitespace checks passed. Awaiting user acceptance; interactive browser/mobile verification remains outstanding.",
     "workspace-readiness": "Implemented: startup now has a default-on readiness overlay with a 20-second slow-load message, fatal recovery/sign-in path, optional-degraded read-only continuation, Retry via reload, and a validated SCHEDULE_CREATOR_WORKSPACE_READINESS_ENABLED presentation-only flag. Limited mode inerts workspace content and disables profile/notification actions while preserving sign-out, navigation, theme and retry. Focused flag/auth test, Python/JavaScript syntax and DOM-stub optional/fatal/read-only transitions passed. Awaiting user acceptance; interactive browser/network-failure and viewport verification remain outstanding.",
     "attendance-source-specific-populations-and-history": "In progress: BambooHR attendance fetch now uses the provider's active employee directory, includes app-inactive and unregistered employees via BambooHR-namespaced IDs, and counts clock activity independent of approval. App mode filters to active app employees. Attendance/history queries are source-filtered; switching sources preserves the other source's rows. HTML/XLSX snapshots and historical reports identify their shift source; app overrides do not affect BambooHR-source history. Verified 27 attendance, 12 snapshot/report, source-population and provenance checks. Historical BambooHR active-status snapshots and provider historical schedule coverage remain unresolved; the historical suite retains two unrelated date/rate-limit assertion failures.",
+    "workforce-dashboards": "Implemented, awaiting user acceptance: Silver+ live attendance dashboard for business admins, managers and employees using the existing five-minute visible-tab refresh. Admins see location→role→location×role team→shift hierarchy and exception names; managers are server-scoped to assigned teams; employees get a simplified own-team read-only view. Existing attendance tables/actions remain unchanged. Gold/Platinum daily staffing-vs-demand interval snapshots remain separate and are not included. Three scoped API tests, Silver+ entitlement tests, admin/manager/employee browser views, filter hierarchy and dashboard renderer checks passed; PostgreSQL and full mobile/browser acceptance remain.",
     "primary-admin-change-request-visibility": "Implemented: the current primary business administrator receives a no-store read-only page and GET API with only business-facing titles and coarse status labels; developer IDs, descriptions, dependencies, timestamps, and private developer/identity requests are excluded. Current primary designation is checked for each request; anonymous and other-role sessions are denied. Developer routes and mutation controls are unchanged. The focused authorization/sanitization test and all 11 developer change-request tests passed. Awaiting user acceptance; browser role/viewport verification remains outstanding.",
     "action-feedback-toasts": "Implemented: user action feedback now shows in a dismissible seven-second toast queue. The latest 20 items are retained in tab session storage and shown from the expanded header; new attendance and pending trade alerts toast once after initial polling without changing bell read/archive state. History and active toasts clear on sign-out. Node syntax, mocked queue/timer/history/sign-out checks, and mocked notification deduplication passed. Awaiting user acceptance; interactive browser and keyboard verification remain outstanding.",
+    "attendance-notifications-clear-all": "Implemented: adds an active-list Clear all attendance action backed by tenant-, reader-, and manager-team-scoped bulk archival beyond the 50-item display page. Archives read and unread alerts for the current reader only; does not touch trade approvals. Verified 60+ records, reader/team isolation, archive history and 19 notification browser assertions. Awaiting user acceptance.",
+    "fresh-notification-toasts-only": "Implemented: after a silent first-poll baseline, attendance alerts toast only when createdAt is newer than the previous successful poll; pending trades use updatedAt with createdAt fallback and version-aware session deduplication. Offset-bearing times are honored, SQLite naive timestamps are interpreted as UTC, and missing/invalid/stale events fail closed without advancing the watermark on poll failure. Immediate action feedback remains unchanged. Verified 23 browser notification assertions, including stale pagination, invalid timestamps, and a fresh update to the same trade. Awaiting user acceptance.",
     "attendance-page-setup-and-reports": "Implemented: grouped BambooHR attendance sync, shift source, filters and rules under Setup, and snapshot/historical report mounts under Reports. Preserved report mount IDs, existing workflows and the always-visible live attendance/score tables. Awaiting user acceptance; browser fixture verification is blocked by its pre-existing historical seed-metrics assertion.",
     "historical-report-progressive-dashboard": "Implemented: new historical HTML uses snapshot-style cards and DC/role overview charts/tables, with employee/team comparisons, patterns and shift evidence hidden until employee or DC plus role selection. Coordinated keyboard/chart/table drill-down, scope labels, reset and print layouts; new reports capture business name/logo. Excel detail and previously saved HTML remain unchanged. Awaiting user acceptance; PostgreSQL checks deferred.",
     "historical-attendance-trend-reports": "Implemented: scoped historical weekly/monthly Excel and offline interactive HTML, saved history, employee/DC comparisons, charts and coordinated filters, incident dates, dated score overrides and conservative shift/day/post-day-off/leave pattern analysis. Confirmed policies: Monday weeks, selected-period patterns, minimum three eligible shifts, managers' current authorized teams with dated record attribution. Missing schedule continuity and history remain explicitly unavailable. Awaiting user acceptance; PostgreSQL validation deferred.",
     "unified-application-shell": "Implemented: shared /signin account/business selection and role-aware Access/Trades/Business/owner navigation, branding/themes, scoped alerts and preserved legacy/deep links. Administrator browser workspace remains at /. Existing MFA, role, tenant, team and idle-session guards are retained. Awaiting acceptance; prerequisite statuses are unchanged.",
     "employee-trade-location-lock": "Implemented: personal trade location/team and Employee 1 are preselected and locked, including linked-manager personal mode. Choices/options/submission recheck current verified assignments; management choices retain authorized scope. Awaiting acceptance; prerequisite statuses are unchanged.",
     "snapshot-email-reports": "Implemented download-only scope: immutable Silver+ attendance XLSX/history, on-demand capture, opt-in 07:00/15:00/23:00 Jamaica worker captures, exact cutoff/verified overnight context, source freshness and explicit stale/failed/missed states with deduplication. Run report_worker.py independently with the app database/environment. Automatic email/recipient/delivery work is deferred by agreement; no email is sent. Staffing-vs-demand interval analytics are separate Gold/Platinum work. Awaiting acceptance and disposable PostgreSQL policy verification; prerequisite statuses are unchanged.",
+    "executive-end-of-day-report": "Implemented Gold+ executive end-of-day HTML downloads. Primary admins configure automatic report generation from 0-24 whole hours after Jamaica day-end; the worker runs independently, records missed/failed/stale history, and uses start-date attribution. Reports aggregate scheduled/actual staffing, attendance rate, location performance and exceptions without an employee register; source freshness and incomplete/unknown overnight boundaries are explicit. Executive history/downloads are separate from interval snapshot history and Gold-gated. Thirty report/action tests pass, including cutoff, settings, aggregate capture, separate history and downloads. Awaiting user acceptance; browser viewport checks and PostgreSQL verification remain.",
 }
 MEMBERSHIP_ASSIGNMENT_NOTES = {
     "workload-fte-headcount-planning": "Platinum feature; future routes and worker jobs must enforce the workloadPlanning entitlement server-side.",
@@ -422,6 +427,7 @@ MEMBERSHIP_ASSIGNMENT_NOTES = {
     "executive-end-of-day-report": "Gold and Platinum feature; future generation, history, and download paths must enforce executiveEndOfDayReport.",
     "attendance-source-specific-populations-and-history": "Silver, Gold, and Platinum feature; sourceSpecificAttendance gates provider-source selection while baseline app-source attendance remains available to Bronze.",
     "attendance-manual-clock-actions": "Silver, Gold, and Platinum feature; manualClockActions is enforced on the API and attendance action availability.",
+    "workforce-dashboards": "Live attendance dashboard is Silver+ through attendanceDashboard; separate daily staffing-vs-demand interval snapshots remain Gold and Platinum.",
     "faq-guides-knowledge-base": "Available in all tiers by default through helpKnowledgeBase.",
     "attendance-notifications-clear-all": "Available in all tiers by default through attendanceNotifications.",
     "fresh-notification-toasts-only": "Available in all tiers by default through attendanceNotifications.",
@@ -446,6 +452,7 @@ MEMBERSHIP_TIERS = {
             "workloadPlanning": False,
             "historicalAttendanceReports": False,
             "executiveEndOfDayReport": False,
+            "attendanceDashboard": False,
             "sourceSpecificAttendance": False,
             "manualClockActions": False,
             "helpKnowledgeBase": True,
@@ -471,6 +478,7 @@ MEMBERSHIP_TIERS = {
             "workloadPlanning": False,
             "historicalAttendanceReports": False,
             "executiveEndOfDayReport": False,
+            "attendanceDashboard": True,
             "sourceSpecificAttendance": True,
             "manualClockActions": True,
             "helpKnowledgeBase": True,
@@ -496,6 +504,7 @@ MEMBERSHIP_TIERS = {
             "workloadPlanning": False,
             "historicalAttendanceReports": False,
             "executiveEndOfDayReport": True,
+            "attendanceDashboard": True,
             "sourceSpecificAttendance": True,
             "manualClockActions": True,
             "helpKnowledgeBase": True,
@@ -521,6 +530,7 @@ MEMBERSHIP_TIERS = {
             "workloadPlanning": True,
             "historicalAttendanceReports": True,
             "executiveEndOfDayReport": True,
+            "attendanceDashboard": True,
             "sourceSpecificAttendance": True,
             "manualClockActions": True,
             "helpKnowledgeBase": True,
@@ -1703,6 +1713,7 @@ def initialize_database() -> None:
                 "billing_accounts",
                 "attendance_reports",
                 "attendance_report_settings",
+                "executive_attendance_report_settings",
                 "billing_events",
                 "business_knowledge_articles",
                 "business_knowledge_submissions",
@@ -2038,6 +2049,7 @@ def migrate_sqlite_business_data(source_path: Path) -> None:
                 "tenant_users", "shift_trades", "shift_trade_events", "shift_trade_reads",
                 "shift_trade_publish", "billing_accounts", "billing_events",
                 "attendance_reports", "attendance_report_settings",
+                "executive_attendance_report_settings",
                 "billing_subscription_index", "billing_webhook_receipts",
                 "attendance_notifications", "attendance_notification_reads",
             )
@@ -3211,6 +3223,7 @@ def membership_feature_denied(feature: str):
         "workloadPlanning": "Workload and headcount planning is included with Platinum.",
         "historicalAttendanceReports": "Historical attendance reports are included with Platinum.",
         "executiveEndOfDayReport": "Executive end-of-day reports are included with Gold and above.",
+        "attendanceDashboard": "The live attendance dashboard is included with Silver and above.",
         "sourceSpecificAttendance": "Source-specific attendance is included with Silver and above.",
         "manualClockActions": "Manual attendance clock actions are included with Silver and above.",
         "helpKnowledgeBase": "The Help and knowledge base is unavailable for this membership.",
@@ -3933,6 +3946,7 @@ def hub_delete_business(tenant_id: str):
             "shift_trade_reads",
             "attendance_reports",
             "attendance_report_settings",
+            "executive_attendance_report_settings",
             "billing_events",
             "billing_accounts",
             "billing_subscription_index",
@@ -5589,6 +5603,20 @@ def attendance_window() -> tuple[str, str] | None:
     return start_text, end_text
 
 
+def selected_attendance_dashboard_date() -> date:
+    text = request.args.get("date")
+    today = datetime.now(ATTENDANCE_TIMEZONE).date()
+    if not text:
+        return today
+    try:
+        selected = date.fromisoformat(text)
+    except ValueError as error:
+        raise ValueError("Provide a valid dashboard date in YYYY-MM-DD format.") from error
+    if selected.isoformat() != text or selected > today:
+        raise ValueError("Provide a valid dashboard date no later than today.")
+    return selected
+
+
 def scoped_attendance_records(
     connection: DatabaseConnection,
     tenant_id: str,
@@ -5684,6 +5712,40 @@ def archive_notifications(
             (tenant_id, notification_id, reader_key),
         )
     return len(allowed)
+
+
+def archive_all_notifications(
+    connection: DatabaseConnection,
+    tenant_id: str,
+    reader_key: str,
+    employee_ids: set[str] | None,
+) -> int:
+    if employee_ids is not None and not employee_ids:
+        return 0
+    scope_clause = ""
+    parameters: list[object] = [reader_key, tenant_id, reader_key]
+    if employee_ids is not None:
+        placeholders = ",".join("?" for _ in employee_ids)
+        scope_clause = f" AND n.employee_id IN ({placeholders})"
+        parameters.extend(sorted(employee_ids))
+    cursor = connection.execute(
+        f"""
+        INSERT INTO attendance_notification_reads
+            (tenant_id, notification_id, reader_key, archived)
+        SELECT n.tenant_id, n.id, ?, 1
+        FROM attendance_notifications n
+        WHERE n.tenant_id = ?
+          AND COALESCE((
+              SELECT r.archived FROM attendance_notification_reads r
+              WHERE r.tenant_id = n.tenant_id AND r.notification_id = n.id
+                AND r.reader_key = ?
+          ), 0) = 0{scope_clause}
+        ON CONFLICT (tenant_id, notification_id, reader_key)
+        DO UPDATE SET archived = 1
+        """,
+        tuple(parameters),
+    )
+    return max(cursor.rowcount, 0)
 
 
 def mark_notifications_read(
@@ -5998,6 +6060,21 @@ def admin_archive_attendance_notifications():
     return jsonify(archived=archived)
 
 
+@app.post("/api/attendance/notifications/archive-all")
+def admin_archive_all_attendance_notifications():
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+    with closing(database_connect()) as connection, connection:
+        archived = archive_all_notifications(
+            connection, active_tenant_id(),
+            f"admin:{session.get('tenant_admin_id')}", None,
+        )
+    return jsonify(archived=archived)
+
+
 @app.post("/api/attendance/notifications/read")
 def admin_read_attendance_notifications():
     denied = membership_feature_denied("attendanceNotifications")
@@ -6240,6 +6317,22 @@ def access_archive_notifications():
     return jsonify(archived=archived)
 
 
+@app.post("/api/access/notifications/archive-all")
+def access_archive_all_notifications():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
+    with closing(database_connect()) as connection, connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        archived = archive_all_notifications(
+            connection, user["tenantId"], f"user:{user['id']}", scope,
+        )
+    return jsonify(archived=archived)
+
+
 @app.post("/api/access/notifications/read")
 def access_read_notifications():
     user, failure = access_guard({"manager"})
@@ -6274,6 +6367,27 @@ def manager_attendance():
     return jsonify(
         start=window[0], end=window[1], scopeEmployees=len(scope), records=records
     )
+
+
+@app.get("/api/access/manager/attendance/dashboard")
+def manager_attendance_dashboard():
+    user, failure = access_guard({"manager"})
+    if failure:
+        return failure
+    denied = membership_feature_denied("attendanceDashboard")
+    if denied:
+        return denied
+    try:
+        selected = selected_attendance_dashboard_date()
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    g.tenant_id = user["tenantId"]
+    with closing(database_connect()) as connection:
+        scope = manager_employee_ids(connection, user["tenantId"], user["email"])
+        dashboard = attendance_dashboard_payload(
+            connection, datetime.now(ATTENDANCE_TIMEZONE), selected, scope,
+        )
+    return jsonify(dashboard)
 
 
 @app.post("/api/access/manager/mark-absent")
@@ -6347,6 +6461,35 @@ def employee_attendance():
     for record in records:
         counts[record["status"]] = counts.get(record["status"], 0) + 1
     return jsonify(start=window[0], end=window[1], counts=counts, records=records)
+
+
+@app.get("/api/access/me/attendance/dashboard")
+def employee_attendance_dashboard():
+    user, failure = access_personal_guard()
+    if failure:
+        return failure
+    denied = membership_feature_denied("attendanceDashboard")
+    if denied:
+        return denied
+    try:
+        selected = selected_attendance_dashboard_date()
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    g.tenant_id = user["tenantId"]
+    with closing(database_connect()) as connection:
+        team = employee_portal_team(connection, user)
+        scope = set()
+        if team and team[0]:
+            scope = {row[0] for row in connection.execute(
+                "SELECT employee_id FROM employees WHERE tenant_id=? "
+                "AND schedule_location_id=? AND LOWER(role)=? AND active=1",
+                (user["tenantId"], team[0], team[1].casefold()),
+            )}
+        dashboard = attendance_dashboard_payload(
+            connection, datetime.now(ATTENDANCE_TIMEZONE), selected, scope,
+            include_exceptions=False,
+        )
+    return jsonify(dashboard)
 
 
 @app.get("/access")
@@ -6679,6 +6822,9 @@ def employee_team_attendance():
     user, failure = access_personal_guard()
     if failure:
         return failure
+    denied = membership_feature_denied("attendanceDashboard")
+    if denied:
+        return denied
     now = datetime.now(ATTENDANCE_TIMEZONE)
     counts = {}
     with closing(database_connect()) as connection:
@@ -9344,6 +9490,122 @@ def attendance_payload(
     }
 
 
+def attendance_dashboard_payload(
+    connection: DatabaseConnection,
+    now: datetime,
+    selected_date: date,
+    employee_ids: set[str] | None = None,
+    include_exceptions: bool = True,
+) -> dict[str, object]:
+    attendance = attendance_payload(connection, now=now, selected_date=selected_date)
+    shifts = [
+        row for row in attendance["shifts"]
+        if employee_ids is None or str(row["employeeId"]) in employee_ids
+    ]
+    leave_statuses = {"approved_leave", "sick", "vacation"}
+
+    def empty_metrics() -> dict[str, int | float | None]:
+        return {
+            "expected": 0, "actual": 0, "clockedIn": 0, "late": 0,
+            "absent": 0, "approvedLeave": 0, "sick": 0, "vacation": 0,
+            "currentShifts": 0, "openClocks": 0, "missingClockIns": 0,
+            "earlyDepartures": 0, "overtimeMinutes": 0, "attendancePercent": None,
+        }
+
+    def add_row(metrics: dict[str, int | float | None], row: dict[str, object]) -> None:
+        status = row["status"]
+        if status in leave_statuses:
+            metrics["approvedLeave"] += 1
+            if status == "sick":
+                metrics["sick"] += 1
+            elif status == "vacation":
+                metrics["vacation"] += 1
+            return
+        metrics["expected"] += 1
+        if status in {"attended", "late"}:
+            metrics["actual"] += 1
+        if row.get("clockIn"):
+            metrics["clockedIn"] += 1
+            if not row.get("clockOut"):
+                metrics["openClocks"] += 1
+        else:
+            metrics["missingClockIns"] += 1
+        if row.get("isClockedInForShift"):
+            metrics["currentShifts"] += 1
+        if status == "late":
+            metrics["late"] += 1
+        if status == "absent":
+            metrics["absent"] += 1
+        if row.get("earlyMinutes"):
+            metrics["earlyDepartures"] += 1
+        metrics["overtimeMinutes"] += int(row.get("overtimeMinutes") or 0)
+
+    summary = empty_metrics()
+    locations: dict[str, dict[str, object]] = {}
+    exceptions = []
+    for row in shifts:
+        add_row(summary, row)
+        location_name = str(row.get("location") or "Unassigned")
+        role_name = str(row.get("role") or "Unassigned")
+        if location_name not in locations:
+            locations[location_name] = {"location": location_name, "summary": empty_metrics(), "roles": {}}
+        location_group = locations[location_name]
+        add_row(location_group["summary"], row)
+        roles = location_group["roles"]
+        if role_name not in roles:
+            roles[role_name] = {"role": role_name, "summary": empty_metrics(), "shifts": {}}
+        role_group = roles[role_name]
+        add_row(role_group["summary"], row)
+        try:
+            shift_label = datetime.fromisoformat(str(row["shiftStart"])).strftime("%H:%M")
+        except (TypeError, ValueError):
+            shift_label = "Unknown"
+        shift_groups = role_group["shifts"]
+        if shift_label not in shift_groups:
+            shift_groups[shift_label] = {"shiftStart": shift_label, "summary": empty_metrics()}
+        add_row(shift_groups[shift_label]["summary"], row)
+        is_exception = (
+            row["status"] in {"late", "absent", "sick", "vacation"}
+            or (row["status"] not in leave_statuses and not row.get("clockIn"))
+            or bool(row.get("earlyMinutes")) or bool(row.get("overtimeMinutes"))
+        )
+        if include_exceptions and is_exception:
+            exceptions.append({
+                "employeeId": row["employeeId"], "name": row["name"],
+                "location": location_name, "role": role_name,
+                "shiftStart": row["shiftStart"], "status": row["status"],
+                "reason": row.get("reason", ""),
+            })
+
+    def finalize(metrics: dict[str, int | float | None]) -> None:
+        expected = int(metrics["expected"])
+        metrics["attendancePercent"] = round(100 * int(metrics["actual"]) / expected, 2) if expected else None
+
+    finalize(summary)
+    location_rows = []
+    for location_name in sorted(locations, key=str.casefold):
+        location = locations[location_name]
+        finalize(location["summary"])
+        role_rows = []
+        for role_name in sorted(location["roles"], key=str.casefold):
+            role = location["roles"][role_name]
+            finalize(role["summary"])
+            shift_rows = []
+            for shift_label in sorted(role["shifts"]):
+                shift = role["shifts"][shift_label]
+                finalize(shift["summary"])
+                shift_rows.append(shift)
+            role_rows.append({"role": role_name, "summary": role["summary"], "shifts": shift_rows})
+        location_rows.append({"location": location_name, "summary": location["summary"], "roles": role_rows})
+    summary["exceptionCount"] = len(exceptions)
+    return {
+        "date": attendance["date"], "reportedAt": attendance["reportedAt"],
+        "timezone": "America/Jamaica", "lastSyncedAt": attendance["lastSyncedAt"],
+        "shiftSource": attendance["shiftSource"]["selected"],
+        "summary": summary, "locations": location_rows, "exceptions": exceptions,
+    }
+
+
 def attendance_shift_source(connection: DatabaseConnection) -> str:
     row = connection.execute(
         """
@@ -10596,6 +10858,21 @@ def get_attendance():
                 "unresolvedDiscrepancies": discrepancies,
             }
         return jsonify(result)
+
+
+@app.get("/api/attendance/dashboard")
+def get_attendance_dashboard():
+    denied = membership_feature_denied("attendanceDashboard")
+    if denied:
+        return denied
+    try:
+        selected = selected_attendance_dashboard_date()
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    with closing(database_connect()) as connection:
+        return jsonify(attendance_dashboard_payload(
+            connection, datetime.now(ATTENDANCE_TIMEZONE), selected,
+        ))
 
 
 def attendance_clock_entries_for_employee(api_key: str, bamboohr_id: str, start: date, end: date):

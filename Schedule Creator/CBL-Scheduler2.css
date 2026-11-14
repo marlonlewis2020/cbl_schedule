@@ -2523,8 +2523,8 @@ dialog input[type=checkbox]{
 .notification-bell{position:relative}
 .notification-badge{position:absolute;top:-6px;right:-6px;min-width:18px;padding:1px 5px;border-radius:10px;background:#c62828;color:#fff;font-size:.75rem}
 .notification-panel{position:fixed;z-index:60;width:min(400px,92vw);max-height:70vh;overflow:auto;padding:12px;border:1px solid #9fb4c2;border-radius:8px;background:#fff;color:#153746;box-shadow:0 8px 24px #0004}
-.notification-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-.notification-head .actions{display:flex;gap:6px}
+.notification-head{display:flex;flex-direction:column;justify-content:space-between;gap:8px;margin-bottom:8px}
+.notification-head .actions{display:flex;align-self: center;gap:6px}
 .notification-panel ul{margin:0;padding:0;list-style:none}
 .notification-item{margin:6px 0;border:1px solid #cfdbe3;border-radius:6px;background:#eef3f6;color:#4f6676}
 .notification-item.unread{background:#fff3c4;border-color:#e0a800;color:#4a3300;font-weight:700}
