@@ -2962,7 +2962,7 @@ async function syncAttendance(silent=true,selectedPeriod=null){
     if(page==='attendance')render(true)
     return succeeded
 }
-function startAttendancePolling(){
+function startAttendancePolling(syncImmediately=true){
     if(attendanceSyncTimer)clearInterval(attendanceSyncTimer);
     attendanceSyncTimer=setInterval(()=>{
         if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
@@ -2970,7 +2970,7 @@ function startAttendancePolling(){
     document.addEventListener('visibilitychange',()=>{
         if(!document.hidden&&Date.now()-attendanceLastAttempt>=5*60*1000)syncAttendance(true)
     });
-    syncAttendance(true)
+    if(syncImmediately)syncAttendance(true)
 }
 async function loadBambooPublishStatus(){
     try{
@@ -5844,7 +5844,8 @@ async function init(){
             attendanceSyncStatus=error.message
         }
         render();
-        startAttendancePolling();
+        await syncAttendance(true);
+        startAttendancePolling(false);
         startNotificationPolling();
         let optionalIssues=[
             acceptedScheduleError&&'Accepted schedules: '+acceptedScheduleError,

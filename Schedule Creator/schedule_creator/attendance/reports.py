@@ -264,14 +264,14 @@ def register(app, s: Dependencies):
             return jsonify(saved=True)
         if request.method == "POST":
             with closing(s.database_connect()) as c:
-                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND created_at>? LIMIT 1",
-                                   (tenant, (now - timedelta(seconds=60)).isoformat())).fetchone()
+                recent = c.execute("SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND created_at>? LIMIT 1",
+                                   (tenant, "historical:%", (now - timedelta(seconds=60)).isoformat())).fetchone()
             if recent:
                 return jsonify(error="Wait one minute between report requests."), 429
             report_id = capture(s, tenant, now, "manual:" + secrets.token_urlsafe(18))
             return jsonify(id=report_id), 201
         with closing(s.database_connect()) as c:
-            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND state<>'deleted' ORDER BY created_at DESC LIMIT 100", (tenant,)).fetchall()
+            rows = c.execute("SELECT id,cutoff,created_at,state,error FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND state<>'deleted' ORDER BY created_at DESC LIMIT 100", (tenant, "historical:%")).fetchall()
             setting = c.execute("SELECT enabled,heartbeat FROM attendance_report_settings WHERE tenant_id=?", (tenant,)).fetchone()
         return jsonify(reports=[dict(zip(("id", "cutoff", "createdAt", "state", "error"), row)) for row in rows],
                        enabled=bool(setting and setting[0]), heartbeat=setting[1] if setting else None,
@@ -291,14 +291,14 @@ def register(app, s: Dependencies):
         tenant = s.active_tenant_id()
         placeholders = ",".join("?" for _ in ids)
         with closing(s.database_connect()) as c, c:
-            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND id IN ({placeholders})", (tenant, *ids)).fetchall()
+            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND id IN ({placeholders})", (tenant, "historical:%", *ids)).fetchall()
             if len(rows) != len(ids):
                 return jsonify(error="One or more snapshots are unavailable. Refresh history before deleting."), 404
             if any(state in {"running", "deleted"} for _, state in rows):
                 return jsonify(error="Running or already deleted snapshots cannot be deleted. Refresh history."), 409
             changed = c.execute(
-                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE 'historical:%' AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
-                (tenant, *ids),
+                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE ? AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
+                (tenant, "historical:%", *ids),
             ).rowcount
             if changed != len(ids):
                 c.rollback()
@@ -314,8 +314,8 @@ def register(app, s: Dependencies):
         if denied:
             return None, denied
         with closing(s.database_connect()) as c:
-            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key NOT LIKE 'historical:%'",
-                            (s.active_tenant_id(), report_id)).fetchone()
+            row = c.execute("SELECT payload,state FROM attendance_reports WHERE tenant_id=? AND id=? AND run_key NOT LIKE ?",
+                            (s.active_tenant_id(), report_id, "historical:%")).fetchone()
         if not row:
             return None, (jsonify(error="Snapshot not found."), 404)
         if row[1] not in {"ready", "stale"}:

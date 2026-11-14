@@ -133,12 +133,12 @@ def _selected_location(s, user, locations, selected):
 def _query_period(s, connection, tenant_id, start, end, now, role, locations, selected_location, selected_role):
     source = s.attendance_shift_source(connection)
     source_clause = (
-        "schedule_run_id LIKE 'bamboohr:%'"
+        "schedule_run_id LIKE ?"
         if source == "bamboohr"
-        else "schedule_run_id NOT LIKE 'bamboohr:%' AND employee_id IN "
+        else "schedule_run_id NOT LIKE ? AND employee_id IN "
              "(SELECT employee_id FROM employees WHERE tenant_id = ? AND active = 1)"
     )
-    parameters = (tenant_id, start.isoformat(), end.isoformat())
+    parameters = (tenant_id, start.isoformat(), end.isoformat(), "bamboohr:%")
     if source == "app":
         parameters += (tenant_id,)
     rows = connection.execute(

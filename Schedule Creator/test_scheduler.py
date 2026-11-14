@@ -1221,6 +1221,23 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertNotIn("NOCASE", connection.query)
         self.assertEqual(connection.parameters, ("alpha", "beta"))
 
+    def test_like_wildcard_is_bound_not_parsed_as_a_psycopg_placeholder(self):
+        class CaptureConnection:
+            def execute(self, query, parameters):
+                self.query = query
+                self.parameters = parameters
+                return self
+
+        connection = CaptureConnection()
+        adapter = scheduler.PostgresConnection(connection)
+        adapter.execute(
+            "SELECT schedule_run_id FROM attendance_shift_records WHERE schedule_run_id LIKE ?",
+            ("bamboohr:%",),
+        )
+        self.assertIn("LIKE %s", connection.query)
+        self.assertNotIn("bamboohr:%", connection.query)
+        self.assertEqual(connection.parameters, ("bamboohr:%",))
+
 
 class MembershipEntitlementTests(unittest.TestCase):
     def setUp(self):
@@ -3010,6 +3027,26 @@ class AttendanceAutomationTests(unittest.TestCase):
         )
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.get_json()["selected"], "app")
+        with patch.object(
+            scheduler,
+            "fetch_bamboohr_scheduled_shifts",
+            side_effect=scheduler.AttendanceIntegrationError(
+                "BambooHR denied access to the active employee list."
+            ),
+        ):
+            failed = self.client.put(
+                "/api/attendance/source",
+                headers={"X-CSRF-Token": "test-csrf-token"},
+                json={
+                    "source": "bamboohr",
+                    "confirmed": True,
+                    "start": start,
+                    "end": end,
+                },
+            )
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(failed.get_json()["error"], "BambooHR denied access to the active employee list.")
+        self.assertEqual(failed.get_json()["selected"], "app")
 
     def seed_reconciliation_schedule(self):
         shift_date = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date() - scheduler.timedelta(days=2)
@@ -3267,6 +3304,28 @@ class AttendanceAutomationTests(unittest.TestCase):
         self.assertNotIn(".", first_query["end"][0])
         self.assertEqual(shifts[0]["id"], "bamboo-shift-111")
         self.assertEqual(shifts[0]["employees"][0]["employeeId"], "attendance-111")
+
+    def test_unmapped_bamboohr_schedule_error_names_schedule_location_id(self):
+        response = {
+            "data": [{
+                "id": "shift-unmapped",
+                "scheduleId": "bamboo-schedule-unmapped",
+                "status": "published",
+                "start": "2026-11-14T11:00:00Z",
+                "end": "2026-11-14T19:00:00Z",
+                "timezone": "America/Jamaica",
+                "employeeIds": [999],
+            }],
+            "meta": {"totalItems": 1, "page": 1, "pageSize": 1000},
+        }
+        with self.assertRaisesRegex(
+            scheduler.AttendanceIntegrationError,
+            "bamboo-schedule-unmapped.*Schedule Locations",
+        ):
+            scheduler.parse_bamboohr_scheduled_shifts(response, {"999": {
+                "employeeId": "bamboohr:999", "bamboohrId": "999",
+                "name": "Unmapped employee", "location": "", "role": "",
+            }}, {})
 
     def test_attendance_mode_fetches_active_provider_without_employee_number(self):
         shift_date, _, template = self.seed_reconciliation_schedule()

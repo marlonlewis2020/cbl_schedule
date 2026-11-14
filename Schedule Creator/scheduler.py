@@ -370,10 +370,34 @@ DEVELOPER_REQUESTS = (
         ("tenant-identity", "manager-employee-access", "developer-change-log", "business-hub"),
     ),
     (
+        "development-mfa-bypass-env",
+        "Loopback-only development MFA bypass environment flag",
+        "Priority: Low. Add an explicit server environment flag SCHEDULE_CREATOR_DEVELOPMENT_MFA_BYPASS, default disabled, for isolated development/test sign-in when MFA setup is impractical. Scope the bypass only to the agreed local business-admin flow; it must never bypass password authentication, role/tenant/membership authorization, CSRF, audit, or protected API guards. Fail closed or refuse startup unless using local SQLite with no trusted proxy, and refuse bypass requests unless directly from loopback with no X-Forwarded-For. Never enable it for PostgreSQL, shared/LAN/public deployments, managers, employees or platform owners. Emit a prominent warning when enabled, and verify default-off behavior, exact accepted values, production/remote refusal, session behavior, and that disabled mode remains unchanged. This is separate from the removed temporary MFA bypass; recording only, implementation pending.",
+        (),
+    ),
+    (
+        "flask-sqlalchemy-database-layer",
+        "Adopt Flask-SQLAlchemy for database management",
+        "Replace the custom sqlite3/psycopg connection and transaction management layer with Flask-SQLAlchemy and SQLAlchemy Core/models for all application workflows. Preserve SQLite local development/tests and PostgreSQL production support, existing schemas, constraints, indexes, migrations, data, transaction boundaries, and worker access. Preserve tenant context and PostgreSQL ENABLE/FORCE ROW LEVEL SECURITY behavior for every tenant table; scope each request/job's database work to its authenticated tenant and avoid leaking sessions/connections across requests or jobs. Provide an idempotent, backed-up migration/compatibility path without rewriting or deleting existing records. Keep query behavior and API responses stable, update dependencies and database documentation, and test representative workflows on disposable SQLite and PostgreSQL databases, including concurrent transactions, workers, RLS isolation, migrations, rollback and error handling. Recording only; implementation pending.",
+        ("tenant-identity",),
+    ),
+    (
         "action-feedback-toasts",
         "Timed action-feedback toasts and recent feedback history",
         "Priority: Low. Show transient user-action feedback in a nonblocking top-right toast for seven seconds, with a close button and accessible status announcements. Ensure rapid messages are queued or stacked rather than silently overwriting one another. Keep expired or dismissed feedback in a recent-feedback history accessible by expanding the header, so users can review messages they missed; retain a bounded history for the current browser session. Also toast newly received header alert events once, but do not replay existing alerts during notification polling or change their durable read/archive state. Keep the notification bell as the source for persistent alerts. Verify timing, dismissal, rapid actions, missed-feedback history, new-alert deduplication, accessibility, keyboard use and responsive layouts.",
         (),
+    ),
+    (
+        "attendance-notifications-clear-all",
+        "Clear all active attendance notifications",
+        "Add a Clear all attendance notifications action to the active notification list. Archive every active attendance alert visible to the current reader in the current tenant, including read and unread items; do not permanently delete shared notification records. Perform the operation server-side for the full set rather than only the current 50-item browser page, preserve per-reader archive history and other readers' views, and refresh the badge/list after success. Do not clear, archive, resolve or hide pending shift-trade approval requests; they remain actionable until resolved. Surface failures without clearing the client list. Verify empty/single/more-than-50 sets, per-reader isolation, retry/failure, archive restoration, tenant isolation, and that trade approvals remain visible. Approved for recording only; implementation pending.",
+        ("manager-employee-access", "shift-trades"),
+    ),
+    (
+        "fresh-notification-toasts-only",
+        "Toast only current notifications newer than the last poll",
+        "Restrict notification-event toasts to genuinely new attendance alerts and trade updates created or changed after the previous successful notification poll. Treat the first poll after page load as a silent baseline; never toast pre-existing unread, archived or older notifications, including items that later enter the visible page because of pagination or list changes. Use authoritative event timestamps (attendance createdAt; trade creation/update time). Define and test the freshness boundary and timestamp handling for missing, invalid, delayed and out-of-order events. Preserve ID deduplication for the browser session and persistent bell/list behavior. Do not suppress immediate action-feedback toasts generated by the current user's own actions. Verify reload, polling delay, stale delivery, deduplication, new and resolved trades, clock/time-zone boundaries and accessibility.",
+        ("action-feedback-toasts", "manager-employee-access", "shift-trades"),
     ),
 )
 WORKFORCE_IMPLEMENTATION_NOTES = {
@@ -8984,12 +9008,13 @@ def attendance_payload(
     source = attendance_shift_source(connection)
     settings = attendance_settings(connection)
     source_clause = (
-        "schedule_run_id LIKE 'bamboohr:%'"
+        "schedule_run_id LIKE ?"
         if source == "bamboohr"
-        else "schedule_run_id NOT LIKE 'bamboohr:%' AND employee_id IN "
+        else "schedule_run_id NOT LIKE ? AND employee_id IN "
              "(SELECT employee_id FROM employees WHERE tenant_id = ? AND active = 1)"
     )
     row_parameters = (tenant_id, report_start.isoformat(), report_end.isoformat())
+    row_parameters += ("bamboohr:%",)
     if source == "app":
         row_parameters += (tenant_id,)
     rows = connection.execute(
@@ -9116,6 +9141,7 @@ def attendance_payload(
             absent += 1
 
     score_parameters = (tenant_id, report_start.isoformat(), report_end.isoformat())
+    score_parameters += ("bamboohr:%",)
     if source == "app":
         score_parameters += (tenant_id,)
     score_rows = connection.execute(
@@ -9277,7 +9303,8 @@ def parse_bamboohr_scheduled_shifts(
             location = locations_by_schedule_id.get(schedule_id)
             if not location:
                 raise AttendanceIntegrationError(
-                    "BambooHR returned a shift for an unmapped schedule location."
+                    f"BambooHR schedule ID '{schedule_id}' is not mapped to a Schedule Location. "
+                    "Add or correct that mapping on the Schedule Locations page, then retry."
                 )
         except AttendanceIntegrationError:
             raise
@@ -10809,6 +10836,10 @@ def update_attendance_shift_source():
                     connection, period_start, period_end, bamboo_shifts
                 )
             except AttendanceIntegrationError as error:
+                app.logger.warning(
+                    "Attendance source validation failed for tenant %s: %s",
+                    active_tenant_id(), error,
+                )
                 return jsonify(error=str(error), selected=attendance_shift_source(connection)), 502
     with closing(database_connect()) as connection, connection:
         connection.execute(
