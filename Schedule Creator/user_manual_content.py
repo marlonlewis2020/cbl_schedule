@@ -11,6 +11,7 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-14", "Updated membership benefits: source-specific attendance and manual clock actions are Silver+; executive reports are Gold+; historical attendance reports and workload planning are Platinum; Help, notifications, roster and META remain all-tier."),
     ("2026-11-13", "Business branding now supports a report-only light/dark theme and two supporting images; new offline HTML captures freeze the saved name, logo, colors, theme and images."),
     ("2026-11-13", "Added role-scoped Help and knowledge base with searchable FAQs/glossary, manager location-scoped submissions, administrator review, feedback and published revision history."),
     ("2026-11-05", "Trade cards and before/after shift previews follow light/dark themes. Both employees must finish the selected week with at least five shifts; other scheduling violations become explicit warnings requiring both employees, manager and administrator acknowledgement. Manual assignment overrides remain separate."),
@@ -385,8 +386,11 @@ SECTIONS = [
             ]),
             ("ul", [
                 "Included in every tier: schedule generation, sharing, BambooHR publishing, email configuration, employee management and settings.",
-                "Silver and above: employee schedule access, shift trades and schedule history.",
-                "Gold and above: overtime forecasting.",
+                "Included in every tier: Help and the knowledge base, attendance notifications, manager roster settings and manager META settings.",
+                "Silver and above: employee schedule access, shift trades, schedule history, source-specific attendance populations and history, and manual attendance clock actions.",
+                "Gold and above: overtime forecasting and the planned executive end-of-day download report.",
+                "Platinum: historical attendance reports and the planned workload and headcount planning module.",
+                "Historical attendance reports require Platinum. This is separate from schedule history, which is included with Silver and above. Attendance snapshots remain Silver and above.",
                 "Downgrades never delete data. Existing over-limit usage is kept, but new additions that exceed the tier are blocked until usage falls within limits.",
             ]),
         ],

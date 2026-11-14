@@ -200,6 +200,13 @@ remain for production use:
 - [x] Keep schedule generation, sharing, BambooHR publishing, email,
   employee management, and settings in all tiers. Gate employee schedule
   access, shift trades, and history at Silver+; overtime forecasting at Gold+.
+- [x] Record additional benefits: Silver+ source-specific attendance and manual
+  clock actions; Gold+ executive end-of-day reports; Platinum workload/headcount
+  planning and historical attendance reports. Help/knowledge base, attendance
+  notifications, manager roster settings and manager META settings are all-tier.
+  The owner feature matrix exposes these benefits and server routes enforce the
+  corresponding configured entitlements. Snapshot downloads retain their
+  existing Silver+ entitlement.
 - [x] Enforce quotas on admin, employee, team, and location additions. Allow
   downgrades to grandfather existing usage without automatic deactivation.
 - [x] Add platform-owner tier assignment and show plan usage/features in
@@ -309,6 +316,10 @@ remain for production use:
 
 ## Source-specific attendance populations and history (`attendance-source-specific-populations-and-history`) — in progress
 
+Tier: Silver, Gold and Platinum. Bronze retains the default app-source attendance;
+provider-source selection and populations require the `sourceSpecificAttendance`
+benefit.
+
 - Implemented: BambooHR mode fetches the provider's active employee directory
   independently of app active status and Employee #. Linked app-inactive people
   retain their app ID; unregistered BambooHR people use a namespaced provider
@@ -332,6 +343,8 @@ remain for production use:
   429-versus-400 rate-limit expectation and a weekday/week-end date expectation.
 
 ## Attendance table manual clock actions (`attendance-manual-clock-actions`) — implemented, acceptance pending
+
+Tier: Silver, Gold and Platinum (`manualClockActions`).
 
 - [x] Add audited, confirmed Clock in, Clock out, and Clock out at shift end
   actions. Enforce tenant-admin authorization, CSRF, employee mapping, leave
@@ -1009,6 +1022,7 @@ Requests below remain pending unless implementation evidence is explicitly noted
   Manuals rebuilt. No real user sessions or business records were modified;
   startup invalidates pre-upgrade sessions because their clock is absent.
 - **Executive end-of-day download report** (`executive-end-of-day-report`):
+  Tier: Gold and Platinum (`executiveEndOfDayReport`).
   admins configure automatic generation 0–24 hours after the reporting day
   ends in Jamaica time. Reuse the interval snapshot's visual format for
   executive attendance/staffing/location summaries and significant exceptions.
@@ -1061,6 +1075,8 @@ Requests below remain pending unless implementation evidence is explicitly noted
 
 ## Clear all active attendance notifications (`attendance-notifications-clear-all`) - approved, implementation pending
 
+Tier: all tiers (`attendanceNotifications`).
+
 - Add a Clear all attendance notifications action that archives every active
   attendance alert for the current reader, including read and unread entries.
 - Archive per reader; never delete shared notification records or affect another
@@ -1074,6 +1090,8 @@ Requests below remain pending unless implementation evidence is explicitly noted
   Approved for recording only; implementation pending.
 
 ## Fresh notification toasts (`fresh-notification-toasts-only`) - approved, implementation pending
+
+Tier: all tiers (`attendanceNotifications`).
 
 - Toast notification events only when their authoritative created/updated time
   is newer than the previous successful poll. The first poll after page load is
@@ -1103,6 +1121,9 @@ Requests below remain pending unless implementation evidence is explicitly noted
   interactive browser role/viewport verification remains outstanding.
 
 ## Historical attendance trends (`historical-attendance-trend-reports`) - implemented, awaiting acceptance
+
+Tier: Platinum (`historicalAttendanceReports`). Report generation, history and
+downloads are denied below Platinum; interval snapshot reports remain Silver+.
 
 - Generate historical weekly and previous-month reports in Excel and offline
   interactive HTML. Admins select all/specific DCs; managers are restricted
@@ -1148,6 +1169,9 @@ Requests below remain pending unless implementation evidence is explicitly noted
 
 ## Workload and headcount planning (`workload-fte-headcount-planning`) - approved, implementation pending
 
+Tier: Platinum (`workloadPlanning`). Enforce the entitlement on every future
+page, API, worker and export path.
+
 - Separate workforce capacity/annual planning module. Managers primarily define
   required tasks, standard times, workload units/conversions, workload-to-task
   mappings and fixed work for their authorized locations/roles. Enforce scope
@@ -1175,6 +1199,8 @@ Requests below remain pending unless implementation evidence is explicitly noted
 - Recording only; implementation pending.
 
 ## Help and knowledge base (`faq-guides-knowledge-base`) - implemented, awaiting acceptance
+
+Tier: all tiers (`helpKnowledgeBase`).
 
 - Added role-aware Help navigation/page with searchable built-in FAQs, glossary,
   a step-by-step tutorial, and a plain-text index of the generated user manual.
@@ -1225,6 +1251,8 @@ Requests below remain pending unless implementation evidence is explicitly noted
 
 ## Role-scoped roster settings (`role-scoped-roster-settings`) - implemented, acceptance verification pending
 
+Tier: all tiers (`managerRosterSettings`).
+
 - Managers see roster settings for their currently authorized teams and may
   edit roster fields except Random 1-3 and Attendance 0-100, which are read-only.
   Proximity, daily availability and allowed shift starts remain editable.
@@ -1259,6 +1287,8 @@ Requests below remain pending unless implementation evidence is explicitly noted
   production acceptance complete based on SQLite results.
 
 ## Manager-scoped META settings (`manager-scoped-meta-settings`) - implemented, acceptance verification pending
+
+Tier: all tiers (`managerMetaSettings`).
 
 - Managers view only their currently authorized locations on META. Permit
   changes only when configuration is unlocked; locked settings are read-only.

@@ -414,6 +414,18 @@ WORKFORCE_IMPLEMENTATION_NOTES = {
     "employee-trade-location-lock": "Implemented: personal trade location/team and Employee 1 are preselected and locked, including linked-manager personal mode. Choices/options/submission recheck current verified assignments; management choices retain authorized scope. Awaiting acceptance; prerequisite statuses are unchanged.",
     "snapshot-email-reports": "Implemented download-only scope: immutable Silver+ attendance XLSX/history, on-demand capture, opt-in 07:00/15:00/23:00 Jamaica worker captures, exact cutoff/verified overnight context, source freshness and explicit stale/failed/missed states with deduplication. Run report_worker.py independently with the app database/environment. Automatic email/recipient/delivery work is deferred by agreement; no email is sent. Staffing-vs-demand interval analytics are separate Gold/Platinum work. Awaiting acceptance and disposable PostgreSQL policy verification; prerequisite statuses are unchanged.",
 }
+MEMBERSHIP_ASSIGNMENT_NOTES = {
+    "workload-fte-headcount-planning": "Platinum feature; future routes and worker jobs must enforce the workloadPlanning entitlement server-side.",
+    "historical-attendance-trend-reports": "Platinum feature; historicalAttendanceReports is enforced on report generation, history, and downloads.",
+    "executive-end-of-day-report": "Gold and Platinum feature; future generation, history, and download paths must enforce executiveEndOfDayReport.",
+    "attendance-source-specific-populations-and-history": "Silver, Gold, and Platinum feature; sourceSpecificAttendance gates provider-source selection while baseline app-source attendance remains available to Bronze.",
+    "attendance-manual-clock-actions": "Silver, Gold, and Platinum feature; manualClockActions is enforced on the API and attendance action availability.",
+    "faq-guides-knowledge-base": "Available in all tiers by default through helpKnowledgeBase.",
+    "attendance-notifications-clear-all": "Available in all tiers by default through attendanceNotifications.",
+    "fresh-notification-toasts-only": "Available in all tiers by default through attendanceNotifications.",
+    "role-scoped-roster-settings": "Available in all tiers by default through managerRosterSettings.",
+    "manager-scoped-meta-settings": "Available in all tiers by default through managerMetaSettings.",
+}
 MEMBERSHIP_TIERS = {
     "bronze": {
         "name": "Bronze",
@@ -429,6 +441,15 @@ MEMBERSHIP_TIERS = {
             "shiftTrades": False,
             "scheduleHistory": False,
             "overtimeForecasting": False,
+            "workloadPlanning": False,
+            "historicalAttendanceReports": False,
+            "executiveEndOfDayReport": False,
+            "sourceSpecificAttendance": False,
+            "manualClockActions": False,
+            "helpKnowledgeBase": True,
+            "attendanceNotifications": True,
+            "managerRosterSettings": True,
+            "managerMetaSettings": True,
         },
     },
     "silver": {
@@ -445,6 +466,15 @@ MEMBERSHIP_TIERS = {
             "shiftTrades": True,
             "scheduleHistory": True,
             "overtimeForecasting": False,
+            "workloadPlanning": False,
+            "historicalAttendanceReports": False,
+            "executiveEndOfDayReport": False,
+            "sourceSpecificAttendance": True,
+            "manualClockActions": True,
+            "helpKnowledgeBase": True,
+            "attendanceNotifications": True,
+            "managerRosterSettings": True,
+            "managerMetaSettings": True,
         },
     },
     "gold": {
@@ -461,6 +491,15 @@ MEMBERSHIP_TIERS = {
             "shiftTrades": True,
             "scheduleHistory": True,
             "overtimeForecasting": True,
+            "workloadPlanning": False,
+            "historicalAttendanceReports": False,
+            "executiveEndOfDayReport": True,
+            "sourceSpecificAttendance": True,
+            "manualClockActions": True,
+            "helpKnowledgeBase": True,
+            "attendanceNotifications": True,
+            "managerRosterSettings": True,
+            "managerMetaSettings": True,
         },
     },
     "platinum": {
@@ -477,6 +516,15 @@ MEMBERSHIP_TIERS = {
             "shiftTrades": True,
             "scheduleHistory": True,
             "overtimeForecasting": True,
+            "workloadPlanning": True,
+            "historicalAttendanceReports": True,
+            "executiveEndOfDayReport": True,
+            "sourceSpecificAttendance": True,
+            "manualClockActions": True,
+            "helpKnowledgeBase": True,
+            "attendanceNotifications": True,
+            "managerRosterSettings": True,
+            "managerMetaSettings": True,
         },
     },
 }
@@ -1357,6 +1405,16 @@ def initialize_database() -> None:
                     "UPDATE developer_change_requests SET description=description || ?,"
                     "updated_at=CURRENT_TIMESTAMP WHERE request_id=?",
                     ("\n\nImplementation update: " + note, request_id),
+                )
+        for request_id, note in MEMBERSHIP_ASSIGNMENT_NOTES.items():
+            if connection.execute(
+                "INSERT OR IGNORE INTO app_migrations(migration_id) VALUES (?)",
+                ("membership-feature-assignment-v1:" + request_id,),
+            ).rowcount:
+                connection.execute(
+                    "UPDATE developer_change_requests SET description=description || ? "
+                    "WHERE request_id=?",
+                    ("\n\nMembership assignment: " + note, request_id),
                 )
         if connection.execute(
             "INSERT OR IGNORE INTO app_migrations (migration_id) VALUES (?)",
@@ -3148,6 +3206,15 @@ def membership_feature_denied(feature: str):
         "overtimeForecasting": "Overtime forecasting is included with Gold and above.",
         "shiftTrades": "Shift trades are included with Silver and above.",
         "employeeScheduleAccess": "Employee schedule access is included with Silver and above.",
+        "workloadPlanning": "Workload and headcount planning is included with Platinum.",
+        "historicalAttendanceReports": "Historical attendance reports are included with Platinum.",
+        "executiveEndOfDayReport": "Executive end-of-day reports are included with Gold and above.",
+        "sourceSpecificAttendance": "Source-specific attendance is included with Silver and above.",
+        "manualClockActions": "Manual attendance clock actions are included with Silver and above.",
+        "helpKnowledgeBase": "The Help and knowledge base is unavailable for this membership.",
+        "attendanceNotifications": "Attendance notifications are unavailable for this membership.",
+        "managerRosterSettings": "Manager roster settings are unavailable for this membership.",
+        "managerMetaSettings": "Manager META settings are unavailable for this membership.",
     }
     return jsonify(error=labels.get(feature, "This feature is not included in the business's membership tier.")), 403
 
@@ -5244,6 +5311,9 @@ def manager_meta_settings():
     user, failure = access_guard({"manager"})
     if failure:
         return failure
+    denied = membership_feature_denied("managerMetaSettings")
+    if denied:
+        return denied
     if request.args.get("view") == "employee":
         return jsonify(error="META settings are not available in the personal employee view."), 403
     tenant_id = user["tenantId"]
@@ -5387,6 +5457,9 @@ def manager_roster_settings():
     user, failure = access_guard({"manager"})
     if failure:
         return failure
+    denied = membership_feature_denied("managerRosterSettings")
+    if denied:
+        return denied
     if request.args.get("view") == "employee":
         return jsonify(error="Use My shifts / employee view to manage your own roster preferences."), 403
     tenant_id = user["tenantId"]
@@ -5430,6 +5503,9 @@ def personal_roster_settings():
     user, failure = access_personal_guard()
     if failure:
         return failure
+    denied = membership_feature_denied("managerRosterSettings")
+    if denied:
+        return denied
     tenant_id, employee_id = user["tenantId"], user["employeeId"]
     with closing(database_connect()) as connection:
         config = roster_config_row(connection, tenant_id)
@@ -5890,6 +5966,9 @@ def set_access_account_active(user_id: str):
 
 @app.get("/api/attendance/notifications")
 def admin_attendance_notifications():
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     with closing(database_connect()) as connection:
         return jsonify(
             **notifications_for_reader(
@@ -5902,6 +5981,9 @@ def admin_attendance_notifications():
 
 @app.post("/api/attendance/notifications/archive")
 def admin_archive_attendance_notifications():
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     if not tenant_auth_csrf_valid():
         return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     payload = request.get_json(silent=True)
@@ -5916,6 +5998,9 @@ def admin_archive_attendance_notifications():
 
 @app.post("/api/attendance/notifications/read")
 def admin_read_attendance_notifications():
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     if not tenant_auth_csrf_valid():
         return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     payload = request.get_json(silent=True)
@@ -6122,6 +6207,9 @@ def access_notifications():
     user, failure = access_guard({"manager"})
     if failure:
         return failure
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     with closing(database_connect()) as connection:
         scope = manager_employee_ids(connection, user["tenantId"], user["email"])
         return jsonify(
@@ -6137,6 +6225,9 @@ def access_archive_notifications():
     user, failure = access_guard({"manager"})
     if failure:
         return failure
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     payload = request.get_json(silent=True)
     with closing(database_connect()) as connection, connection:
         scope = manager_employee_ids(connection, user["tenantId"], user["email"])
@@ -6152,6 +6243,9 @@ def access_read_notifications():
     user, failure = access_guard({"manager"})
     if failure:
         return failure
+    denied = membership_feature_denied("attendanceNotifications")
+    if denied:
+        return denied
     payload = request.get_json(silent=True)
     with closing(database_connect()) as connection, connection:
         scope = manager_employee_ids(connection, user["tenantId"], user["email"])
@@ -9057,6 +9151,7 @@ def attendance_payload(
         )
     }
     clock_actions_enabled = bool(bamboohr_api_key())
+    manual_clock_actions_enabled = membership_features_for_request().get("manualClockActions", False)
     current_shifts = []
     expected = clocked_in = late = absent = approved_leave = 0
     for row in rows:
@@ -9092,6 +9187,7 @@ def attendance_payload(
         clocked_in_for_shift = len(matching_open_entries) == 1 and len(employee_open_entries) == 1
         eligible_clock_action = (
             clock_actions_enabled
+            and manual_clock_actions_enabled
             and app_employee_mapping is not None
             and employee_active
             and re.fullmatch(r"[0-9]+", bamboohr_id) is not None
@@ -9258,7 +9354,11 @@ def attendance_shift_source(connection: DatabaseConnection) -> str:
         return "app"
     if row[0] != "app":
         if row[0] == "bamboohr":
-            return row[0]
+            tier = tenant_membership_tier(connection)
+            features = membership_billing.features(
+                connection, tier, MEMBERSHIP_TIERS[tier]["features"]
+            )
+            return row[0] if features.get("sourceSpecificAttendance") else "app"
         raise RuntimeError("Stored attendance shift source is invalid.")
     return row[0]
 
@@ -10566,6 +10666,9 @@ def refresh_attendance_after_clock_action(shift_date: date, now: datetime):
 
 @app.post("/api/attendance/clock-events")
 def create_attendance_clock_event():
+    denied = membership_feature_denied("manualClockActions")
+    if denied:
+        return denied
     if not tenant_auth_csrf_valid():
         return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     payload = request.get_json(silent=True)
@@ -10799,12 +10902,16 @@ def update_attendance_settings():
 
 @app.put("/api/attendance/source")
 def update_attendance_shift_source():
-    if not tenant_auth_csrf_valid():
-        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     payload = request.get_json(silent=True)
     source = payload.get("source") if isinstance(payload, dict) else None
     if not isinstance(source, str) or source not in {"app", "bamboohr"}:
         return jsonify(error="Choose either app or BambooHR shifts as the attendance source."), 400
+    if source == "bamboohr":
+        denied = membership_feature_denied("sourceSpecificAttendance")
+        if denied:
+            return denied
+    if not tenant_auth_csrf_valid():
+        return jsonify(error="The request token is invalid. Reload the page and retry."), 400
     if source == "bamboohr" and (not isinstance(payload, dict) or payload.get("confirmed") is not True):
         return jsonify(error="Explicit confirmation is required before switching to BambooHR shifts."), 400
     today = datetime.now(ATTENDANCE_TIMEZONE).date()

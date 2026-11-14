@@ -14,12 +14,29 @@ import test_scheduler
 
 
 class HistoricalAttendanceReportTests(unittest.TestCase):
-    setUp = test_scheduler.ManagerEmployeeAccessTests.setUp
+    def setUp(self):
+        test_scheduler.ManagerEmployeeAccessTests.setUp(self)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier='platinum' WHERE tenant_id=?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+
     tearDown = test_scheduler.ManagerEmployeeAccessTests.tearDown
     create_account = test_scheduler.ManagerEmployeeAccessTests.create_account
     new_client = test_scheduler.ManagerEmployeeAccessTests.new_client
     sign_in_manager = test_scheduler.ManagerEmployeeAccessTests.sign_in_manager
     admin_headers = {"X-CSRF-Token": "test-csrf-token"}
+
+    def test_historical_reports_require_platinum(self):
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        response = self.admin.get("/api/attendance/historical-reports")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Platinum", response.get_json()["error"])
 
     def test_dashboard_branding_is_saved(self):
         from test_attendance_snapshot import LOGO

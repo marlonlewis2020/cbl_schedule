@@ -233,7 +233,16 @@
         ["employeeScheduleAccess", "Employee schedule access"],
         ["shiftTrades", "Shift trades"],
         ["scheduleHistory", "Schedule history"],
-        ["overtimeForecasting", "Overtime forecasting"]
+        ["overtimeForecasting", "Overtime forecasting"],
+        ["workloadPlanning", "Workload and headcount planning"],
+        ["historicalAttendanceReports", "Historical attendance reports"],
+        ["executiveEndOfDayReport", "Executive end-of-day report"],
+        ["sourceSpecificAttendance", "Source-specific attendance populations and history"],
+        ["manualClockActions", "Manual attendance clock actions"],
+        ["helpKnowledgeBase", "Help and knowledge base"],
+        ["attendanceNotifications", "Attendance notifications"],
+        ["managerRosterSettings", "Manager roster settings"],
+        ["managerMetaSettings", "Manager META settings"]
       ];
       tierFeatures.textContent = `Included: ${featureLabels.filter(([key]) => membership.features[key]).map(([, label]) => label).join(", ") || "core scheduling only"}. Existing over-limit usage is retained; additions remain blocked until usage is within the selected limits.`;
       const note = document.createElement("input");

@@ -141,6 +141,9 @@ def register(app, s):
         _, failure = _actor(s)
         if failure:
             return failure
+        denied = s.membership_feature_denied("helpKnowledgeBase")
+        if denied:
+            return denied
         return s.send_from_directory(s.APP_DIRECTORY / "docs", "User-Manual.html")
 
     @app.get("/api/help/knowledge")
@@ -148,6 +151,9 @@ def register(app, s):
         actor, failure = _actor(s)
         if failure:
             return failure
+        denied = s.membership_feature_denied("helpKnowledgeBase")
+        if denied:
+            return denied
         tenant_id = actor["tenantId"]
         with closing(s.database_connect()) as connection:
             if actor["role"] == "admin":
@@ -238,6 +244,9 @@ def register(app, s):
         user, failure = s.access_guard({"manager"})
         if failure:
             return failure
+        denied = s.membership_feature_denied("helpKnowledgeBase")
+        if denied:
+            return denied
         payload = request.get_json(silent=True)
         try:
             submission = _validated_submission(payload)
@@ -302,6 +311,9 @@ def register(app, s):
             return jsonify(error="Sign in as a business administrator."), 401
         if g.tenant_status != "active" or g.tenant_membership_status != "active":
             return jsonify(error="This business membership is not active."), 403
+        denied = s.membership_feature_denied("helpKnowledgeBase")
+        if denied:
+            return denied
         if s.cross_origin_request():
             return jsonify(error="Cross-origin requests are not allowed."), 403
         if not s.tenant_auth_csrf_valid():

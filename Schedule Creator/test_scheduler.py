@@ -1271,6 +1271,49 @@ class MembershipEntitlementTests(unittest.TestCase):
                 (tier, scheduler.DEFAULT_TENANT_ID),
             )
 
+    def test_feature_benefits_match_requested_tier_assignments(self):
+        assignments = {
+            "workloadPlanning": (False, False, False, True),
+            "historicalAttendanceReports": (False, False, False, True),
+            "executiveEndOfDayReport": (False, False, True, True),
+            "sourceSpecificAttendance": (False, True, True, True),
+            "manualClockActions": (False, True, True, True),
+            "helpKnowledgeBase": (True, True, True, True),
+            "attendanceNotifications": (True, True, True, True),
+            "managerRosterSettings": (True, True, True, True),
+            "managerMetaSettings": (True, True, True, True),
+        }
+        tiers = ("bronze", "silver", "gold", "platinum")
+        for feature, expected in assignments.items():
+            self.assertEqual(
+                tuple(scheduler.MEMBERSHIP_TIERS[tier]["features"][feature] for tier in tiers),
+                expected,
+                feature,
+            )
+
+    def test_bronze_cannot_select_provider_attendance_or_use_manual_clock_actions(self):
+        today = scheduler.datetime.now(scheduler.ATTENDANCE_TIMEZONE).date().isoformat()
+        source = self.client.put(
+            "/api/attendance/source",
+            json={"source": "bamboohr", "confirmed": True, "start": today, "end": today},
+        )
+        clock = self.client.post("/api/attendance/clock-events", json={})
+        self.assertEqual(source.status_code, 403)
+        self.assertEqual(clock.status_code, 403)
+        self.assertIn("Silver", source.get_json()["error"])
+        self.assertIn("Silver", clock.get_json()["error"])
+
+    def test_bronze_downgrade_falls_back_to_app_attendance_source(self):
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "INSERT INTO application_settings(setting_key,setting_value,tenant_id) "
+                "VALUES('attendance_shift_source','bamboohr',?)",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
+        response = self.client.get("/api/attendance")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["shiftSource"]["selected"], "app")
+
     def schedule_location(self, name, location, role):
         return self.client.post(
             "/api/schedule-locations",
@@ -2961,6 +3004,11 @@ class AttendanceAutomationTests(unittest.TestCase):
         scheduler.app.config["TESTING"] = True
         self.client = scheduler.app.test_client()
         authenticate_test_admin(self.client)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier='silver' WHERE tenant_id=?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
 
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
@@ -4661,6 +4709,16 @@ class DeveloperChangeRequestTests(unittest.TestCase):
             if item[0] != "developer-change-log"
         ] + ["developer-change-log"]
         self.assertEqual(request_ids, expected)
+
+    def test_membership_assignments_are_recorded_in_change_requests(self):
+        with closing(scheduler.database_connect()) as connection:
+            descriptions = dict(connection.execute(
+                "SELECT request_id, description FROM developer_change_requests"
+            ).fetchall())
+        self.assertIn("Membership assignment: Platinum", descriptions["workload-fte-headcount-planning"])
+        self.assertIn("Membership assignment: Gold and Platinum", descriptions["executive-end-of-day-report"])
+        self.assertIn("Membership assignment: Silver, Gold, and Platinum", descriptions["attendance-manual-clock-actions"])
+        self.assertIn("Membership assignment: Available in all tiers", descriptions["faq-guides-knowledge-base"])
 
     def test_primary_admin_change_request_view_is_sanitized_and_read_only(self):
         authenticate_test_admin(self.client)

@@ -83,6 +83,9 @@ def _authorized_locations(s, connection, tenant_id, user):
 def _authorized_context(s):
     user, failure = s.access_guard({"manager"})
     if not failure:
+        denied = s.membership_feature_denied("historicalAttendanceReports")
+        if denied:
+            return None, denied
         return {
             "role": "manager", "tenantId": user["tenantId"], "actorId": user["id"],
             "email": user.get("email"), "user": user,
@@ -93,6 +96,9 @@ def _authorized_context(s):
         return None, (jsonify(error="Sign in to continue."), 401)
     if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return None, (jsonify(error="This business membership is not active."), 403)
+    denied = s.membership_feature_denied("historicalAttendanceReports")
+    if denied:
+        return None, denied
     return {
         "role": "admin", "tenantId": s.active_tenant_id(),
         "actorId": session.get("tenant_admin_id") or "",
