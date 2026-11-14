@@ -117,6 +117,11 @@ def main():
     fixture.setUp()
     try:
         fixture.seed()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET membership_tier='platinum' WHERE tenant_id=?",
+                (scheduler.DEFAULT_TENANT_ID,),
+            )
         employee = fixture.portal_employee_client()
         fixture.target_client()
         manager, _, _ = fixture.sign_in_manager()

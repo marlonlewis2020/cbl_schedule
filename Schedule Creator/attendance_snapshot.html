@@ -77,8 +77,8 @@ details summary{cursor:pointer;font-weight:600}details p{margin-top:10px}#printS
 <h2 class="section-label">Executive highlights</h2>
 <section class="kpis" id="kpis" aria-label="Executive KPIs"></section>
 <div class="grid">
- <section class="panel"><div class="panel-head"><div><h2>Attendance by location</h2><p class="subtle">Confirmed attendance as a share of expected shifts so far.</p></div></div><div class="legend" id="legend"></div><div id="locations"></div><p class="chart-hint subtle">Select a location to focus every card, chart and table.</p></section>
- <section class="panel"><h2>Attendance composition</h2><p class="subtle">Mutually exclusive groups; approved leave is not expected.</p><div id="composition"></div></section>
+ <section class="panel"><div class="panel-head"><div><h2>Attendance by location</h2><p class="subtle">Attended and late statuses as a share of expected shifts, matching the Attendance page.</p></div></div><div class="legend" id="legend"></div><div id="locations"></div><p class="chart-hint subtle">Select a location to focus every card, chart and table.</p></section>
+ <section class="panel"><h2>Attendance composition</h2><p class="subtle">Validation groups are mutually exclusive; approved leave is not expected.</p><div id="composition"></div></section>
 </div>
 <div class="grid">
  <section class="panel"><div class="panel-head"><div><h2>Role performance</h2><p class="subtle">Compare attendance, gaps and leave across job roles.</p></div></div><div id="roles"></div><p class="chart-hint subtle">Select a role to drill into its workforce.</p></section>
@@ -86,7 +86,7 @@ details summary{cursor:pointer;font-weight:600}details p{margin-top:10px}#printS
 </div>
 <section class="panel">
  <div class="panel-head"><div><h2>Location and role summary</h2><p class="subtle">Accessible tabular detail for the charts above.</p></div></div>
- <div class="tablewrap"><table><thead><tr><th>Location</th><th>Role</th><th>Expected</th><th>Confirmed</th><th>Absent</th><th>Awaiting validation</th><th>Leave</th><th>Attendance</th></tr></thead><tbody id="summary"></tbody></table></div>
+ <div class="tablewrap"><table><thead><tr><th>Location</th><th>Role</th><th>Expected</th><th>Attended / late</th><th>Absent</th><th>Awaiting validation</th><th>Leave</th><th>Attendance</th></tr></thead><tbody id="summary"></tbody></table></div>
 </section>
 <h2 class="section-label" id="exceptionsHeading">Employee exceptions and risks</h2>
 <section class="panel"><h2>Operational attention</h2><p class="subtle">Evidence-based follow-up, not a staffing-demand forecast.</p><div class="risks" id="risks"></div></section>
@@ -153,11 +153,13 @@ try{
  };
  const exception=r=>!isLeave(r)&&(r.status==='late'||r.status==='absent'||!confirmed(r)||missingOut(r)||minutes(r.earlyMinutes)>0||minutes(r.overtimeMinutes)>0);
  function metrics(rows){
-  const m={total:rows.length,expected:0,present:0,absent:0,pending:0,leave:0,clocked:0,late:0,missing:0,early:0,overtime:0,missingOut:0};
+  const m={total:rows.length,expected:0,present:0,validated:0,absent:0,pending:0,leave:0,clocked:0,late:0,missing:0,early:0,overtime:0,missingOut:0};
   for(const r of rows){
-   const type=category(r);m[type]++;
+    const type=category(r);
+    if(type==='present')m.validated++;else m[type]++;
    if(type==='leave')continue;
    m.expected++;
+   if(r.status==='attended'||r.status==='late')m.present++;
    if(r.clockIn)m.clocked++;
    if(r.status==='late'&&r.clockIn)m.late++;
    if(!r.clockIn)m.missing++;
@@ -201,7 +203,7 @@ try{
  $('freshness').classList.toggle('warning',Boolean(outdated));
  $('freshness').textContent=outdated?'Source warning: '+(data.refreshError||'Source refresh timestamp is missing or newer than the cutoff. Treat this evidence as incomplete.'):'Source refreshed for this capture. This is a fixed snapshot, not a live feed.';
  $('definitions').textContent='Reporting timezone: America/Jamaica. Saved lateness tolerance: '+(data.tolerance??'unavailable')+' minutes. The app uses its four-hour no-clock-in absence rule and existing worked-time/leave/override decisions; the sample template does not change these rules.';
- const compositionNames={present:'Confirmed',absent:'Absent',pending:'Awaiting validation',leave:'Approved leave'};
+ const compositionNames={present:'Validated attendance',absent:'Absent',pending:'Awaiting validation',leave:'Approved leave'};
  for(const key of Object.keys(compositionNames)){const label=element('span');label.append(element('i',undefined,'dot '+key),document.createTextNode(compositionNames[key]));$('legend').append(label);}
  let sortKey='location',direction=1,selectedCategory='';
  function filtered(){
@@ -225,10 +227,11 @@ try{
    svg.append(svgElement('rect',{x:0,y:0,width:100,height:8,rx:3,class:'bar-track'}));
    let x=0;
    for(const key of Object.keys(compositionNames)){
-    const width=entry.m.total?entry.m[key]/entry.m.total*100:0;
+    const count=key==='present'?entry.m.validated:entry.m[key];
+    const width=entry.m.total?count/entry.m.total*100:0;
     svg.append(svgElement('rect',{x,y:0,width,height:8,class:key}));x+=width;
    }
-   const description=`${entry.m.present} confirmed / ${entry.m.expected} expected; ${entry.m.absent} absent; ${entry.m.pending} awaiting validation; ${entry.m.leave} leave`;
+  const description=`${entry.m.present} attended/late / ${entry.m.expected} expected; ${entry.m.absent} absent; ${entry.m.pending} awaiting validation; ${entry.m.leave} leave`;
    button.title=entry.key+': '+description;button.setAttribute('aria-label',entry.key+', '+percent(entry.m.present,entry.m.expected)+'. '+description+'. Filter this group.');
    button.append(label,svg,element('small',description));
    button.onclick=()=>{$(filterId).value=entry.key;update();};
@@ -237,16 +240,16 @@ try{
  }
  function composition(m){
   const container=$('composition');container.replaceChildren();
-  const layout=element('div',undefined,'donut-layout'),svg=svgElement('svg',{viewBox:'0 0 200 200',class:'donut',role:'img','aria-label':percent(m.present,m.expected)+' confirmed attendance'});
+  const layout=element('div',undefined,'donut-layout'),svg=svgElement('svg',{viewBox:'0 0 200 200',class:'donut',role:'img','aria-label':percent(m.present,m.expected)+' attendance rate'});
   const track=svgElement('circle',{cx:100,cy:100,r:78,class:'track'});
   const arc=svgElement('circle',{cx:100,cy:100,r:78,class:'arc',pathLength:100,'stroke-dasharray':`${m.expected?100*m.present/m.expected:0} 100`});
   const text=svgElement('text',{x:100,y:100});text.textContent=percent(m.present,m.expected);
-  const caption=svgElement('text',{x:100,y:121,class:'caption'});caption.textContent='confirmed / expected';svg.append(track,arc,text,caption);
+  const caption=svgElement('text',{x:100,y:121,class:'caption'});caption.textContent='attended/late / expected';svg.append(track,arc,text,caption);
   const list=element('div',undefined,'disposition');
   for(const key of Object.keys(compositionNames)){
    const button=element('button');button.type='button';button.setAttribute('aria-pressed',String(selectedCategory===key));
    const label=element('span');label.append(element('i',undefined,'dot '+key),document.createTextNode(' '+compositionNames[key]));
-   button.append(label,element('strong',n(m[key])));button.title='Toggle '+compositionNames[key]+' filter';
+  button.append(label,element('strong',n(key==='present'?m.validated:m[key])));button.title='Toggle '+compositionNames[key]+' filter';
    button.onclick=()=>{selectedCategory=selectedCategory===key?'':key;update();};list.append(button);
   }
   layout.append(svg,list);container.append(layout);
@@ -296,7 +299,7 @@ try{
   $('scope').textContent=`${rows.length} of ${all.length} captured shift records. ${scope}`;$('printScope').textContent=$('scope').textContent;
   $('kpis').replaceChildren();
   for(const [label,value,note,kind] of [
-   ['Confirmed attendance',percent(m.present,m.expected),`${m.present} confirmed / ${m.expected} expected`,m.absent?'critical':''],
+  ['Attendance rate',percent(m.present,m.expected),`${m.present} attended/late status / ${m.expected} expected`,m.absent?'critical':''],
    ['Expected so far',n(m.expected),'Started shifts; approved leave excluded',''],
    ['Clock-in evidence',n(m.clocked),'Not necessarily worked-time validated',''],
    ['Late arrivals',n(m.late),'Late status with a matching clock-in','alert'],

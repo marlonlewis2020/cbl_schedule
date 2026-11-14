@@ -56,6 +56,8 @@ import knowledge_base
 import meta_settings
 import roster_settings
 
+ALLOWED_IP = "0.0.0.0"
+
 
 APP_DIRECTORY = Path(__file__).resolve().parent
 load_dotenv(APP_DIRECTORY / ".env")
@@ -3153,7 +3155,7 @@ def tenant_auth_state():
         canBootstrap=(
             not DATABASE_URL
             and not configured
-            and request.remote_addr in {"127.0.0.1", "::1"}
+            and request.remote_addr in {ALLOWED_IP, "::1"}
         ),
     )
 
@@ -3223,7 +3225,7 @@ def membership_feature_denied(feature: str):
 def bootstrap_tenant_admin():
     if DATABASE_URL:
         return jsonify(error="Use the server-side bootstrap-admin command for PostgreSQL."), 403
-    if request.remote_addr not in {"127.0.0.1", "::1"}:
+    if request.remote_addr not in {ALLOWED_IP, "::1"}:
         return jsonify(error="Initial administrator setup is allowed only from this computer."), 403
     if not tenant_auth_csrf_valid():
         return jsonify(error="The setup session expired. Reload the page and retry."), 400
@@ -6789,7 +6791,7 @@ def developer_authenticated() -> bool:
 
 
 def developer_local_request() -> bool:
-    return request.remote_addr in {"127.0.0.1", "::1"}
+    return request.remote_addr in {ALLOWED_IP, "::1"}
 
 
 def valid_developer_username(value: object) -> bool:
@@ -11660,7 +11662,7 @@ def main() -> None:
         )
         return
     port = int(os.environ.get("SCHEDULE_CREATOR_PORT", "5000"))
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    app.run(host=ALLOWED_IP, port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":

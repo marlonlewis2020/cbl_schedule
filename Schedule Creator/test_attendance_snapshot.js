@@ -5,7 +5,7 @@ async function runAttendanceSnapshotTests() {
     const value=index=>$('kpis').children[index].querySelector('strong').textContent;
     const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));};
     $('reset').click();
-    assert(value(0)==='57.1%','Attendance must be four validated shifts divided by seven expected, not late-without-punch');
+    assert(value(0)==='71.4%','Attendance rate must count attended and late statuses like the Attendance page');
     assert(value(1)==='7'&&value(2)==='5','Expected shifts exclude leave; clock-in evidence includes pending validation');
     assert(value(3)==='1'&&value(4)==='2','Late arrivals require a matching clock-in; missing includes absent');
     assert(value(5)==='1'&&value(6)==='1'&&value(7)==='61','Absence, leave and overtime retain saved evidence');
@@ -23,7 +23,7 @@ async function runAttendanceSnapshotTests() {
     assert(document.querySelectorAll('#employees .name-absent').length===1,'Absent names use red styling with status labels');
     const kingston=[...document.querySelectorAll('#locations button')].find(el=>el.textContent.includes('Kingston'));
     kingston.click();
-    assert($('location').value==='Kingston'&&value(0)==='50.0%'&&value(1)==='4','Location drill-down updates KPI denominator and percentage');
+    assert($('location').value==='Kingston'&&value(0)==='75.0%'&&value(1)==='4','Location drill-down updates KPI denominator and percentage');
     assert($('summary').children.length===1&&$('summary').textContent.includes('Kingston'),'Chart drill-down filters summary table');
     assert(!$('employees').textContent.includes('Gray Example'),'Chart drill-down filters employee register');
     $('reset').click();
@@ -40,7 +40,7 @@ async function runAttendanceSnapshotTests() {
     $('reset').click();
     const pending=[...document.querySelectorAll('#composition button')].find(el=>el.textContent.includes('Awaiting validation'));
     pending.click();
-    assert(value(1)==='2'&&value(0)==='0.0%','Composition drill-down filters by mutually exclusive validation groups');
+    assert(value(1)==='2'&&value(0)==='50.0%','Composition drill-down filters by mutually exclusive validation groups and keeps the live attendance rate');
     [...document.querySelectorAll('#composition button')].find(el=>el.getAttribute('aria-pressed')==='true').click();
     assert(value(1)==='7','Clicking active composition restores unfiltered view');
     $('search').value='Gray';$('search').dispatchEvent(new Event('input'));
