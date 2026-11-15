@@ -3064,14 +3064,11 @@ def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
     g.tenant_status = None
     g.tenant_membership_status = None
-    if DATABASE_URL:
-        if not http_allowed_for_client(): 
-            pass
-        # if not request.is_secure:
-        # return (
-        #     "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
-        #     400,
-        # )
+    if DATABASE_URL and not http_allowed_for_client() and not request.is_secure:
+        return (
+            "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
+            400,
+        )
     if request.path == "/api/payments/paypal/webhook":
         return None
     if request.path == "/api/session/state":
