@@ -73,9 +73,84 @@ ALLOW_LAN_HTTP = (
     os.environ.get("SCHEDULE_CREATOR_TEMPORARY_ALLOW_LAN_HTTP", "").strip() == "1"
 )
 
+def is_secure_request(request) -> bool:
+    """
+    Determines if an incoming HTTP request was made over HTTPS,
+    accounting for direct connections and reverse proxies across
+    Django, Flask, FastAPI/Starlette, and WSGI.
+    """
+    # 1. Extract headers safely across frameworks
+    headers = {}
+    if hasattr(request, "headers"):
+        # Standardizes keys to lowercase (works for Flask, Django >= 2.2, FastAPI)
+        headers = {k.lower(): v for k, v in request.headers.items()}
+    elif hasattr(request, "META"):
+        # Fallback for older Django versions or raw WSGI
+        for k, v in request.META.items():
+            if k.startswith("HTTP_"):
+                header_name = k[5:].replace("_", "-").lower()
+                headers[header_name] = v
+
+    # 2. Check standard proxy headers
+    # X-Forwarded-Proto (AWS ALB, Nginx, Heroku, GCP, Envoy)
+    forwarded_proto = headers.get("x-forwarded-proto", "")
+    if forwarded_proto:
+        # Handle comma-separated chains (e.g., "https, http") -> check original client proto
+        first_proto = forwarded_proto.split(",")[0].strip().lower()
+        if first_proto == "https":
+            return True
+
+    # Front-End-Https (Microsoft IIS / ARR)
+    if headers.get("front-end-https", "").lower() == "on":
+        return True
+
+    # X-Forwarded-Ssl (Some older proxies / Nginx setups)
+    if headers.get("x-forwarded-ssl", "").lower() == "on":
+        return True
+
+    # X-Url-Scheme (Custom proxy setups)
+    if headers.get("x-url-scheme", "").lower() == "https":
+        return True
+
+    # RFC 7239 Forwarded header (e.g., "for=192.0.2.60;proto=https;by=203.0.113.43")
+    forwarded = headers.get("forwarded", "")
+    if "proto=https" in forwarded.lower():
+        return True
+
+    # Cloudflare CF-Visitor header (JSON string: '{"scheme":"https"}')
+    cf_visitor = headers.get("cf-visitor", "")
+    if '"https"' in cf_visitor.lower():
+        return True
+
+    # 3. Check direct server/framework attributes (no proxy or proxy passed scheme)
+    # FastAPI / Starlette
+    if hasattr(request, "url") and hasattr(request.url, "scheme"):
+        if request.url.scheme == "https":
+            return True
+
+    # Flask / Werkzeug
+    if hasattr(request, "scheme") and request.scheme == "https":
+        return True
+
+    # Django built-in check (if SECURE_PROXY_SSL_HEADER is already configured)
+    if hasattr(request, "is_secure"):
+        # Note: In Django is_secure is a method; in Flask it's a boolean property
+        val = request.is_secure() if callable(request.is_secure) else request.is_secure
+        if val:
+            return True
+
+    # Raw WSGI environ fallback
+    environ = getattr(request, "environ", getattr(request, "META", {}))
+    if environ.get("wsgi.url_scheme") == "https" or environ.get("HTTPS") == "on":
+        return True
+
+    return False
+
+
 
 def http_allowed_for_client() -> bool:
     if not ALLOW_LAN_HTTP or request.headers.get("X-Forwarded-For"):
+        print(f"ALLOW_LAN_HTTP is {ALLOW_LAN_HTTP}, X-Forwarded-For: {request.headers.get('X-Forwarded-For')}, remote_addr: {request.remote_addr}")
         return False
     try:
         address = ipaddress.ip_address(request.remote_addr or "")
@@ -3064,14 +3139,11 @@ def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
     g.tenant_status = None
     g.tenant_membership_status = None
-    if DATABASE_URL:
-        if not http_allowed_for_client(): 
-            pass
-        # if not request.is_secure:
-        # return (
-        #     "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
-        #     400,
-        # )
+    if DATABASE_URL and not http_allowed_for_client() and not is_secure_request(request):
+        return (
+            "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
+            400,
+        )
     if request.path == "/api/payments/paypal/webhook":
         return None
     if request.path == "/api/session/state":
@@ -3109,7 +3181,7 @@ def audit_tenant_mutation(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
-    if DATABASE_URL and request.is_secure:
+    if DATABASE_URL and is_secure_request(request):
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )

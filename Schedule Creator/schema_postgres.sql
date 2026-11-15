@@ -515,4 +515,8 @@ INSERT INTO tenants (tenant_id, business_name)
 VALUES ('cbljm', 'Celebration Brands Limited')
 ON CONFLICT (tenant_id) DO NOTHING;
 
+INSERT INTO tenant_admins (id, tenant_id, email, display_name, is_primary, mfa_enabled, active, mfa_secret, password_hash)
+VALUES ('zYaZAkEICu3TUwQMnX-2Y-jO', 'cbljm', 'marlonl@cbljm.com', 'Marlon Lewis', 1, 1, 1, 'gAAAAABq9Ac-U_QrRwm6UNacRhZ90cM6NCLLJKj7oeo9AhClQz4joPYiWW8zppUQpsyUZl-B-ZbDDURsoy2uweDDkgD2SVLPwi2zKD4-ArBDy5Azfc-93KcLLC_pfcq5A1qu5iQtjwP1', 'scrypt:32768:8:1$x4Sr39g4ZywKA3AC$f84ece21ef74c653ef37dbc26e3fe28d6356953649a8305ef8deda531c3598d6a9fadbdf0f7ccaeca89849955ad3a2688fc8ecb27c4f23f806d7c45bf7ad66b6')
+ON CONFLICT (tenant_id) DO NOTHING;
+
 COMMIT;
