@@ -16,6 +16,7 @@ from pathlib import Path
 from flask import Response, g, jsonify, request, session
 
 import attendance_email
+import report_branding
 
 
 REPORT_PREFIX = "historical:"
@@ -815,7 +816,7 @@ def workbook(report):
                 f"xl/worksheets/sheet{sheet_index}.xml",
                 f'<worksheet xmlns="{namespace}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews><sheetData>{"".join(body)}</sheetData></worksheet>',
             )
-    return output.getvalue()
+    return report_branding.workbook_cover(output.getvalue(), report)
 
 
 def _history_context(s, report_id, context, locations):
@@ -931,34 +932,21 @@ def register(app, s):
                 except ValueError as error:
                     return jsonify(error=str(error)), 400
                 report_id = secrets.token_urlsafe(18)
-                branding = s.current_app_config()
-                logo = s.validate_logo_data_url(branding.get("logoDataUrl", ""))
-                if logo is None:
-                    return jsonify(error="The saved business logo is invalid. Update branding before generating a report."), 400
-                raw_images = branding.get("supportingImages", [])
-                if not isinstance(raw_images, list) or len(raw_images) > 2:
-                    return jsonify(error="Business supporting images are invalid. Update branding before generating a report."), 400
-                supporting_images = [s.validate_logo_data_url(image) for image in raw_images if image]
-                if any(image is None for image in supporting_images):
-                    return jsonify(error="A business supporting image is invalid. Update branding before generating a report."), 400
-                report["businessName"] = branding["businessName"]
-                report["logoDataUrl"] = logo
-                report["supportingImages"] = supporting_images
-                report_theme = branding.get("reportTheme", "light")
-                report["reportTheme"] = (
-                    report_theme if isinstance(report_theme, str) and report_theme in {"light", "dark"}
-                    else "light"
-                )
-                report["primaryColor"] = branding.get("primaryColor", "#176bd5")
-                report["accentColor"] = branding.get("accentColor", "#079998")
+                try:
+                    report.update(report_branding.snapshot(s))
+                except ValueError as error:
+                    return jsonify(error=str(error)), 400
                 run_key = _scope_run_key_prefix(context) + secrets.token_urlsafe(24)
                 cutoff = datetime.combine(
                     min(end, now.date()), time.max, tzinfo=s.ATTENDANCE_TIMEZONE
                 ).isoformat()
-                saved_report = report | {
-                    "downloadHtml": render_html(report),
-                    "downloadWorkbook": base64.b64encode(workbook(report)).decode("ascii"),
-                }
+                try:
+                    saved_report = report | {
+                        "downloadHtml": render_html(report),
+                        "downloadWorkbook": base64.b64encode(workbook(report)).decode("ascii"),
+                    }
+                except ValueError as error:
+                    return jsonify(error=str(error)), 400
                 encoded_report = json.dumps(saved_report, ensure_ascii=False, separators=(",", ":"))
                 if len(encoded_report.encode("utf-8")) > MAX_SAVED_REPORT_BYTES:
                     return jsonify(error="The report is too large to save. Narrow its location or role filters."), 413

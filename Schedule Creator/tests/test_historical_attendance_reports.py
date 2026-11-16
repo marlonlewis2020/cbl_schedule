@@ -76,6 +76,15 @@ class HistoricalAttendanceReportTests(unittest.TestCase):
         self.assertIn(b'"primaryColor":"#123456"', response.data)
         self.assertIn(b'"accentColor":"#abcdef"', response.data)
         self.assertIn("img-src data:", response.headers["Content-Security-Policy"])
+        with patch.object(scheduler, "current_app_config", side_effect=AssertionError("Use saved workbook branding")):
+            download = self.admin.get(f"/api/attendance/historical-reports/{report_id}/download?format=xlsx")
+        self.assertEqual(download.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(download.data)) as archive:
+            root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            self.assertEqual(root.find(".//s:sheet", namespace).get("name"), "Business branding")
+            self.assertIn(b"Saved Business", archive.read("xl/worksheets/business-branding.xml"))
+            self.assertEqual(len([name for name in archive.namelist() if name.startswith("xl/media/")]), 2)
 
     def add_shift(
         self, employee_id, day, status, location="Kingston", role="Cashier",

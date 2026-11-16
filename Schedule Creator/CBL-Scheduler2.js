@@ -534,7 +534,53 @@ function zipStore(files,type='application/vnd.openxmlformats-officedocument.spre
     ev.setUint32(16,offset,true);
     return new Blob([...out,...central,end],{type})
 }
-function workbookBlob(sheets){
+async function addWorkbookBranding(files,branding=savedReportBranding){
+    const images=[];
+    if(branding.logoDataUrl)images.push({label:'Business logo',url:branding.logoDataUrl,column:0,row:5,maxWidth:220,maxHeight:110});
+    (branding.supportingImages||[]).forEach((url,index)=>{if(url)images.push({label:'Supporting image '+(index+1),url,column:index*5,row:14,maxWidth:280,maxHeight:160});});
+    if(!images.length)return;
+    const sheetNS='http://schemas.openxmlformats.org/spreadsheetml/2006/main',officeNS='http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+        relNS='http://schemas.openxmlformats.org/package/2006/relationships',typeNS='http://schemas.openxmlformats.org/package/2006/content-types';
+    const parse=value=>{const doc=new DOMParser().parseFromString(value,'application/xml');if(doc.querySelector('parsererror'))throw Error('Invalid report workbook XML.');return doc;};
+    const workbook=parse(files['xl/workbook.xml']),relationships=parse(files['xl/_rels/workbook.xml.rels']),types=parse(files['[Content_Types].xml']);
+    const sheets=workbook.getElementsByTagNameNS(sheetNS,'sheets')[0],existing=[...sheets.children],sheetId=Math.max(...existing.map(sheet=>Number(sheet.getAttribute('sheetId'))))+1;
+    let name='Business branding',suffix=2;
+    while(existing.some(sheet=>sheet.getAttribute('name')===name))name='Business branding '+suffix++;
+    const append=(doc,namespace,tag,attributes)=>{const node=doc.createElementNS(namespace,tag);for(const [key,value] of Object.entries(attributes))node.setAttribute(key,value);doc.documentElement.append(node);return node;};
+    const cover=workbook.createElementNS(sheetNS,'sheet');cover.setAttribute('name',name);cover.setAttribute('sheetId',sheetId);cover.setAttributeNS(officeNS,'r:id','branding'+sheetId);sheets.prepend(cover);
+    for(const view of workbook.getElementsByTagNameNS(sheetNS,'workbookView')){view.setAttribute('activeTab','0');view.setAttribute('firstSheet','0');}
+    append(relationships,relNS,'Relationship',{Id:'branding'+sheetId,Type:officeNS+'/worksheet',Target:'worksheets/business-branding.xml'});
+    append(types,typeNS,'Override',{PartName:'/xl/worksheets/business-branding.xml',ContentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml'});
+    append(types,typeNS,'Override',{PartName:'/xl/drawings/business-branding.xml',ContentType:'application/vnd.openxmlformats-officedocument.drawing+xml'});
+    const anchors=[],imageRelationships=[];
+    for(const [index,item] of images.entries()){
+        const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(item.url);
+        if(!match)throw Error(item.label+' is invalid. Update business branding.');
+        const image=new Image();image.src=item.url;
+        try{await image.decode();}catch(error){throw Error(item.label+' cannot be rendered. Update business branding. '+error.message);}
+        let width=image.naturalWidth,height=image.naturalHeight,extension=match[1],data=item.url;
+        if(width*height>40000000)throw Error(item.label+' is too large to render. Use a smaller image.');
+        if(extension==='webp'){
+            const canvas=document.createElement('canvas'),scale=Math.min(1,1024/width,1024/height);
+            canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+            const context=canvas.getContext('2d');if(!context)throw Error('Image conversion is unavailable. Retry in a supported browser.');
+            context.drawImage(image,0,0,canvas.width,canvas.height);data=canvas.toDataURL('image/png');extension='png';
+        }
+        const number=index+1,scale=Math.min(item.maxWidth/width,item.maxHeight/height),cx=Math.round(width*scale*9525),cy=Math.round(height*scale*9525);
+        files[`xl/media/business-branding-${number}.${extension}`]=Uint8Array.from(atob(data.split(',')[1]),char=>char.charCodeAt(0));
+        if(![...types.documentElement.children].some(node=>node.getAttribute('Extension')===extension))append(types,typeNS,'Default',{Extension:extension,ContentType:'image/'+extension});
+        anchors.push(`<xdr:oneCellAnchor><xdr:from><xdr:col>${item.column}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${item.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="${cx}" cy="${cy}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${number}" name="${xml(item.label)}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId${number}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`);
+        imageRelationships.push(`<Relationship Id="rId${number}" Type="${officeNS}/image" Target="../media/business-branding-${number}.${extension}"/>`);
+    }
+    const rows=[branding.businessName||'Business',branding.teamName||'','Report branding'].map((value,index)=>`<row r="${index+1}"><c r="A${index+1}" t="inlineStr"><is><t>${xml(value)}</t></is></c></row>`).join('');
+    files['xl/worksheets/business-branding.xml']=`<worksheet xmlns="${sheetNS}" xmlns:r="${officeNS}"><cols><col min="1" max="10" width="12" customWidth="1"/></cols><sheetData>${rows}</sheetData><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="1"/><drawing r:id="rId1"/></worksheet>`;
+    files['xl/worksheets/_rels/business-branding.xml.rels']=`<Relationships xmlns="${relNS}"><Relationship Id="rId1" Type="${officeNS}/drawing" Target="../drawings/business-branding.xml"/></Relationships>`;
+    files['xl/drawings/business-branding.xml']=`<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${officeNS}">${anchors.join('')}</xdr:wsDr>`;
+    files['xl/drawings/_rels/business-branding.xml.rels']=`<Relationships xmlns="${relNS}">${imageRelationships.join('')}</Relationships>`;
+    const serializer=new XMLSerializer();
+    files['xl/workbook.xml']=serializer.serializeToString(workbook);files['xl/_rels/workbook.xml.rels']=serializer.serializeToString(relationships);files['[Content_Types].xml']=serializer.serializeToString(types);
+}
+async function workbookBlob(sheets){
     let names=Object.keys(sheets),files={
 
     }
@@ -545,6 +591,7 @@ function workbookBlob(sheets){
     files['xl/_rels/workbook.xml.rels']='<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+names.map((n,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="rId${names.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
     files['xl/styles.xml']='<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF153746"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
     names.forEach((n,i)=>files[`xl/worksheets/sheet${i+1}.xml`]=sheetXML(sheets[n]));
+    await addWorkbookBranding(files);
     return zipStore(files)
 }
 function exportTables(runs=model.results){
@@ -601,9 +648,9 @@ exportTables=function(runs=model.results){
     }
     return tables
 }
-function downloadSchedules(){
+async function downloadSchedules(){
     if(!model.results.length)throw Error('Generate schedules first');
-    downloadFile('CBL-All-Location-Role-Schedules.xlsx',workbookBlob(exportTables()))
+    downloadFile('CBL-All-Location-Role-Schedules.xlsx',await workbookBlob(exportTables()))
 }
 function inputTables(){
     let roster=[['ID','Employee',...ROSTER_FIELDS.slice(0,6).map(x=>x[1]),...STARTS.map(start=>'Allow '+timeLabel(start)),...ROSTER_FIELDS.slice(6).map(x=>x[1]),'Previous start','Attendance rank','Input check','Location','Role']],meta=[['Location',...DAYS.map(d=>d+' I'),'Total I',...DAYS,'Shift Total']],pools=[['Location','Role','Headcount','6 AM share','8:30 AM share','2 PM share','10 PM share','Enabled']],controls=[['Setting','Value'],...Object.entries(model.controls)],names=model.roster.map(e=>[e.id,e.name,e.flex,e.reason,e.preferred,e.proximity,e.random,e.attendance,...STARTS.map(start=>employeeStartPermission(e,start)??null),...e.days,e.previous,'',rosterErrors(e).length?'CHECK':'OK',e.location,e.role]);
@@ -629,7 +676,7 @@ function inputTables(){
 }
 async function downloadInputs(){
     await authorizeDataSettings('configured-inputs');
-    downloadFile('CBL-Scheduling-Configured-Inputs.xlsx',workbookBlob(inputTables()))
+    downloadFile('CBL-Scheduling-Configured-Inputs.xlsx',await workbookBlob(inputTables()))
 }
 const MENU_GROUPS=[
     {label:'Workspace',pages:[['home','Overview']]},
@@ -657,11 +704,12 @@ let businessConfig={
     businessName:'Celebration Brands Limited',teamName:'Schedule Management',logoDataUrl:'',
     supportingImages:[],reportTheme:'light',
     primaryColor:'#159bd5',accentColor:'#74bf16',tenantId:'cbljm',apiKeyConfigured:'false'
-},bambooPromotionToken='',defaultBusinessLogos=new WeakMap();
+},bambooPromotionToken='',defaultBusinessLogos=new WeakMap(),defaultSupportingImages=new WeakMap(),savedReportBranding={};
 async function loadBusinessConfig(){
     businessConfig=await directoryRequest('/app-config');
     if(!Array.isArray(businessConfig.supportingImages))businessConfig.supportingImages=[];
     if(!['light','dark'].includes(businessConfig.reportTheme))businessConfig.reportTheme='light';
+    savedReportBranding={...businessConfig,supportingImages:[...businessConfig.supportingImages]};
 }
 function applyBranding(){
     let business=businessConfig.businessName||'Celebration Brands Limited';
@@ -670,10 +718,16 @@ function applyBranding(){
     document.querySelector('meta[name="description"]')?.setAttribute('content',business+' scheduling command centre');
     document.querySelectorAll('[data-brand-business]').forEach(element=>element.textContent=business);
     document.querySelectorAll('[data-brand-team]').forEach(element=>element.textContent=team);
-    document.querySelectorAll('.brandblock img,.products img').forEach(image=>{
+    document.querySelectorAll('.brandblock img').forEach(image=>{
         if(!defaultBusinessLogos.has(image))defaultBusinessLogos.set(image,image.src);
         image.src=businessConfig.logoDataUrl||defaultBusinessLogos.get(image);
         image.alt=businessConfig.logoDataUrl?business:'CBL'
+    });
+    document.querySelectorAll('.workspace .hero .products img').forEach((image,index)=>{
+        if(!defaultSupportingImages.has(image))defaultSupportingImages.set(image,{src:image.src,alt:image.alt});
+        let saved=businessConfig.supportingImages?.[index],original=defaultSupportingImages.get(image);
+        image.src=saved||original.src;
+        image.alt=saved?business+' supporting image '+(index+1):original.alt
     });
     document.documentElement.style.setProperty('--blue',businessConfig.primaryColor||'#159bd5');
     document.documentElement.style.setProperty('--green',businessConfig.accentColor||'#74bf16');
@@ -1025,7 +1079,7 @@ document.addEventListener('click',async e=>{
         $('emailDialog').querySelectorAll('[data-email-run]').forEach(x=>x.checked=cmd==='selectAll');refreshEmailManagerGroups();return
     }
     let p=await prepareEmail();if(!p)return;try{
-        if(cmd==='workbook')downloadFile(p.filename,workbookBlob(exportTables(p.runs)));if(cmd==='client'){
+        if(cmd==='workbook')downloadFile(p.filename,await workbookBlob(exportTables(p.runs)));if(cmd==='client'){
             let url=mailtoUrl(p);if(url.length>7000)throw Error('This message is too long for a reliable email link. Use Copy full email template instead.');window.location.href=url;$('emailError').textContent='Mail client requested. Download and attach '+p.filename+' before sending.'
         }
         if(cmd==='template')downloadFile('CBL-Schedule-Email-'+p.sent+'.txt',new Blob([emailTemplate(p)],{
@@ -1822,6 +1876,7 @@ async function downloadScheduleTemplate(){
     ,(_,i)=>[locs[i]??'',roles[i]??'',['OFF','6 AM','8:30 AM','2 PM','10 PM'][i]??'',pairs[i]?.[0]??'',pairs[i]?.[1]??''])];
     files['xl/worksheets/sheet2.xml']=sheetXML(listRows);
     files['xl/worksheets/sheet1.xml']=files['xl/worksheets/sheet1.xml'].replace(/Lists!\$A\$2:\$A\$\d+/g,'Lists!$A$2:$A$'+(locs.length+1)).replace(/Lists!\$B\$2:\$B\$\d+/g,'Lists!$B$2:$B$'+(roles.length+1));
+    await addWorkbookBranding(files);
     downloadFile('CBL-Weekly-Schedule-Template.xlsx',zipStore(files))
 }
 document.addEventListener('click',async e=>{
@@ -4415,6 +4470,7 @@ async function action(a,element=null){
             bambooPromotionToken='';
             let saved=await directoryRequest('/app-config',{method:'PUT',body:JSON.stringify(config)});
             businessConfig=saved;
+            savedReportBranding={...saved,supportingImages:[...(saved.supportingImages||[])]};
             applyBranding();
             render(true);
             message('Business settings saved. The saved tenant now controls BambooHR API requests.');
@@ -5144,7 +5200,7 @@ async function action(a,element=null){
             return
         }
         if(a==='downloadVisible'){
-            downloadFile('CBL-Filtered-Schedules.xlsx',workbookBlob(exportTables(visibleScheduleRuns())));
+            downloadFile('CBL-Filtered-Schedules.xlsx',await workbookBlob(exportTables(visibleScheduleRuns())));
             return
         }
         if(a==='refresh'){
@@ -5246,7 +5302,7 @@ async function action(a,element=null){
             render();
             message(runs.length+(storageMode==='session'?' weekly schedules generated in this session. Save a workspace backup or portable ZIP bundle before closing.':' weekly schedules generated and saved. Review unfilled demand and employee shortfalls.')+timeOffSummary(),(model.bambooTimeOff?.status==='error'||model.bambooTimeOff?.apiStatus==='error'))
         }
-        else if(a==='download')downloadSchedules();
+        else if(a==='download')await downloadSchedules();
         else if(a==='csv')downloadCSV();
         else if(a==='backup'){
             await authorizeDataSettings('backup');

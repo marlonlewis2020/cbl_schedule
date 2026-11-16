@@ -12,7 +12,7 @@
             const title=section?.querySelector('h2,h3')?.textContent||'Attendance table';
             const button=document.createElement('button');button.type='button';button.textContent='Download Excel';
             button.setAttribute('aria-label',`Download Excel: ${title}`);
-            button.onclick=()=>{
+            button.onclick=async()=>{
                 try{
                     const headers=[...table.querySelectorAll('thead tr:first-child th')];
                     const columns=headers.map((cell,index)=>({cell,index})).filter(({cell})=>
@@ -29,7 +29,7 @@
                         if(row.cells.length!==headers.length||row.hidden)continue;
                         rows.push(columns.map(({index})=>text(row.cells[index])));
                     }
-                    downloadFile('Attendance-'+title.replace(/[^a-z0-9]+/gi,'-').slice(0,80)+'.xlsx',workbookBlob({Attendance:rows}));
+                    downloadFile('Attendance-'+title.replace(/[^a-z0-9]+/gi,'-').slice(0,80)+'.xlsx',await workbookBlob({Attendance:rows}));
                 }catch(error){window.alert('Unable to download this table: '+error.message);}
             };
             const wrapper=table.closest('.tablewrap,.scroll')||table;

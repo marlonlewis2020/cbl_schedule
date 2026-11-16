@@ -94,6 +94,7 @@ if(data.logoDataUrl&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test
 }
 const supportingPattern=/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 for(const [index,image] of (Array.isArray(data.supportingImages)?data.supportingImages:[]).entries()){
+ if(image==="")continue;
  if(!supportingPattern.test(image))throw Error("Saved supporting image is invalid");
  const supporting=document.createElement("img");supporting.src=image;supporting.alt=(data.businessName||"Business")+" supporting image "+(index+1);$("supportingImages").append(supporting);
 }
