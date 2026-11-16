@@ -1,5 +1,7 @@
 """Loopback-only browser fixture using disposable data and no provider access."""
-from flask import abort, redirect, session, Response
+import app_path  # noqa: F401  (makes application modules importable)
+from flask import abort, redirect, send_from_directory, session, Response
+from pathlib import Path
 from threading import Thread
 from werkzeug.serving import make_server
 from contextlib import closing
@@ -111,9 +113,14 @@ def main():
             abort(404)
         return Response(attendance_snapshot.render(payload), mimetype="text/html")
 
+    tests_directory = Path(__file__).resolve().parent
+    for script in ("test_trade_picker.js", "test_attendance_snapshot.js"):
+        scheduler.app.add_url_rule(
+            f"/{script}", f"fixture_{Path(script).stem}",
+            lambda script=script: send_from_directory(tests_directory, script),
+        )
+
     fixture = test_workforce_workflows.TradeWorkflowTests()
-    scheduler.STATIC_ASSETS.add("test_trade_picker.js")
-    scheduler.STATIC_ASSETS.add("test_attendance_snapshot.js")
     fixture.setUp()
     try:
         fixture.seed()

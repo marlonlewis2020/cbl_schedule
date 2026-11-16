@@ -57,6 +57,8 @@ import meta_settings
 import roster_settings
 
 ALLOWED_IP = "0.0.0.0"
+# Clients treated as "this computer" for local-only setup; ALLOWED_IP is only the bind address.
+LOCAL_CLIENT_ADDRESSES = frozenset({"127.0.0.1", "::1"})
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -150,7 +152,6 @@ def is_secure_request(request) -> bool:
 
 def http_allowed_for_client() -> bool:
     if not ALLOW_LAN_HTTP or request.headers.get("X-Forwarded-For"):
-        print(f"ALLOW_LAN_HTTP is {ALLOW_LAN_HTTP}, X-Forwarded-For: {request.headers.get('X-Forwarded-For')}, remote_addr: {request.remote_addr}")
         return False
     try:
         address = ipaddress.ip_address(request.remote_addr or "")
@@ -3262,7 +3263,7 @@ def tenant_auth_state():
         canBootstrap=(
             not DATABASE_URL
             and not configured
-            and request.remote_addr in {ALLOWED_IP, "::1"}
+            and request.remote_addr in LOCAL_CLIENT_ADDRESSES
         ),
     )
 
@@ -3333,7 +3334,7 @@ def membership_feature_denied(feature: str):
 def bootstrap_tenant_admin():
     if DATABASE_URL:
         return jsonify(error="Use the server-side bootstrap-admin command for PostgreSQL."), 403
-    if request.remote_addr not in {ALLOWED_IP, "::1"}:
+    if request.remote_addr not in LOCAL_CLIENT_ADDRESSES:
         return jsonify(error="Initial administrator setup is allowed only from this computer."), 403
     if not tenant_auth_csrf_valid():
         return jsonify(error="The setup session expired. Reload the page and retry."), 400
@@ -7033,7 +7034,7 @@ def developer_authenticated() -> bool:
 
 
 def developer_local_request() -> bool:
-    return request.remote_addr in {ALLOWED_IP, "::1"}
+    return request.remote_addr in LOCAL_CLIENT_ADDRESSES
 
 
 def valid_developer_username(value: object) -> bool:

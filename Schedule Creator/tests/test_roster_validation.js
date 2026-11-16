@@ -152,6 +152,6 @@ if (typeof module !== 'undefined') {
     module.exports = runRosterValidationTests;
     if (require.main === module) {
         const fs = require('node:fs'), path = require('node:path');
-        console.log(runRosterValidationTests(fs.readFileSync(path.join(__dirname, 'CBL-Scheduler2.js'), 'utf8')));
+        console.log(runRosterValidationTests(fs.readFileSync(path.join(__dirname, '..', 'CBL-Scheduler2.js'), 'utf8')));
     }
 }

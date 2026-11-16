@@ -1,3 +1,4 @@
+import app_path  # noqa: F401  (makes application modules importable)
 import base64
 import io
 import json

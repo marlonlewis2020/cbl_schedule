@@ -678,13 +678,20 @@ security. Scheduling workspace preferences and generated schedules are saved
 in the browser when browser storage is available; use the app's backup feature
 to retain or move a workspace.
 
-Run the Flask API tests from `Schedule Creator`:
+Test modules live in `Schedule Creator\tests`. Run every module from
+`Schedule Creator` with the single runner, which prints a per-module summary
+and exits non-zero on any failure:
 
 ```powershell
-python -m unittest -v test_scheduler.py
+python tests\run_all_tests.py                       # all test modules
+python tests\run_all_tests.py test_scheduler        # selected modules
+python tests\run_all_tests.py -v -f                 # verbose; stop at first failing module
 ```
 
-The test module forces SQLite before running fixtures so the suite cannot
+A single module can also be run directly, for example
+`python tests\test_scheduler.py`; each module imports `tests\app_path.py` to
+make the application modules importable. The runner imports `test_scheduler`
+first, and that module forces SQLite before running fixtures so the suite cannot
 connect to the deployment PostgreSQL database loaded from `.env`. Run
 PostgreSQL integration checks only with a disposable schema and an explicitly
 isolated test harness.

@@ -1,3 +1,4 @@
+import app_path  # noqa: F401  (makes application modules importable)
 import json
 import unittest
 from contextlib import closing

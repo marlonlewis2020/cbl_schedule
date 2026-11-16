@@ -1,9 +1,10 @@
+import app_path  # noqa: F401  (makes application modules importable)
 import io
 import json
 import unittest
 import zipfile
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime
 from html.parser import HTMLParser
 from unittest.mock import patch
 from xml.etree import ElementTree
@@ -13,8 +14,20 @@ import scheduler
 import test_scheduler
 
 
+class FrozenDateTime(datetime):
+    """Fixes "now" at the date these fixtures were written for (Friday 2026-11-06)."""
+
+    @classmethod
+    def now(cls, tz=None):
+        moment = datetime(2026, 11, 6, 12, 0, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+        return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
+
+
 class HistoricalAttendanceReportTests(unittest.TestCase):
     def setUp(self):
+        clock = patch.object(historical, "datetime", FrozenDateTime)
+        clock.start()
+        self.addCleanup(clock.stop)
         test_scheduler.ManagerEmployeeAccessTests.setUp(self)
         with closing(scheduler.database_connect()) as connection, connection:
             connection.execute(

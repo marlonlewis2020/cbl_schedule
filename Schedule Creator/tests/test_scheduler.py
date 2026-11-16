@@ -1,3 +1,4 @@
+import app_path  # noqa: F401  (makes application modules importable)
 import json
 import os
 import sqlite3
@@ -1783,7 +1784,7 @@ class TenantAuthenticationTests(unittest.TestCase):
         self.assertEqual(primary_key, ["tenant_id", "setting_key"])
 
     def test_admin_bootstrap_requires_mfa_and_protects_business_apis(self):
-        login_page = self.client.get("/")
+        login_page = self.client.get("/?legacyLogin=1")
         self.assertIn(b"Administrator sign-in", login_page.data)
         login_page.close()
         self.assertEqual(self.client.get("/api/employees").status_code, 401)
@@ -4488,7 +4489,9 @@ class DeveloperChangeRequestTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM developer_change_request_dependencies WHERE request_id=?",
                 (request_id,),
             ).fetchone()[0]
-        self.assertEqual(row, (definition[1], definition[2], "pending"))
+        # Seeded from the definition; later migrations may append notes to the description.
+        self.assertEqual((row[0], row[2]), (definition[1], "pending"))
+        self.assertTrue(row[1].startswith(definition[2]))
         self.assertEqual(dependencies, len(definition[3]))
         for requirement in ("Clock in", "Clock out", "Clock out at shift end",
                             "same open attendance entry", "overnight", "BambooHR",
