@@ -43,9 +43,9 @@
             ...(body===undefined?{}:{body:JSON.stringify(body)})});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Report request failed.');return data;
     }
-    async function requestExecutive(method='GET',body){
+    async function requestExecutive(method='GET',body,path=''){
         const state=method==='GET'?null:await jsonResponse(await fetch('/api/tenant-auth/state',{cache:'no-store'}),'Tenant authentication');
-        const response=await fetch('/api/attendance/executive-reports',{method,cache:'no-store',
+        const response=await fetch('/api/attendance/executive-reports'+path,{method,cache:'no-store',
             headers:{'Content-Type':'application/json',...(state?{'X-CSRF-Token':state.csrfToken}:{})},
             ...(body===undefined?{}:{body:JSON.stringify(body)})});
         return jsonResponse(response,'Executive report request');
@@ -87,8 +87,17 @@
         const executiveStatus=document.createElement('p');executiveStatus.setAttribute('role','status');
         const executiveHistory=document.createElement('div');executiveHistory.className='tablewrap';
         executiveControls.append(executiveEnabledLabel,delayLabel,executiveSave);
+        const jamaicaDate=offsetDays=>{const day=new Date(Date.now()-offsetDays*86400000);return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Jamaica',year:'numeric',month:'2-digit',day:'2-digit'}).format(day);};
+        const manualControls=document.createElement('div');manualControls.className='formgrid';
+        const manualDateLabel=document.createElement('label');manualDateLabel.append(document.createTextNode('Reporting day'));
+        const manualDate=document.createElement('input');manualDate.type='date';manualDate.setAttribute('aria-label','Reporting day for manual executive report');manualDateLabel.append(manualDate);
+        const generateExecutive=document.createElement('button');generateExecutive.type='button';generateExecutive.textContent='Generate report now';
+        const manualNote=document.createElement('p');manualNote.className='note';manualNote.textContent='Generate a report for today (partial day so far) or any of the previous 14 days. It is saved to the history below for download; scheduled reports are not affected.';
+        const resetManualDate=()=>{manualDate.max=jamaicaDate(0);manualDate.min=jamaicaDate(14);if(!manualDate.value||manualDate.value<manualDate.min||manualDate.value>manualDate.max)manualDate.value=manualDate.max;};
+        resetManualDate();
+        manualControls.append(manualDateLabel,generateExecutive);
         executiveSummary.append(executiveTitle);
-        executiveBody.append(executiveIntro,executiveControls,executiveStatus,executiveHistory);
+        executiveBody.append(executiveIntro,executiveControls,manualControls,manualNote,executiveStatus,executiveHistory);
         executiveDetails.append(executiveSummary,executiveBody);
         executivePanel.append(executiveDetails);
         node.classList.add('collapsible');body.className='panel-body';
@@ -104,12 +113,12 @@
                 executiveEnabled.checked=data.enabled;delay.value=String(data.delayHours);
                 executiveStatus.textContent=`Worker last seen: ${data.heartbeat?new Date(data.heartbeat).toLocaleString():'not yet connected'}. Reports run independently of an open browser.`;
                 const table=document.createElement('table'),thead=document.createElement('thead'),header=document.createElement('tr');table.dataset.excelDownload='true';
-                for(const text of ['Reporting day','Scheduled cutoff (Jamaica)','Generated','State','Report']){const th=document.createElement('th');th.textContent=text;header.append(th);}
+                for(const text of ['Reporting day','Type','Cutoff (Jamaica)','Generated','State','Report']){const th=document.createElement('th');th.textContent=text;header.append(th);}
                 thead.append(header);table.append(thead);
                 const tbody=document.createElement('tbody');
                 for(const report of data.reports){
                     const row=document.createElement('tr');
-                    for(const value of [report.reportDate,report.cutoff,report.createdAt,report.error?`${report.state}: ${report.error}`:report.state]){const cell=document.createElement('td');cell.textContent=value||'';row.append(cell);}
+                    for(const value of [report.reportDate,report.trigger==='manual'?'Manual':'Scheduled',report.cutoff,report.createdAt,report.error?`${report.state}: ${report.error}`:report.state]){const cell=document.createElement('td');cell.textContent=value||'';row.append(cell);}
                     const output=document.createElement('td');
                     if(['ready','stale'].includes(report.state)){
                         const link=document.createElement('a');link.textContent=report.state==='stale'?'Download HTML (source warning)':'Download HTML';
@@ -117,9 +126,9 @@
                     }
                     row.append(output);tbody.append(row);
                 }
-                if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=5;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
+                if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
                 table.append(tbody);executiveHistory.replaceChildren(table);
-            }catch(error){executiveStatus.textContent=error.message;const denied=error.status===403;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=denied;}
+            }catch(error){executiveStatus.textContent=error.message;const denied=error.status===403;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=generateExecutive.disabled=denied;}
         }
         async function showEmail(id){
             const response=await fetch(`/api/attendance/reports/${encodeURIComponent(id)}/email`,{cache:'no-store'});
@@ -198,6 +207,21 @@
                 await loadExecutive();
             }catch(error){executiveStatus.textContent=error.message;}
             finally{executiveSave.disabled=false;}
+        };
+        generateExecutive.onclick=async()=>{
+            resetManualDate();
+            const reportDate=manualDate.value;
+            generateExecutive.disabled=true;executiveStatus.textContent=`Refreshing source data and generating the executive report for ${reportDate}...`;
+            try{
+                const result=await requestExecutive('POST',{reportDate},'/generate');
+                await loadExecutive();
+                executiveStatus.textContent=result.state==='stale'
+                    ?`Report for ${reportDate} saved with a source warning. Download it from the history below.`
+                    :`Report for ${reportDate} saved. Download it from the history below.`;
+            }catch(error){
+                executiveStatus.textContent=error.message;
+                if(error.status===500)await loadExecutive().catch(()=>{});
+            }finally{generateExecutive.disabled=false;}
         };
         remove.onclick=()=>{
             const ids=[...selected];

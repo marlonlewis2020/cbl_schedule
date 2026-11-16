@@ -11,6 +11,7 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-16", "Any business administrator on Gold or Platinum can generate an executive end-of-day report on demand for today (labelled partial day) or the previous 14 days; manual reports are saved to the executive history, labelled Manual, and do not replace the scheduled report."),
     ("2026-11-14", "Gold and Platinum businesses can configure an automated executive end-of-day attendance report with 0–24-hour Jamaica-time delay, location summaries, exception counts and dated HTML download history."),
     ("2026-11-14", "Updated membership benefits: source-specific attendance and manual clock actions are Silver+; executive reports are Gold+; historical attendance reports and workload planning are Platinum; Help, notifications, roster and META remain all-tier."),
     ("2026-11-13", "Business branding now supports a report-only light/dark theme and two supporting images; new offline HTML captures freeze the saved name, logo, colors, theme and images."),

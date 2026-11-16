@@ -1073,6 +1073,12 @@ Requests below remain pending unless implementation evidence is explicitly noted
   included. The executive history/download API is tenant-scoped and Gold-gated,
   and remains separate from interval snapshot history. Thirty report/action
   tests passed; browser presentation and PostgreSQL verification remain.
+  Manual generation added 2026-11-16: any business administrator (Gold+) can
+  use "Generate report now" for today (marked partial day) or the previous
+  14 Jamaica days. Manual reports are saved to the executive history with a
+  Manual label and `-manual` download filename, use a separate run key so the
+  scheduled report still runs, require CSRF and are limited to one per minute.
+  Two focused tests were added; awaiting a local test run and user acceptance.
 - **Lock employee trade location** (`employee-trade-location-lock`):
   automatically populate the initiating employee's current verified location
   and make it uneditable; include linked managers in personal employee mode.

@@ -118,6 +118,63 @@ class ApplicationReportTests(unittest.TestCase):
         self.assertEqual(args[3], cutoff)
         self.assertFalse(kwargs["missed"])
 
+    def test_manual_executive_report_is_saved_beside_scheduled_history(self):
+        path = "/api/attendance/executive-reports/generate"
+        today = datetime.now(scheduler.ATTENDANCE_TIMEZONE).date()
+        self.assertEqual(self.admin.post(path, headers=self.headers, json={"reportDate": today.isoformat()}).status_code, 403)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+            connection.execute("UPDATE tenant_admins SET is_primary=0")
+        self.assertEqual(self.admin.post(path, json={"reportDate": today.isoformat()}).status_code, 400)
+        for invalid in ((today + timedelta(days=1)).isoformat(), (today - timedelta(days=15)).isoformat(), "2026-13-01", 20261109, None):
+            self.assertEqual(self.admin.post(path, headers=self.headers, json={"reportDate": invalid}).status_code, 400)
+        past = today - timedelta(days=14)
+        with scheduler.app.app_context(), \
+             patch.object(scheduler, "bamboohr_api_key", return_value="fixture"), \
+             patch.object(scheduler, "bamboohr_json", return_value=[]), \
+             patch.object(scheduler, "sync_attendance_data"):
+            scheduled_id = reports.capture_executive(
+                scheduler, scheduler.DEFAULT_TENANT_ID, past,
+                reports.executive_cutoff(past, 0, scheduler.ATTENDANCE_TIMEZONE), 0,
+            )
+            created = self.admin.post(path, headers=self.headers, json={"reportDate": past.isoformat()})
+            limited = self.admin.post(path, headers=self.headers, json={"reportDate": today.isoformat()})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["state"], "ready")
+        self.assertEqual(limited.status_code, 429)
+        manual_id = created.get_json()["id"]
+        history = {row["id"]: row for row in self.admin.get("/api/attendance/executive-reports").get_json()["reports"]}
+        self.assertEqual(history[scheduled_id]["trigger"], "scheduled")
+        self.assertEqual(history[manual_id]["trigger"], "manual")
+        self.assertEqual(history[manual_id]["reportDate"], past.isoformat())
+        download = self.admin.get(f"/api/attendance/executive-reports/{manual_id}/download")
+        self.assertEqual(download.status_code, 200)
+        self.assertIn(f"executive-attendance-{past.isoformat()}-manual.html", download.headers["Content-Disposition"])
+        self.assertIn(b"Manually generated", download.data)
+        self.assertNotIn(b"Partial day", download.data)
+
+    def test_manual_executive_report_for_today_is_marked_partial(self):
+        today = datetime.now(scheduler.ATTENDANCE_TIMEZONE).date()
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+        with scheduler.app.app_context(), \
+             patch.object(scheduler, "bamboohr_api_key", return_value="fixture"), \
+             patch.object(scheduler, "bamboohr_json", return_value=[]), \
+             patch.object(scheduler, "sync_attendance_data"):
+            created = self.admin.post(
+                "/api/attendance/executive-reports/generate", headers=self.headers, json={"reportDate": today.isoformat()},
+            )
+        self.assertEqual(created.status_code, 201)
+        with closing(scheduler.database_connect()) as connection:
+            payload = json.loads(connection.execute(
+                "SELECT payload FROM attendance_reports WHERE tenant_id=? AND id=?",
+                (scheduler.DEFAULT_TENANT_ID, created.get_json()["id"]),
+            ).fetchone()[0])
+        self.assertTrue(payload["partialDay"])
+        self.assertEqual(payload["trigger"], "manual")
+        self.assertLessEqual(payload["cutoff"], payload["generatedAt"])
+        self.assertIn("Partial day", payload["html"])
+
     def test_shared_routes_keep_admin_workspace_and_assets(self):
         anon = scheduler.app.test_client()
         for client, path, text in (

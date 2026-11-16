@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS executive_attendance_report_settings (
 """
 
 EXECUTIVE_REPORT_PREFIX = "executive:"
+EXECUTIVE_MANUAL_MARKER = ":manual:"
+EXECUTIVE_MANUAL_LOOKBACK_DAYS = 14
 
 
 def executive_cutoff(report_date: date, delay_hours: int, timezone) -> datetime:
@@ -279,6 +281,12 @@ def executive_html(payload):
         "<p class=warning>Source warning: " + html_escape(payload["refreshError"]) + "</p>"
         if payload["refreshError"] else ""
     )
+    if payload.get("partialDay"):
+        warning += (
+            "<p class=warning>Partial day: generated before the reporting day ended. "
+            "Shifts after the generation time are not yet final.</p>"
+        )
+    trigger = " · Manually generated" if payload.get("trigger") == "manual" else ""
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'">
@@ -291,13 +299,16 @@ section{margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align
 .warning{border-left:4px solid #bd3045;background:#fff0f2;padding:12px}.note{color:#526a73;font-size:13px}
 @media(max-width:700px){main{padding:14px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}section{overflow-x:auto}}
 @media print{body{background:#fff}main{max-width:none;padding:0}.kpi,section{break-inside:avoid}}
-</style></head><body><main><header><p class=meta>""" + html_escape(payload["businessName"]) + "</p><h1>Executive end-of-day attendance</h1><p class=meta>Reporting day " + html_escape(payload["reportDate"]) + " · Generated " + html_escape(payload["generatedAt"]) + " · America/Jamaica</p><p class=meta>Shift source: " + html_escape(payload["shiftSource"]) + " · Source refreshed: " + html_escape(payload["lastSyncedAt"] or "Unavailable") + "</p></header>" + warning + "<div class=kpis><div class=kpi><span>Scheduled shifts</span><strong>" + number(summary["planned"]) + "</strong></div><div class=kpi><span>Attended / late</span><strong>" + number(summary["actual"]) + "</strong></div><div class=kpi><span>Attendance rate</span><strong>" + percent(summary["attendancePercent"]) + "</strong></div><div class=kpi><span>Late / absent</span><strong>" + number(summary["late"]) + " / " + number(summary["absent"]) + "</strong></div></div><section><h2>Location performance</h2><table><thead><tr><th>Location</th><th>Scheduled</th><th>Attended / late</th><th>Attendance</th><th>Late</th><th>Absent</th><th>Leave</th></tr></thead><tbody>" + locations + "</tbody></table></section><section><h2>Significant exceptions</h2><p>Late arrivals: <strong>" + number(summary["late"]) + "</strong> · Absences: <strong>" + number(summary["absent"]) + "</strong> · Missing clock-ins: <strong>" + number(summary["missingClockIns"]) + "</strong> · Early departures: <strong>" + number(summary["earlyDepartures"]) + "</strong> · Overtime: <strong>" + number(summary["overtimeMinutes"]) + " minutes</strong></p><p>Incomplete overnight shifts: <strong>" + number(summary["incompleteOvernight"]) + "</strong> · Unknown shift ends: <strong>" + number(summary["unknownShiftEnds"]) + "</strong></p><p class=note>Shifts are attributed to their start date; approved leave is excluded from expected staffing. This report aggregates by location and does not include an employee register.</p></section></main></body></html>"
+</style></head><body><main><header><p class=meta>""" + html_escape(payload["businessName"]) + "</p><h1>Executive end-of-day attendance</h1><p class=meta>Reporting day " + html_escape(payload["reportDate"]) + " · Generated " + html_escape(payload["generatedAt"]) + " · America/Jamaica" + trigger + "</p><p class=meta>Shift source: " + html_escape(payload["shiftSource"]) + " · Source refreshed: " + html_escape(payload["lastSyncedAt"] or "Unavailable") + "</p></header>" + warning + "<div class=kpis><div class=kpi><span>Scheduled shifts</span><strong>" + number(summary["planned"]) + "</strong></div><div class=kpi><span>Attended / late</span><strong>" + number(summary["actual"]) + "</strong></div><div class=kpi><span>Attendance rate</span><strong>" + percent(summary["attendancePercent"]) + "</strong></div><div class=kpi><span>Late / absent</span><strong>" + number(summary["late"]) + " / " + number(summary["absent"]) + "</strong></div></div><section><h2>Location performance</h2><table><thead><tr><th>Location</th><th>Scheduled</th><th>Attended / late</th><th>Attendance</th><th>Late</th><th>Absent</th><th>Leave</th></tr></thead><tbody>" + locations + "</tbody></table></section><section><h2>Significant exceptions</h2><p>Late arrivals: <strong>" + number(summary["late"]) + "</strong> · Absences: <strong>" + number(summary["absent"]) + "</strong> · Missing clock-ins: <strong>" + number(summary["missingClockIns"]) + "</strong> · Early departures: <strong>" + number(summary["earlyDepartures"]) + "</strong> · Overtime: <strong>" + number(summary["overtimeMinutes"]) + " minutes</strong></p><p>Incomplete overnight shifts: <strong>" + number(summary["incompleteOvernight"]) + "</strong> · Unknown shift ends: <strong>" + number(summary["unknownShiftEnds"]) + "</strong></p><p class=note>Shifts are attributed to their start date; approved leave is excluded from expected staffing. This report aggregates by location and does not include an employee register.</p></section></main></body></html>"
 
 
-def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False, now=None):
+def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False, now=None, manual=False):
     now = now or datetime.now(s.ATTENDANCE_TIMEZONE)
     report_id = secrets.token_urlsafe(18)
     run_key = EXECUTIVE_REPORT_PREFIX + report_date.isoformat()
+    if manual:
+        # Manual runs never claim the scheduled run key, so the worker still generates that day.
+        run_key += EXECUTIVE_MANUAL_MARKER + report_id
     with closing(s.database_connect()) as connection, connection:
         claimed = connection.execute(
             "INSERT INTO attendance_reports(tenant_id,id,run_key,cutoff,created_at,state,error) "
@@ -367,6 +378,8 @@ def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False,
             "shiftSource": attendance.get("shiftSource", {}).get("selected", "Unavailable"),
             "lastSyncedAt": attendance.get("lastSyncedAt"), "refreshError": refresh_error,
             "delayHours": delay_hours, "summary": summary, "locations": locations,
+            "trigger": "manual" if manual else "scheduled",
+            "partialDay": now.date() <= report_date,
         }
         payload["html"] = executive_html(payload)
         with closing(s.database_connect()) as connection, connection:
@@ -632,10 +645,56 @@ def register(app, s):
             enabled=bool(setting and setting[0]), delayHours=int(setting[1]) if setting else 0,
             checkedAt=setting[2] if setting else None, heartbeat=setting[3] if setting else None,
             reports=[{
-                "id": row[0], "reportDate": row[1].removeprefix(EXECUTIVE_REPORT_PREFIX),
+                "id": row[0], "reportDate": row[1].removeprefix(EXECUTIVE_REPORT_PREFIX).split(":", 1)[0],
+                "trigger": "manual" if EXECUTIVE_MANUAL_MARKER in row[1] else "scheduled",
                 "cutoff": row[2], "createdAt": row[3], "state": row[4], "error": row[5],
             } for row in rows],
         )
+
+    @app.post("/api/attendance/executive-reports/generate")
+    def generate_executive_report():
+        denied = executive_guard()
+        if denied:
+            return denied
+        if not s.tenant_auth_csrf_valid():
+            return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+        body = request.get_json(silent=True)
+        raw_date = body.get("reportDate") if isinstance(body, dict) else None
+        now = datetime.now(s.ATTENDANCE_TIMEZONE)
+        try:
+            report_date = date.fromisoformat(raw_date) if isinstance(raw_date, str) and len(raw_date) == 10 else None
+        except ValueError:
+            report_date = None
+        earliest = now.date() - timedelta(days=EXECUTIVE_MANUAL_LOOKBACK_DAYS)
+        if report_date is None or not earliest <= report_date <= now.date():
+            return jsonify(
+                error=f"Choose a reporting day from {earliest.isoformat()} to {now.date().isoformat()}.",
+            ), 400
+        tenant = s.active_tenant_id()
+        with closing(s.database_connect()) as connection:
+            recent = connection.execute(
+                "SELECT 1 FROM attendance_reports WHERE tenant_id=? AND run_key LIKE ? AND created_at>? LIMIT 1",
+                (tenant, EXECUTIVE_REPORT_PREFIX + "%" + EXECUTIVE_MANUAL_MARKER + "%",
+                 (now - timedelta(seconds=60)).isoformat()),
+            ).fetchone()
+            setting = connection.execute(
+                "SELECT delay_hours FROM executive_attendance_report_settings WHERE tenant_id=?", (tenant,),
+            ).fetchone()
+        if recent:
+            return jsonify(error="Wait one minute between manual executive reports."), 429
+        cutoff = min(now, executive_cutoff(report_date, 0, s.ATTENDANCE_TIMEZONE))
+        try:
+            report_id = capture_executive(
+                s, tenant, report_date, cutoff, int(setting[0]) if setting else 0, now=now, manual=True,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Manual executive report failed for tenant %s", tenant)
+            return jsonify(error="The executive report could not be generated. The failure is recorded in the report history."), 500
+        with closing(s.database_connect()) as connection:
+            state = connection.execute(
+                "SELECT state FROM attendance_reports WHERE tenant_id=? AND id=?", (tenant, report_id),
+            ).fetchone()
+        return jsonify(id=report_id, state=state[0] if state else "failed", reportDate=report_date.isoformat()), 201
 
     @app.get("/api/attendance/executive-reports/<report_id>/download")
     def download_executive_report(report_id):
@@ -652,10 +711,11 @@ def register(app, s):
         if row[1] not in {"ready", "stale"}:
             return jsonify(error="This executive report has no downloadable file."), 409
         payload = json.loads(row[0])
+        suffix = "-manual" if payload.get("trigger") == "manual" else ""
         return Response(
             payload["html"], mimetype="text/html; charset=utf-8",
             headers={
-                "Content-Disposition": f'attachment; filename="executive-attendance-{payload["reportDate"]}.html"',
+                "Content-Disposition": f'attachment; filename="executive-attendance-{payload["reportDate"]}{suffix}.html"',
                 "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'",
                 "X-Content-Type-Options": "nosniff",
