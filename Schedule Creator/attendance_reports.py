@@ -521,31 +521,39 @@ def register(app, s):
         denied = guard()
         if denied:
             return denied
+        return delete_selected_reports()
+
+    def delete_selected_reports(executive=False):
         body = request.get_json(silent=True)
         ids = body.get("ids") if isinstance(body, dict) else None
+        label = "executive reports" if executive else "snapshots"
         if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(not isinstance(value, str) or not value or len(value) > 128 for value in ids) or len(set(ids)) != len(ids):
-            return jsonify(error="Select between 1 and 100 distinct snapshots."), 400
+            return jsonify(error=f"Select between 1 and 100 distinct {label}."), 400
         if body.get("confirm") is not True:
-            return jsonify(error="Confirm deletion of the selected snapshots."), 400
+            return jsonify(error=f"Confirm deletion of the selected {label}."), 400
         tenant = s.active_tenant_id()
         placeholders = ",".join("?" for _ in ids)
+        scope = "run_key LIKE ?" if executive else "run_key NOT LIKE ? AND run_key NOT LIKE ?"
+        prefixes = (EXECUTIVE_REPORT_PREFIX + "%",) if executive else ("historical:%", EXECUTIVE_REPORT_PREFIX + "%")
+        parameters = (tenant, *prefixes, *ids)
         with closing(s.database_connect()) as c, c:
-            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND id IN ({placeholders})", (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%", *ids)).fetchall()
+            rows = c.execute(f"SELECT id,state FROM attendance_reports WHERE tenant_id=? AND {scope} AND id IN ({placeholders})", parameters).fetchall()
             if len(rows) != len(ids):
-                return jsonify(error="One or more snapshots are unavailable. Refresh history before deleting."), 404
+                return jsonify(error=f"One or more {label} are unavailable. Refresh history before deleting."), 404
             if any(state in {"running", "deleted"} for _, state in rows):
-                return jsonify(error="Running or already deleted snapshots cannot be deleted. Refresh history."), 409
+                return jsonify(error=f"Running or already deleted {label} cannot be deleted. Refresh history."), 409
             changed = c.execute(
-                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND run_key NOT LIKE ? AND run_key NOT LIKE ? AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
-                (tenant, "historical:%", EXECUTIVE_REPORT_PREFIX + "%", *ids),
+                f"UPDATE attendance_reports SET state='deleted',payload='{{}}',error='' WHERE tenant_id=? AND {scope} AND id IN ({placeholders}) AND state NOT IN ('running','deleted')",
+                parameters,
             ).rowcount
             if changed != len(ids):
                 c.rollback()
-                return jsonify(error="Snapshot history changed during deletion. Refresh and retry."), 409
+                return jsonify(error="Report history changed during deletion. Refresh and retry."), 409
             # Keep run keys as tombstones so scheduled cutoffs are never regenerated.
             c.execute("INSERT INTO tenant_audit_events(id,tenant_id,actor_id,actor_email,action,route,response_status) VALUES(?,?,?,?,?,?,?)",
                       (secrets.token_urlsafe(18), tenant, session.get("tenant_admin_id"), session.get("tenant_admin_email"),
-                       json.dumps({"action": "attendance-snapshots-deleted", "ids": ids}), "delete_reports", 200))
+                       json.dumps({"action": "executive-reports-deleted" if executive else "attendance-snapshots-deleted", "ids": ids}),
+                       "delete_executive_reports" if executive else "delete_reports", 200))
         return jsonify(deleted=ids)
 
     def saved_report(report_id):
@@ -601,8 +609,8 @@ def register(app, s):
             denied = s.primary_admin_guard()
             if denied:
                 return denied
-            if not s.tenant_auth_csrf_valid():
-                return jsonify(error="The request token is invalid. Reload the page and retry."), 400
+        if request.method in {"PUT", "POST", "DELETE"} and not s.tenant_auth_csrf_valid():
+            return jsonify(error="The request token is invalid. Reload the page and retry."), 400
         return None
 
     @app.route("/api/attendance/executive-reports", methods=["GET", "PUT"])
@@ -651,13 +659,18 @@ def register(app, s):
             } for row in rows],
         )
 
+    @app.delete("/api/attendance/executive-reports")
+    def delete_executive_reports():
+        denied = executive_guard()
+        if denied:
+            return denied
+        return delete_selected_reports(executive=True)
+
     @app.post("/api/attendance/executive-reports/generate")
     def generate_executive_report():
         denied = executive_guard()
         if denied:
             return denied
-        if not s.tenant_auth_csrf_valid():
-            return jsonify(error="The request token is invalid. Reload the page and retry."), 400
         body = request.get_json(silent=True)
         raw_date = body.get("reportDate") if isinstance(body, dict) else None
         now = datetime.now(s.ATTENDANCE_TIMEZONE)

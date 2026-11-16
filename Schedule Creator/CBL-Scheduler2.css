@@ -1611,7 +1611,8 @@ td small,th small{
 .formgrid{
     display:grid;
     grid-template-columns:repeat(3,1fr);
-    gap:19px
+    gap:19px;
+    margin-block:18px
 }
 .formgrid label{
     font-size:11px;
@@ -1620,6 +1621,32 @@ td small,th small{
 .formgrid input,.formgrid select{
     font-size:13px;
     padding:11px
+}
+.executive-report-settings .formgrid{
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),280px));
+    align-items:end
+}
+.executive-report-settings .check{
+    grid-column:1 / -1;
+    margin:0
+}
+.executive-report-settings input[type="checkbox"]{
+    width:16px;
+    height:16px;
+    min-height:0;
+    padding:0;
+    margin:0;
+    flex:0 0 auto
+}
+.executive-report-settings .formgrid .actions{
+    margin:0;
+    align-self:end
+}
+.executive-report-settings button{
+    width:auto;
+    padding:8px 12px;
+    font-size:12px;
+    align-self:center
 }
 .callout{
     padding:14px;

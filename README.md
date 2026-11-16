@@ -364,6 +364,13 @@ Running captures cannot be deleted. Minimal run-key tombstones and deletion
 audit entries remain so a deleted scheduled cutoff cannot be regenerated.
 Previously downloaded or emailed copies cannot be recalled.
 
+Gold+ administrators can also select individual executive end-of-day reports
+or all displayed deletable reports and choose **Delete selected** in the
+executive report panel. Confirmation removes the saved HTML and visible history;
+running reports are protected. Scheduled run-key tombstones and an audit entry
+remain, so deletion never regenerates a scheduled report or changes attendance,
+schedules, or automatic generation settings. Downloaded copies cannot be recalled.
+
 Each table on the administrator Attendance page offers **Download Excel**,
 including attendance, scores, discrepancies and report histories. Exports follow
 the displayed filters and sort order; action/selection/download controls are

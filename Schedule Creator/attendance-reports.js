@@ -80,24 +80,31 @@
         const executiveIntro=document.createElement('p');executiveIntro.textContent='Download a location-level attendance summary after each reporting day. Reports use shifts attributed to their start date; no employee register is included.';
         const executiveControls=document.createElement('div');executiveControls.className='formgrid';
         const executiveEnabledLabel=document.createElement('label'),executiveEnabled=document.createElement('input');
+        executiveEnabledLabel.className='check';
         executiveEnabled.type='checkbox';executiveEnabledLabel.append(executiveEnabled,document.createTextNode(' Enable automatic generation'));
         const delayLabel=document.createElement('label');delayLabel.append(document.createTextNode('Hours after day end'));
         const delay=document.createElement('input');delay.type='number';delay.min='0';delay.max='24';delay.step='1';delay.value='0';delay.setAttribute('aria-label','Hours after reporting day ends');delayLabel.append(delay);
         const executiveSave=document.createElement('button');executiveSave.type='button';executiveSave.textContent='Save executive report settings';
+        const executiveSaveActions=document.createElement('div');executiveSaveActions.className='actions';executiveSaveActions.append(executiveSave);
         const executiveStatus=document.createElement('p');executiveStatus.setAttribute('role','status');
         const executiveHistory=document.createElement('div');executiveHistory.className='tablewrap';
-        executiveControls.append(executiveEnabledLabel,delayLabel,executiveSave);
+        executiveControls.append(executiveEnabledLabel,delayLabel,executiveSaveActions);
         const jamaicaDate=offsetDays=>{const day=new Date(Date.now()-offsetDays*86400000);return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Jamaica',year:'numeric',month:'2-digit',day:'2-digit'}).format(day);};
         const manualControls=document.createElement('div');manualControls.className='formgrid';
         const manualDateLabel=document.createElement('label');manualDateLabel.append(document.createTextNode('Reporting day'));
         const manualDate=document.createElement('input');manualDate.type='date';manualDate.setAttribute('aria-label','Reporting day for manual executive report');manualDateLabel.append(manualDate);
         const generateExecutive=document.createElement('button');generateExecutive.type='button';generateExecutive.textContent='Generate report now';
+        const manualActions=document.createElement('div');manualActions.className='actions';manualActions.append(generateExecutive);
         const manualNote=document.createElement('p');manualNote.className='note';manualNote.textContent='Generate a report for today (partial day so far) or any of the previous 14 days. It is saved to the history below for download; scheduled reports are not affected.';
         const resetManualDate=()=>{manualDate.max=jamaicaDate(0);manualDate.min=jamaicaDate(14);if(!manualDate.value||manualDate.value<manualDate.min||manualDate.value>manualDate.max)manualDate.value=manualDate.max;};
         resetManualDate();
-        manualControls.append(manualDateLabel,generateExecutive);
+        manualControls.append(manualDateLabel,manualActions);
+        const executiveHistoryActions=document.createElement('div');executiveHistoryActions.className='actions';
+        const executiveRefresh=document.createElement('button'),executiveRemove=document.createElement('button');
+        executiveRefresh.type=executiveRemove.type='button';executiveRefresh.textContent='Refresh history';executiveRemove.textContent='Delete selected (0)';executiveRemove.disabled=true;
+        executiveHistoryActions.append(executiveRefresh,executiveRemove);
         executiveSummary.append(executiveTitle);
-        executiveBody.append(executiveIntro,executiveControls,manualControls,manualNote,executiveStatus,executiveHistory);
+        executiveBody.append(executiveIntro,executiveControls,manualControls,manualNote,executiveHistoryActions,executiveStatus,executiveHistory);
         executiveDetails.append(executiveSummary,executiveBody);
         executivePanel.append(executiveDetails);
         node.classList.add('collapsible');body.className='panel-body';
@@ -106,18 +113,30 @@
         actions.append(capture,refresh,toggle,remove);node.replaceChildren(details);node.after(executivePanel);
         const selected=new Set();
         const updateSelection=()=>{remove.disabled=busy||!selected.size;remove.textContent=`Delete selected (${selected.size})`;};
+        const executiveSelected=new Set();
+        let executiveDeleting=false;
+        const updateExecutiveSelection=()=>{executiveRemove.disabled=executiveDeleting||!executiveSelected.size;executiveRemove.textContent=`Delete selected (${executiveSelected.size})`;};
         async function loadExecutive(){
             try{
                 const data=await requestExecutive();
+                executiveSelected.clear();updateExecutiveSelection();
                 executiveEnabled.disabled=delay.disabled=executiveSave.disabled=false;
                 executiveEnabled.checked=data.enabled;delay.value=String(data.delayHours);
                 executiveStatus.textContent=`Worker last seen: ${data.heartbeat?new Date(data.heartbeat).toLocaleString():'not yet connected'}. Reports run independently of an open browser.`;
                 const table=document.createElement('table'),thead=document.createElement('thead'),header=document.createElement('tr');table.dataset.excelDownload='true';
+                const selectHeader=document.createElement('th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label','Select all deletable executive reports');selectHeader.append(all);header.append(selectHeader);
+                all.onchange=()=>{for(const box of executiveHistory.querySelectorAll('input[data-report-id]')){box.checked=all.checked;if(box.checked)executiveSelected.add(box.dataset.reportId);else executiveSelected.delete(box.dataset.reportId);}updateExecutiveSelection();};
                 for(const text of ['Reporting day','Type','Cutoff (Jamaica)','Generated','State','Report']){const th=document.createElement('th');th.textContent=text;header.append(th);}
                 thead.append(header);table.append(thead);
                 const tbody=document.createElement('tbody');
                 for(const report of data.reports){
                     const row=document.createElement('tr');
+                    const selection=document.createElement('td');
+                    if(!['running','deleted'].includes(report.state)){
+                        const box=document.createElement('input');box.type='checkbox';box.dataset.reportId=report.id;box.setAttribute('aria-label',`Select ${report.trigger==='manual'?'manual':'scheduled'} executive report ${report.reportDate}`);
+                        box.onchange=()=>{if(box.checked)executiveSelected.add(report.id);else executiveSelected.delete(report.id);all.checked=false;updateExecutiveSelection();};selection.append(box);
+                    }
+                    row.append(selection);
                     for(const value of [report.reportDate,report.trigger==='manual'?'Manual':'Scheduled',report.cutoff,report.createdAt,report.error?`${report.state}: ${report.error}`:report.state]){const cell=document.createElement('td');cell.textContent=value||'';row.append(cell);}
                     const output=document.createElement('td');
                     if(['ready','stale'].includes(report.state)){
@@ -126,9 +145,11 @@
                     }
                     row.append(output);tbody.append(row);
                 }
-                if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
+                all.disabled=!tbody.querySelector('input[data-report-id]');
+                if(!data.reports.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.textContent='No executive reports generated yet.';row.append(cell);tbody.append(row);}
                 table.append(tbody);executiveHistory.replaceChildren(table);
-            }catch(error){executiveStatus.textContent=error.message;const denied=error.status===403;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=generateExecutive.disabled=denied;}
+                return true;
+            }catch(error){executiveSelected.clear();updateExecutiveSelection();executiveStatus.textContent=error.message;const denied=error.status===403;executiveEnabled.disabled=delay.disabled=executiveSave.disabled=generateExecutive.disabled=denied;return false;}
         }
         async function showEmail(id){
             const response=await fetch(`/api/attendance/reports/${encodeURIComponent(id)}/email`,{cache:'no-store'});
@@ -196,6 +217,19 @@
         }
         capture.onclick=()=>void action(async()=>{status.textContent='Refreshing source and capturing snapshot...';await request('POST',{});await load();});
         refresh.onclick=()=>void action(load);
+        executiveRefresh.onclick=()=>void loadExecutive();
+        executiveRemove.onclick=async()=>{
+            const ids=[...executiveSelected];
+            if(executiveDeleting||!ids.length||!window.confirm(`Permanently delete ${ids.length} selected executive report(s), including HTML and saved history? Attendance/schedules are unchanged. Downloaded copies cannot be recalled. Scheduled reports will not regenerate.`))return;
+            executiveDeleting=true;executiveRefresh.disabled=true;updateExecutiveSelection();
+            try{
+                await requestExecutive('DELETE',{ids,confirm:true});
+                executiveSelected.clear();updateExecutiveSelection();
+                const refreshed=await loadExecutive();
+                executiveStatus.textContent=`Deleted ${ids.length} executive report(s).`+(refreshed?'':` History refresh failed: ${executiveStatus.textContent}`);
+            }catch(error){executiveStatus.textContent=error.message;}
+            finally{executiveDeleting=false;executiveRefresh.disabled=false;updateExecutiveSelection();}
+        };
         toggle.onclick=()=>void action(async()=>{await request('PUT',{enabled:!enabled});await load();});
         executiveSave.onclick=async()=>{
             const delayHours=Number(delay.value);

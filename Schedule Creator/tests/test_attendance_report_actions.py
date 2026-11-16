@@ -110,6 +110,87 @@ class ReportActionTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as c:
             self.assertEqual(c.execute("SELECT state FROM attendance_reports").fetchone()[0], "ready")
 
+    def save_executive_reports(self):
+        self.save()
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+            for report_id, run_key in (
+                ("exec-scheduled", attendance_reports.EXECUTIVE_REPORT_PREFIX + "2026-11-06"),
+                ("exec-manual", attendance_reports.EXECUTIVE_REPORT_PREFIX + "2026-11-06:manual:fixture"),
+                ("historical", "historical:fixture"),
+            ):
+                c.execute(
+                    "INSERT INTO attendance_reports SELECT tenant_id,?,?,cutoff,created_at,state,payload,error "
+                    "FROM attendance_reports WHERE id='html-fixture'",
+                    (report_id, run_key),
+                )
+
+    def test_executive_batch_delete_preserves_other_reports_and_scheduled_tombstones(self):
+        self.save_executive_reports()
+        path = "/api/attendance/executive-reports"
+        ids = ["exec-scheduled", "exec-manual"]
+        with closing(scheduler.database_connect()) as c:
+            employees = c.execute("SELECT * FROM employees").fetchall()
+        response = self.admin.delete(path, headers=self.headers, json={"ids": ids, "confirm": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["deleted"], ids)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.admin.get(path).get_json()["reports"], [])
+        self.assertEqual(len(self.admin.get("/api/attendance/reports").get_json()["reports"]), 1)
+        for report_id in ids:
+            self.assertEqual(self.admin.get(f"{path}/{report_id}/download").status_code, 409)
+        with closing(scheduler.database_connect()) as c:
+            rows = c.execute("SELECT id,state,payload FROM attendance_reports ORDER BY id").fetchall()
+            self.assertTrue(all(state == "deleted" and payload == "{}" for report_id, state, payload in rows if report_id in ids))
+            self.assertTrue(all(state == "ready" and payload != "{}" for report_id, state, payload in rows if report_id not in ids))
+            self.assertEqual(c.execute("SELECT * FROM employees").fetchall(), employees)
+            event = c.execute(
+                "SELECT action FROM tenant_audit_events WHERE route='delete_executive_reports' AND action LIKE '{%'",
+            ).fetchone()
+            self.assertEqual(json.loads(event[0]), {"action": "executive-reports-deleted", "ids": ids})
+        with scheduler.app.app_context(), patch.object(scheduler, "sync_attendance_data", side_effect=AssertionError("Must not regenerate")):
+            day = datetime(2026, 11, 6).date()
+            self.assertIsNone(attendance_reports.capture_executive(
+                scheduler, scheduler.DEFAULT_TENANT_ID, day,
+                attendance_reports.executive_cutoff(day, 0, scheduler.ATTENDANCE_TIMEZONE), 0,
+            ))
+
+    def test_executive_deletion_authorization_validation_and_atomic_conflicts(self):
+        self.save_executive_reports()
+        path = "/api/attendance/executive-reports"
+        valid = {"ids": ["exec-scheduled"], "confirm": True}
+        self.assertEqual(scheduler.app.test_client().delete(path, json=valid).status_code, 401)
+        self.assertEqual(self.admin.delete(path, json=valid).status_code, 400)
+        for body in (None, {"ids": []}, {"ids": ["exec-scheduled"]},
+                     {"ids": ["exec-scheduled"], "confirm": 1},
+                     {"ids": ["exec-scheduled"] * 2, "confirm": True},
+                     {"ids": [1], "confirm": True},
+                     {"ids": [""], "confirm": True},
+                     {"ids": ["x" * 129], "confirm": True},
+                     {"ids": [str(index) for index in range(101)], "confirm": True}):
+            self.assertEqual(self.admin.delete(path, headers=self.headers, json=body).status_code, 400)
+        for unavailable in ("unknown", "html-fixture", "historical"):
+            response = self.admin.delete(path, headers=self.headers,
+                                         json={"ids": ["exec-scheduled", unavailable], "confirm": True})
+            self.assertEqual(response.status_code, 404)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE attendance_reports SET state='running' WHERE id='exec-manual'")
+        response = self.admin.delete(path, headers=self.headers,
+                                     json={"ids": ["exec-scheduled", "exec-manual"], "confirm": True})
+        self.assertEqual(response.status_code, 409)
+        with closing(scheduler.database_connect()) as c, c:
+            self.assertEqual(c.execute("SELECT state FROM attendance_reports WHERE id='exec-scheduled'").fetchone()[0], "ready")
+            c.execute("UPDATE attendance_reports SET state='ready',tenant_id='other-tenant' WHERE id='exec-manual'")
+        self.assertEqual(self.admin.delete(path, headers=self.headers,
+                                          json={"ids": ["exec-scheduled", "exec-manual"], "confirm": True}).status_code, 404)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE tenants SET membership_tier='silver' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+        self.assertEqual(self.admin.delete(path, headers=self.headers, json=valid).status_code, 403)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+            c.execute("UPDATE attendance_reports SET state='deleted' WHERE id='exec-scheduled'")
+        self.assertEqual(self.admin.delete(path, headers=self.headers, json=valid).status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()
