@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import psycopg
 import re
 import secrets
 import sqlite3

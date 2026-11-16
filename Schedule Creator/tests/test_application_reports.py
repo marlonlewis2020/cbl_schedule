@@ -49,6 +49,7 @@ class ApplicationReportTests(unittest.TestCase):
         self.assertEqual(self.admin.get(path).get_json()["delayHours"], 24)
 
     def test_executive_capture_is_aggregated_and_separate_from_snapshot_history(self):
+        from test_attendance_snapshot import LOGO
         with closing(scheduler.database_connect()) as connection, connection:
             connection.execute("UPDATE tenants SET membership_tier='gold' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
             connection.executemany(
@@ -72,6 +73,9 @@ class ApplicationReportTests(unittest.TestCase):
         generated = datetime(2026, 11, 10, 1, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
         cutoff = reports.executive_cutoff(report_date, 1, scheduler.ATTENDANCE_TIMEZONE)
         with scheduler.app.app_context(), \
+             patch.object(scheduler, "current_app_config", return_value={
+                 "businessName": "Example Logistics", "logoDataUrl": LOGO, "supportingImages": [LOGO, LOGO],
+             }), \
              patch.object(scheduler, "bamboohr_api_key", return_value="fixture"), \
              patch.object(scheduler, "bamboohr_json", return_value=[]), \
              patch.object(scheduler, "sync_attendance_data"):
@@ -89,15 +93,21 @@ class ApplicationReportTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["actual"], 1)
         self.assertEqual(payload["summary"]["attendancePercent"], 50.0)
         self.assertEqual(payload["summary"]["leave"], 1)
+        self.assertEqual(payload["logoDataUrl"], LOGO)
+        self.assertEqual(payload["supportingImages"], [LOGO, LOGO])
+        self.assertEqual(payload["html"].count(f'src="{LOGO}"'), 3)
         self.assertNotIn("Ann Kingston", payload["html"])
         self.assertIn("Kingston", payload["html"])
         self.assertEqual(self.admin.get("/api/attendance/reports").get_json()["reports"], [])
         history = self.admin.get("/api/attendance/executive-reports")
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.get_json()["reports"][0]["id"], report_id)
-        download = self.admin.get(f"/api/attendance/executive-reports/{report_id}/download")
+        with patch.object(scheduler, "current_app_config", side_effect=AssertionError("Use saved report branding")):
+            download = self.admin.get(f"/api/attendance/executive-reports/{report_id}/download")
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.mimetype, "text/html")
+        self.assertIn("img-src data:", download.headers["Content-Security-Policy"])
+        self.assertEqual(download.data.count(f'src="{LOGO}"'.encode()), 3)
 
     def test_executive_worker_generates_once_at_configured_day_end_delay(self):
         report_date = datetime(2026, 11, 9).date()

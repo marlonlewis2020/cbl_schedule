@@ -190,6 +190,18 @@ their respective image slots; the sidebar brand uses the saved business logo.
 Slots without a saved image retain their default artwork, and removing an image
 restores that slot's default without changing the others.
 
+New HTML attendance reports (snapshots, executive end-of-day, and historical
+reports) embed the saved business logo and supporting images for offline viewing
+and printing. Excel attendance reports, Attendance table downloads, schedule
+workbooks, templates, and configured-input exports include a **Business branding**
+cover sheet when any image is saved. Existing data sheets and import layouts
+remain unchanged. WebP images are converted to PNG for Excel compatibility;
+image proportions are preserved. CSV and text downloads cannot embed images.
+Exports use saved settings, not pending image selections. Existing saved reports
+retain their original branding; generate a new report to use updated images.
+Install the updated requirements on both the app and report worker; Pillow is
+used for Excel image handling.
+
 The app fetches BambooHR time-off data when generating or refreshing schedules.
 If the key is missing or BambooHR cannot be reached, scheduling continues
 without that data and marks the schedule for review. Review schedules carefully

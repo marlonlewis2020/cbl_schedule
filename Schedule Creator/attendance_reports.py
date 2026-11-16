@@ -15,6 +15,7 @@ from xml.sax.saxutils import escape
 from flask import Response, g, jsonify, request, session
 import attendance_snapshot
 import attendance_email
+import report_branding
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS attendance_reports (
@@ -102,7 +103,7 @@ def workbook(payload):
                     cells.append(f'<c s="{style}" t="inlineStr"><is><t xml:space="preserve">{safe(value)}</t></is></c>')
                 body.append(f'<row r="{number}">{"".join(cells)}</row>')
             z.writestr(f"xl/worksheets/sheet{i}.xml", f'<worksheet xmlns="{ns}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="{4 if i == 1 else 1}" topLeftCell="A{5 if i == 1 else 2}" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="13" width="24" customWidth="1"/></cols><sheetData>{"".join(body)}</sheetData></worksheet>')
-    return out.getvalue()
+    return report_branding.workbook_cover(out.getvalue(), payload)
 
 
 def eligible(s, c, tenant):
@@ -170,24 +171,9 @@ def capture(s, tenant, cutoff, run_key, missed=False, now=None):
             "absent": sum(r["status"] == "absent" for r in rows),
             "approvedLeave": sum(r["status"] in {"approved_leave", "sick", "vacation"} for r in rows),
         }
-        branding = s.current_app_config()
-        logo = s.validate_logo_data_url(branding.get("logoDataUrl", ""))
-        if logo is None:
-            raise ValueError("The saved business logo is invalid. Update branding before capturing a report.")
-        raw_images = branding.get("supportingImages", [])
-        if not isinstance(raw_images, list) or len(raw_images) > 2:
-            raise ValueError("Business supporting images are invalid. Update branding before capturing a report.")
-        supporting_images = [s.validate_logo_data_url(image) for image in raw_images if image]
-        if any(image is None for image in supporting_images):
-            raise ValueError("A business supporting image is invalid. Update branding before capturing a report.")
-        report_theme = branding.get("reportTheme", "light")
-        if not isinstance(report_theme, str) or report_theme not in {"light", "dark"}:
-            report_theme = "light"
+        branding = report_branding.snapshot(s)
         payload = {"cutoff": cutoff.isoformat(), "generatedAt": now.isoformat(),
-                   "businessName": branding["businessName"], "logoDataUrl": logo,
-                   "supportingImages": supporting_images, "reportTheme": report_theme,
-                   "primaryColor": branding.get("primaryColor", "#176bd5"),
-                   "accentColor": branding.get("accentColor", "#079998"),
+                   **branding,
                    "refreshError": refresh_error, "attendance": data}
         payload["workbook"] = base64.b64encode(workbook(payload)).decode("ascii")
         payload["html"] = attendance_snapshot.render(payload)
@@ -287,9 +273,9 @@ def executive_html(payload):
             "Shifts after the generation time are not yet final.</p>"
         )
     trigger = " · Manually generated" if payload.get("trigger") == "manual" else ""
-    return """<!doctype html><html lang="en"><head><meta charset="utf-8">
+    document = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Executive attendance report</title><style>
 *{box-sizing:border-box}body{margin:0;background:#eef5f7;color:#173340;font:15px/1.5 Segoe UI,Arial,sans-serif}
 main{max-width:1180px;margin:auto;padding:28px}header{border-bottom:3px solid #087f8c;padding-bottom:18px;margin-bottom:22px}
@@ -297,9 +283,11 @@ h1{font-size:30px;margin:0}h2{font-size:19px;margin:0 0 14px}.meta{color:#526a73
 .kpi,section{background:#fff;border:1px solid #d5e1e4;border-radius:8px;padding:18px}.kpi span{display:block;color:#526a73;font-size:13px}.kpi strong{display:block;font-size:28px;margin-top:8px}
 section{margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #d5e1e4}th{background:#f2f7f8;color:#405c65}
 .warning{border-left:4px solid #bd3045;background:#fff0f2;padding:12px}.note{color:#526a73;font-size:13px}
+.report-branding{display:flex;align-items:center;flex-wrap:wrap;gap:18px;margin-bottom:16px}.report-branding img{max-width:180px;max-height:100px;object-fit:contain}
 @media(max-width:700px){main{padding:14px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}section{overflow-x:auto}}
 @media print{body{background:#fff}main{max-width:none;padding:0}.kpi,section{break-inside:avoid}}
 </style></head><body><main><header><p class=meta>""" + html_escape(payload["businessName"]) + "</p><h1>Executive end-of-day attendance</h1><p class=meta>Reporting day " + html_escape(payload["reportDate"]) + " · Generated " + html_escape(payload["generatedAt"]) + " · America/Jamaica" + trigger + "</p><p class=meta>Shift source: " + html_escape(payload["shiftSource"]) + " · Source refreshed: " + html_escape(payload["lastSyncedAt"] or "Unavailable") + "</p></header>" + warning + "<div class=kpis><div class=kpi><span>Scheduled shifts</span><strong>" + number(summary["planned"]) + "</strong></div><div class=kpi><span>Attended / late</span><strong>" + number(summary["actual"]) + "</strong></div><div class=kpi><span>Attendance rate</span><strong>" + percent(summary["attendancePercent"]) + "</strong></div><div class=kpi><span>Late / absent</span><strong>" + number(summary["late"]) + " / " + number(summary["absent"]) + "</strong></div></div><section><h2>Location performance</h2><table><thead><tr><th>Location</th><th>Scheduled</th><th>Attended / late</th><th>Attendance</th><th>Late</th><th>Absent</th><th>Leave</th></tr></thead><tbody>" + locations + "</tbody></table></section><section><h2>Significant exceptions</h2><p>Late arrivals: <strong>" + number(summary["late"]) + "</strong> · Absences: <strong>" + number(summary["absent"]) + "</strong> · Missing clock-ins: <strong>" + number(summary["missingClockIns"]) + "</strong> · Early departures: <strong>" + number(summary["earlyDepartures"]) + "</strong> · Overtime: <strong>" + number(summary["overtimeMinutes"]) + " minutes</strong></p><p>Incomplete overnight shifts: <strong>" + number(summary["incompleteOvernight"]) + "</strong> · Unknown shift ends: <strong>" + number(summary["unknownShiftEnds"]) + "</strong></p><p class=note>Shifts are attributed to their start date; approved leave is excluded from expected staffing. This report aggregates by location and does not include an employee register.</p></section></main></body></html>"
+    return document.replace("<header>", "<header>" + report_branding.html_images(payload), 1)
 
 
 def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False, now=None, manual=False):
@@ -370,11 +358,11 @@ def capture_executive(s, tenant, report_date, cutoff, delay_hours, missed=False,
                 else:
                     row["shiftEnd"] = "Unavailable"
         summary, locations = executive_report_metrics(attendance["shifts"], report_date, now)
-        branding = s.current_app_config()
+        branding = report_branding.snapshot(s)
         payload = {
             "reportType": "executive_end_of_day", "reportDate": report_date.isoformat(),
             "cutoff": cutoff.isoformat(), "generatedAt": now.isoformat(),
-            "businessName": branding.get("businessName", "Workforce"),
+            **branding,
             "shiftSource": attendance.get("shiftSource", {}).get("selected", "Unavailable"),
             "lastSyncedAt": attendance.get("lastSyncedAt"), "refreshError": refresh_error,
             "delayHours": delay_hours, "summary": summary, "locations": locations,
@@ -730,7 +718,7 @@ def register(app, s):
             headers={
                 "Content-Disposition": f'attachment; filename="executive-attendance-{payload["reportDate"]}{suffix}.html"',
                 "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
-                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'",
+                "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'",
                 "X-Content-Type-Options": "nosniff",
             },
         )

@@ -44,5 +44,76 @@ function runBusinessBrandingTests(source) {
             if(value)document.documentElement.style.setProperty(name,value);
             else document.documentElement.style.removeProperty(name);
         }
+
     }
+}
+
+async function runReportWorkbookBrandingTests(source) {
+    const slice=(start,end)=>{const from=source.indexOf(start),to=source.indexOf(end,from);if(from<0||to<0)throw Error('Missing production test boundary: '+start);return source.slice(from,to);};
+    const makeImage=format=>{
+        const canvas=document.createElement('canvas');canvas.width=80;canvas.height=40;
+        canvas.getContext('2d').fillRect(0,0,80,40);
+        return canvas.toDataURL('image/'+format);
+    };
+    const saved={businessName:'=Example & Business',teamName:'Scheduling',logoDataUrl:makeImage('png'),
+        supportingImages:[makeImage('jpeg'),makeImage('webp')]};
+    let loaded={};
+    const api=new Function('directoryRequest',
+        slice('let businessConfig=','function applyBranding(')+
+        slice('async function inflate(','function allScheduleRows(')+
+        slice('function xml(','function exportTables(')+
+        ';return {loadBusinessConfig,workbookBlob,parseXlsx,zipEntries,pending:image=>{businessConfig.logoDataUrl=image;businessConfig.supportingImages=[image];}};'
+    )(async()=>({...loaded,supportingImages:[...(loaded.supportingImages||[])]}));
+    let checks=0;
+    const check=(condition,label)=>{if(!condition)throw Error(label);checks++;};
+    const rows=[['Employee','Value'],['=Not a formula',12]];
+    await api.loadBusinessConfig();
+    const plain=await api.workbookBlob({'Weekly Schedules':rows});
+    let parsed=await api.parseXlsx(await plain.arrayBuffer());
+    check(JSON.stringify(parsed)===JSON.stringify({'Weekly Schedules':rows}),'Unbranded export preserves data and has no cover');
+    loaded=saved;await api.loadBusinessConfig();
+    api.pending(makeImage('png'));
+    const branded=await api.workbookBlob({'Weekly Schedules':rows});
+    parsed=await api.parseXlsx(await branded.arrayBuffer());
+    check(Object.keys(parsed)[0]==='Business branding','Branded cover is the first sheet');
+    check(JSON.stringify(parsed['Weekly Schedules'])===JSON.stringify(rows),'Original schedule remains importable without changed values');
+    check(parsed['Business branding'][0][0]===saved.businessName,'Business name remains string data, not a formula');
+    const archive=await api.zipEntries(await branded.arrayBuffer());
+    check(archive.has('xl/media/business-branding-1.png')&&archive.has('xl/media/business-branding-2.jpeg')&&archive.has('xl/media/business-branding-3.png'),'PNG, JPEG and converted WebP are embedded');
+    const parse=text=>new DOMParser().parseFromString(text,'application/xml');
+    const drawing=parse(await archive.text('xl/drawings/business-branding.xml'));
+    const xdr='http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+    check(drawing.getElementsByTagNameNS(xdr,'oneCellAnchor').length===3,'All saved images survive pending edits');
+    check([...drawing.getElementsByTagNameNS(xdr,'ext')].every(ext=>Math.abs(Number(ext.getAttribute('cx'))/Number(ext.getAttribute('cy'))-2)<.001),'Image proportions are preserved');
+    const data=parse(await archive.text('xl/worksheets/sheet1.xml'));
+    check(!data.getElementsByTagNameNS('*','f').length,'Formula-looking text never becomes a formula');
+    loaded={supportingImages:['',saved.supportingImages[1]]};await api.loadBusinessConfig();
+    const second=await api.zipEntries(await (await api.workbookBlob({Attendance:rows})).arrayBuffer());
+    const secondDrawing=parse(await second.text('xl/drawings/business-branding.xml'));
+    check(secondDrawing.getElementsByTagNameNS(xdr,'col')[0].textContent==='5','Supporting image 2 retains its cover slot');
+    loaded={logoDataUrl:'data:image/png;base64,AAAA'};await api.loadBusinessConfig();
+    let rejected=false;
+    try{await api.workbookBlob({Attendance:rows});}catch(error){rejected=error.message.includes('cannot be rendered');}
+    check(rejected,'Invalid saved image rejects the export instead of silently omitting branding');
+    return {passed:checks};
+}
+
+function runSupportingReportBrandingTests(snapshotHtml,historicalHtml) {
+    let checks=0;
+    for(const [html,start,end] of [
+        [snapshotHtml,'const imagePattern=','document.title='],
+        [historicalHtml,'const supportingPattern=','const detailSections=']
+    ]){
+        const from=html.indexOf(start),to=html.indexOf(end,from);
+        if(from<0||to<0)throw Error('Missing report image rendering test boundary');
+        const render=new Function('$','data',html.slice(from,to)),container=document.createElement('div');
+        render(()=>container,{businessName:'Example',supportingImages:['','data:image/png;base64,AAAA']});
+        if(container.children.length!==1||container.firstChild.alt!=='Example supporting image 2')throw Error('Supporting image 2 must render without requiring image 1');
+        checks++;
+        let rejected=false;
+        try{render(()=>container,{businessName:'Example',supportingImages:[null]});}catch(error){rejected=error.message.includes('invalid');}
+        if(!rejected)throw Error('Invalid nonempty report images must still fail explicitly');
+        checks++;
+    }
+    return {passed:checks};
 }
