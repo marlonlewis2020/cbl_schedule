@@ -657,7 +657,7 @@ let businessConfig={
     businessName:'Celebration Brands Limited',teamName:'Schedule Management',logoDataUrl:'',
     supportingImages:[],reportTheme:'light',
     primaryColor:'#159bd5',accentColor:'#74bf16',tenantId:'cbljm',apiKeyConfigured:'false'
-},bambooPromotionToken='',defaultBusinessLogos=new WeakMap();
+},bambooPromotionToken='',defaultBusinessLogos=new WeakMap(),defaultSupportingImages=new WeakMap();
 async function loadBusinessConfig(){
     businessConfig=await directoryRequest('/app-config');
     if(!Array.isArray(businessConfig.supportingImages))businessConfig.supportingImages=[];
@@ -670,10 +670,16 @@ function applyBranding(){
     document.querySelector('meta[name="description"]')?.setAttribute('content',business+' scheduling command centre');
     document.querySelectorAll('[data-brand-business]').forEach(element=>element.textContent=business);
     document.querySelectorAll('[data-brand-team]').forEach(element=>element.textContent=team);
-    document.querySelectorAll('.brandblock img,.products img').forEach(image=>{
+    document.querySelectorAll('.brandblock img').forEach(image=>{
         if(!defaultBusinessLogos.has(image))defaultBusinessLogos.set(image,image.src);
         image.src=businessConfig.logoDataUrl||defaultBusinessLogos.get(image);
         image.alt=businessConfig.logoDataUrl?business:'CBL'
+    });
+    document.querySelectorAll('.workspace .hero .products img').forEach((image,index)=>{
+        if(!defaultSupportingImages.has(image))defaultSupportingImages.set(image,{src:image.src,alt:image.alt});
+        let saved=businessConfig.supportingImages?.[index],original=defaultSupportingImages.get(image);
+        image.src=saved||original.src;
+        image.alt=saved?business+' supporting image '+(index+1):original.alt
     });
     document.documentElement.style.setProperty('--blue',businessConfig.primaryColor||'#159bd5');
     document.documentElement.style.setProperty('--green',businessConfig.accentColor||'#74bf16');

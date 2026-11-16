@@ -185,6 +185,11 @@ explicitly promoted for the saved tenant. Business name, team name (default
 colors are saved in the app database and applied throughout the interface and
 schedule confirmation email signature.
 
+The workspace hero uses **Supporting image 1** and **Supporting image 2** in
+their respective image slots; the sidebar brand uses the saved business logo.
+Slots without a saved image retain their default artwork, and removing an image
+restores that slot's default without changing the others.
+
 The app fetches BambooHR time-off data when generating or refreshing schedules.
 If the key is missing or BambooHR cannot be reached, scheduling continues
 without that data and marks the schedule for review. Review schedules carefully
