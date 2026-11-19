@@ -190,7 +190,7 @@ class ApplicationReportTests(unittest.TestCase):
         for client, path, text in (
             (anon, "/", b'Account experience'),
             (anon, "/?legacyLogin=1", b'Create administrator'),
-            (self.admin, "/", b'CBL-Scheduler2'),
+            (self.admin, "/", b'propa-Scheduler2'),
             (self.admin, "/app/business", b'<base href="/">'),
         ):
             with client.get(path) as response:
@@ -198,7 +198,11 @@ class ApplicationReportTests(unittest.TestCase):
                 self.assertIn(text, response.data)
         with self.admin.get("/app/trades?adminView=1&trade=123") as response:
             self.assertEqual(response.headers["X-Frame-Options"], "SAMEORIGIN")
-        for asset in ("application-shell.js", "application-shell.css", "attendance-reports.js"):
+        for asset in (
+            "application-shell.js", "application-shell.css", "attendance-reports.js",
+            "propa-Scheduler2.css", "propa-Scheduler2.js", "propa-Scheduler2.config.js",
+            "propa-MicrosoftAuth.html", "CBL-MicrosoftAuth.html",
+        ):
             with anon.get("/" + asset) as response:
                 self.assertEqual(response.status_code, 200)
         response = anon.get("/app/trades?trade=123")

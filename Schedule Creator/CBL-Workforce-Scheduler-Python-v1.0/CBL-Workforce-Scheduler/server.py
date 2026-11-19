@@ -13,7 +13,7 @@ from bamboo_connector import ConnectorServer, ConnectorHandler
 
 ROOT = Path(__file__).resolve().parent
 APP_ROOT = ROOT.parents[1]
-SPLIT_APP_PATH = APP_ROOT / 'CBL-Scheduler2.html'
+SPLIT_APP_PATH = APP_ROOT / 'propa-Scheduler2.html'
 MAX_BYTES = 64 * 1024 * 1024
 
 class AppServer(ConnectorServer):
@@ -25,7 +25,7 @@ class AppServer(ConnectorServer):
             db.execute('CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, content TEXT NOT NULL)')
         self.database.chmod(0o600)
         self.split_app = SPLIT_APP_PATH.is_file()
-        app_path = SPLIT_APP_PATH if self.split_app else ROOT / 'CBL-Scheduling-Command-Centre.html'
+        app_path = SPLIT_APP_PATH if self.split_app else ROOT / 'propa-Scheduling-Command-Centre.html'
         super().__init__(port, app_path, upstream=upstream)
         self.RequestHandlerClass = AppHandler
 
@@ -42,19 +42,19 @@ class AppHandler(ConnectorHandler):
                 row = db.execute('SELECT version,content FROM workspace WHERE id=1').fetchone()
             return self.send_data(200, {'version': row[0] if row else 0, 'model': json.loads(row[1]) if row else None})
         if self.server.split_app and path in {
-            '/CBL-Scheduler2.css',
-            '/CBL-Scheduler2.js',
-            '/CBL-Scheduler2.config.js',
-            '/CBL-MicrosoftAuth.html',
+            '/propa-Scheduler2.css',
+            '/propa-Scheduler2.js',
+            '/propa-Scheduler2.config.js',
+            '/propa-MicrosoftAuth.html',
             '/server-storage-v2.js',
         }:
             if not self.allowed_request():
                 return self.send_data(403, {'error': 'Host or origin is not allowed.'})
             asset = {
-                '/CBL-Scheduler2.css': APP_ROOT / 'CBL-Scheduler2.css',
-                '/CBL-Scheduler2.js': APP_ROOT / 'CBL-Scheduler2.js',
-                '/CBL-Scheduler2.config.js': APP_ROOT / 'CBL-Scheduler2.config.js',
-                '/CBL-MicrosoftAuth.html': APP_ROOT / 'CBL-MicrosoftAuth.html',
+                '/propa-Scheduler2.css': APP_ROOT / 'propa-Scheduler2.css',
+                '/propa-Scheduler2.js': APP_ROOT / 'propa-Scheduler2.js',
+                '/propa-Scheduler2.config.js': APP_ROOT / 'propa-Scheduler2.config.js',
+                '/propa-MicrosoftAuth.html': APP_ROOT / 'propa-MicrosoftAuth.html',
                 '/server-storage-v2.js': ROOT / 'server-storage-v2.js',
             }[path]
             try:
@@ -62,12 +62,12 @@ class AppHandler(ConnectorHandler):
                 return self.send_data(200, asset.read_bytes(), content_type)
             except OSError:
                 return self.send_data(404, {'error': 'Required scheduler asset is missing.'})
-        if path in {'/', '/CBL-Scheduling-Command-Centre.html', '/CBL-Scheduler2.html'}:
+        if path in {'/', '/propa-Scheduling-Command-Centre.html', '/propa-Scheduler2.html'}:
             if not self.allowed_request():
                 return self.send_data(403, {'error': 'Host or origin is not allowed.'})
             html = self.server.app_path.read_text(encoding='utf-8')
             if self.server.split_app:
-                marker = '<script src="CBL-Scheduler2.js"></script>'
+                marker = '<script src="propa-Scheduler2.js"></script>'
                 if marker not in html:
                     return self.send_data(500, {'error': 'Scheduler page is missing its application script.'})
                 html = html.replace(marker, '<script src="server-storage-v2.js"></script>' + marker)
@@ -126,7 +126,7 @@ def main():
         server = AppServer(args.port, args.data_dir)
     except OSError as exc:
         raise SystemExit(f'Could not start: {exc}. Try --port 8766.') from exc
-    path = 'CBL-Scheduler2.html' if server.split_app else 'CBL-Scheduling-Command-Centre.html'
+    path = 'propa-Scheduler2.html' if server.split_app else 'propa-Scheduling-Command-Centre.html'
     url = f'http://localhost:{server.server_address[1]}/{path}#connector={server.token}'
     print('CBL Workforce Scheduler · Python web app')
     print('Workspace database:', server.database)

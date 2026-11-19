@@ -44,16 +44,16 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.call(extra={'Origin':'https://untrusted.example'})[0],403)
         self.assertEqual(self.call(extra={'Host':'untrusted.example'})[0],403)
         if self.server.split_app:
-            self.assertEqual(self.call('/CBL-Scheduler2.js',extra={'Origin':'https://untrusted.example'})[0],403)
+            self.assertEqual(self.call('/propa-Scheduler2.js',extra={'Origin':'https://untrusted.example'})[0],403)
         code,html=self.call('/')
         self.assertEqual(code,200)
         if self.server.split_app:
             self.assertIn(b'<script src="server-storage-v2.js"></script>',html)
             self.assertIn(b'sourcePickerDialog',html)
-            self.assertEqual(self.call('/CBL-Scheduler2.js')[0],200)
-            self.assertIn(b'data-control="weeks"',self.call('/CBL-Scheduler2.js')[1])
-            self.assertEqual(self.call('/CBL-Scheduler2.config.js')[0],200)
-            self.assertEqual(self.call('/CBL-MicrosoftAuth.html')[0],200)
+            self.assertEqual(self.call('/propa-Scheduler2.js')[0],200)
+            self.assertIn(b'data-control="weeks"',self.call('/propa-Scheduler2.js')[1])
+            self.assertEqual(self.call('/propa-Scheduler2.config.js')[0],200)
+            self.assertEqual(self.call('/propa-MicrosoftAuth.html')[0],200)
         else:
             self.assertIn(b'const browserRecordStore=store;',html)
             self.assertIn(b'Workforce Links',html)

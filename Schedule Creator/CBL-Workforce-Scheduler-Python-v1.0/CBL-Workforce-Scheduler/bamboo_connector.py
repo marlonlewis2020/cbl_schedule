@@ -11,7 +11,7 @@ import threading
 from urllib import error, parse, request
 import webbrowser
 
-APP_FILE = 'CBL-Scheduling-Command-Centre.html'
+APP_FILE = 'propa-Scheduling-Command-Centre.html'
 BAMBOO_URL = 'https://cbljm.bamboohr.com/api/v1/time_off/whos_out'
 
 class NoRedirect(request.HTTPRedirectHandler):

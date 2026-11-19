@@ -277,7 +277,7 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
         self.assertEqual(self.primary.get(path).status_code, 401)
 
     def test_settings_is_separate_from_restricted_navigation_group(self):
-        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
+        markup = (scheduler.APP_DIRECTORY / "propa-Scheduler2.html").read_text(encoding="utf-8")
         group = markup.split('Data & settings</span>', 1)[1].split("</div>", 1)[0]
         self.assertIn('data-page="source" hidden', group)
         self.assertIn('data-page="meta" hidden', group)
@@ -287,18 +287,18 @@ class PrimaryAdminDataSettingsTests(unittest.TestCase):
         self.assertIn('</div>\n                <button type="button" data-page="settings">', markup)
 
     def test_schedule_locations_link_is_in_plan_schedules_menu(self):
-        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
+        markup = (scheduler.APP_DIRECTORY / "propa-Scheduler2.html").read_text(encoding="utf-8")
         people = markup.split('People</span>', 1)[1].split('</div>', 1)[0]
         planning = markup.split('Plan schedules</span>', 1)[1].split('</div>', 1)[0]
         self.assertNotIn('data-page="scheduleLocations"', people)
         self.assertIn('data-page="scheduleLocations"', planning)
-        script = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.js").read_text(encoding="utf-8")
+        script = (scheduler.APP_DIRECTORY / "propa-Scheduler2.js").read_text(encoding="utf-8")
         self.assertIn("{label:'Plan schedules',pages:[['pools','Location roles'],['scheduleLocations','Schedule locations']", script)
         self.assertIn("{label:'People',pages:[['employees','Employees'],['attendance','Attendance']]}", script)
 
     def test_empty_starter_bootstrap_does_not_clear_portable_workspace_payloads(self):
-        markup = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_text(encoding="utf-8")
-        script = (scheduler.APP_DIRECTORY / "CBL-Scheduler2.js").read_text(encoding="utf-8")
+        markup = (scheduler.APP_DIRECTORY / "propa-Scheduler2.html").read_text(encoding="utf-8")
+        script = (scheduler.APP_DIRECTORY / "propa-Scheduler2.js").read_text(encoding="utf-8")
         self.assertIn('<meta name="cbl-empty-bootstrap" content="true">', markup)
         self.assertIn("if(document.querySelector('meta[name=\"cbl-empty-bootstrap\"]'))", script)
         self.assertIn("doc.querySelector('meta[name=\"cbl-empty-bootstrap\"]')?.remove()", script)
@@ -631,7 +631,7 @@ class BusinessHubTests(unittest.TestCase):
         )
         page = client.get("/").get_data()
         self.assertEqual(page, (scheduler.APP_DIRECTORY / "business-status.html").read_bytes())
-        self.assertNotEqual(page, (scheduler.APP_DIRECTORY / "CBL-Scheduler2.html").read_bytes())
+        self.assertNotEqual(page, (scheduler.APP_DIRECTORY / "propa-Scheduler2.html").read_bytes())
 
     def test_admin_can_update_own_profile_and_email_change_requires_password(self):
         self.register()
@@ -4476,6 +4476,23 @@ class DeveloperChangeRequestTests(unittest.TestCase):
     def tearDown(self):
         scheduler.DATABASE_PATH = self.original_database_path
         self.temporary_directory.cleanup()
+
+    def test_propa_brief_is_pending_and_restart_preserves_progress(self):
+        self.setup_developer()
+        response = self.client.get("/api/developer/change-requests?status=pending")
+        self.assertEqual(response.status_code, 200)
+        expected = [f"cr{index:02}" for index in range(1, 14)]
+        requests = [item for item in response.get_json()["requests"] if item["id"] in expected]
+        self.assertEqual([item["id"] for item in requests], expected)
+        fleet = requests[-1]["description"]
+        for marker in ("CR13-R01", "CR13-R11", "CR13-A01", "CR13-A03",
+                       "Fleet Operations and Maintenance", "Fleet Loans and Driver Attendance"):
+            self.assertIn(marker, fleet)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE developer_change_requests SET status='blocked' WHERE request_id='cr13'")
+        scheduler.initialize_database()
+        response = self.client.get("/api/developer/change-requests?status=blocked")
+        self.assertEqual([item["id"] for item in response.get_json()["requests"]].count("cr13"), 1)
 
     def test_manual_clock_actions_are_pending_and_preserved_on_restart(self):
         request_id = "attendance-manual-clock-actions"

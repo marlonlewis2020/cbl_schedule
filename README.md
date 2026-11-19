@@ -1,8 +1,12 @@
-# CBL Schedule Creator
+# Propa WFM
 
-The CBL Schedule Creator is a local Flask application for configuring workforce
+Propa is a local Flask application for configuring workforce
 requirements, creating and reviewing weekly employee schedules, managing
 employees and BambooHR schedule locations, and publishing accepted shifts.
+
+The developer change-request log seeds the Propa Workforce brief as 13 pending
+requests (CR01–CR13) during database initialization. CR13 includes both fleet
+sections. Restarting Propa does not overwrite existing request statuses.
 
 ## Requirements
 
@@ -11,6 +15,13 @@ employees and BambooHR schedule locations, and publishing accepted shifts.
 - Google Chrome
 
 ## Run the application
+
+The split workspace assets use the `propa-` filename prefix. For Microsoft
+sign-in, the default Entra redirect path is now `/propa-MicrosoftAuth.html`.
+Register the full new URL as a SPA redirect, or keep the previously registered
+URL by setting `CBL_MICROSOFT_REDIRECT_URI` in
+[`propa-Scheduler2.config.js`](<Schedule Creator/propa-Scheduler2.config.js>).
+The main app still serves the old callback URL for existing configurations.
 
 1. Open a terminal in `Schedule Creator`.
 2. Install the dependencies:

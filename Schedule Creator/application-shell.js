@@ -44,7 +44,7 @@
         document.documentElement.style.setProperty('--green',profile.accentColor||'#74bf16');
         const sidebar=document.createElement('nav');sidebar.id='applicationSidebar';sidebar.setAttribute('aria-label','Application navigation');
         sidebar.dataset.role=profile.role;
-        const brand=document.createElement('strong');brand.textContent=profile.businessName||'Scheduling Command Centre';sidebar.append(brand);
+        const brand=document.createElement('strong');brand.textContent=profile.businessName||'Propa WFM';sidebar.append(brand);
         if(profile.logoDataUrl){const img=document.createElement('img');img.src=profile.logoDataUrl;img.alt=brand.textContent;sidebar.prepend(img);}
         nav.forEach(([text,url])=>{const a=link(text,url);if(new URL(url,location.href).pathname===location.pathname&&new URL(url,location.href).search===location.search)a.setAttribute('aria-current','page');sidebar.append(a);});
         const header=document.createElement('header');header.id='applicationHeader';

@@ -99,11 +99,11 @@ DEFAULT_APP_CONFIG = {
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 _validated_bamboo_keys: dict[str, tuple[str, str, datetime, str]] = {}
 STATIC_ASSETS = {
-    "CBL-Scheduler2.css",
-    "CBL-Scheduler2.config.js",
-    "CBL-Scheduler2.js",
+    "propa-Scheduler2.css",
+    "propa-Scheduler2.config.js",
+    "propa-Scheduler2.js",
     "scheduling-engine.js",
-    "CBL-MicrosoftAuth.html",
+    "propa-MicrosoftAuth.html",
     "workforce-ui.css",
     "trade-picker.js",
     "session-idle.js",
@@ -6137,7 +6137,7 @@ def index():
         return send_from_directory(runtime_setting("APP_DIRECTORY"), "tenant-login.html" if request.args.get("legacyLogin") == "1" else "unified-login.html")
     if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return send_from_directory(runtime_setting("APP_DIRECTORY"), "business-status.html")
-    return send_from_directory(runtime_setting("APP_DIRECTORY"), "CBL-Scheduler2.html")
+    return send_from_directory(runtime_setting("APP_DIRECTORY"), "propa-Scheduler2.html")
 
 
 def hub_page():
@@ -6151,6 +6151,8 @@ def business_page():
 
 
 def serve_asset(asset_name):
+    if asset_name == "CBL-MicrosoftAuth.html":
+        asset_name = "propa-MicrosoftAuth.html"
     if asset_name not in STATIC_ASSETS:
         abort(404)
     return send_from_directory(runtime_setting("APP_DIRECTORY"), asset_name)
