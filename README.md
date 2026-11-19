@@ -145,6 +145,11 @@ without collecting payments. Signed-in business admins still open their workspac
 or business status page at `/`.
 The shared `/signin` page uses the same Propa branding and supports business
 administrator, workforce, and platform owner sign-in.
+To reveal **Platform owner** in **Account type**, click or tap the **BambooHR
+subdomain** field six times within two seconds. Selecting **Platform owner**
+then shows the **Developer access** link. Selecting a different account type
+hides both again until you repeat the six-click gesture. This only changes
+what the sign-in page displays; owner and developer authentication remain separate.
 
 New businesses start on Bronze. The platform owner assigns or changes a tier
 from the Businesses panel at `/hub`. Admin seats are the user-license limit;

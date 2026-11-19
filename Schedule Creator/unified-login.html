@@ -22,7 +22,8 @@
 <h1 id="signin-title">Welcome back.</h1>
 <p class="login-intro">Choose your account type to sign in to your Propa workspace.</p>
 <form id="login">
-<label>Account type<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option><option value="owner">Platform owner</option></select></label>
+<label>Account type<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option></select></label>
+<p id="ownerNotice" role="status" hidden></p>
 <label id="businessLabel">BambooHR subdomain<input id="business" maxlength="63" required autocomplete="organization"></label>
 <label>Email or employee ID<input id="identifier" maxlength="254" required autocomplete="username"></label>
 <label>Password<input id="password" type="password" required autocomplete="current-password"></label>
@@ -33,7 +34,7 @@
 <p id="message" role="alert"></p>
 <div class="login-links">
   <p>New to Propa? <a href="/hub#registerSection">Register a business</a></p>
-  <div><a href="/?legacyLogin=1">Initial local administrator setup</a><a href="/developer/change-requests">Developer access</a></div>
+  <div><a href="/?legacyLogin=1">Initial local administrator setup</a><a id="developerAccess" href="/developer/change-requests" hidden>Developer access</a></div>
 </div>
 </section>
 </main><script>
@@ -41,10 +42,28 @@
 const $=id=>document.getElementById(id);
 let csrf="",base="",ready=false,stateRevision=0;
 const params=new URLSearchParams(location.search);
-if(["admin","workforce","owner"].includes(params.get("experience")))$("experience").value=params.get("experience");
+const experience=$("experience"), business=$("business");
+const requestedExperience=params.get("experience");
+if(requestedExperience==="workforce")experience.value="workforce";
+let subdomainClicks=[],ownerOption=null;
+business.addEventListener("click",event=>{
+ if(ownerOption||event.button!==0)return;
+ const now=performance.now();
+ subdomainClicks=subdomainClicks.filter(time=>now-time<=2000);
+ subdomainClicks.push(now);
+ if(subdomainClicks.length<6)return;
+ ownerOption=new Option("Platform owner","owner");
+ experience.add(ownerOption);
+ const notice=$("ownerNotice");
+ notice.hidden=false;
+ notice.textContent="Platform owner is now available in Account type.";
+});
+const resetSubdomainClicks=()=>{subdomainClicks=[];};
+business.addEventListener("blur",resetSubdomainClicks);
+business.addEventListener("input",resetSubdomainClicks);
 const target=()=>{
  const fallback=({admin:"/",workforce:"/app/access",owner:"/app/owner"})[$("experience").value];
- const next=params.get("next");if(!next)return fallback;
+ const next=params.get("next");if(!next||(requestedExperience==="owner"&&experience.value!=="owner"))return fallback;
  const url=new URL(next,location.origin);
  const allowed=({admin:["/","/app/business","/app/trades","/app/billing"],workforce:["/app/access","/app/trades"],owner:["/app/owner","/app/billing"]})[$("experience").value];
  return url.origin===location.origin&&allowed.includes(url.pathname)?url.pathname+url.search+url.hash:fallback;
@@ -61,6 +80,8 @@ async function state(){
  ready=false; base=({admin:"/api/tenant-auth",workforce:"/api/access",owner:"/api/hub"})[$("experience").value];
  const endpoint=base;
  $("businessLabel").hidden=$("experience").value==="owner";$("business").required=$("experience").value!=="owner";
+ $("developerAccess").hidden=experience.value!=="owner";
+ $("ownerNotice").hidden=true;
  $("changeLabel").hidden=true;$("newPassword").value="";$("enroll").hidden=true;$("login").hidden=false;$("message").textContent="";
  try{const response=await fetch(endpoint+"/state",{cache:"no-store"});const data=await responseData(response,"Unable to load sign-in");if(revision!==stateRevision)return;
  csrf=data.csrfToken;ready=true;}catch(error){if(revision===stateRevision)$("message").textContent=error.message;}
@@ -75,7 +96,14 @@ async function submit(path,body){
  if(data.mfaEnrollmentRequired){$("login").hidden=true;$("enroll").hidden=false;$("qr").src=data.qrCode;$("secret").textContent=data.secret;return;}
  if(data.authenticated)location.assign(target());
 }
-$("experience").onchange=state;
+experience.onchange=()=>{
+ if(experience.value!=="owner"&&ownerOption){
+  ownerOption.remove();
+  ownerOption=null;
+  resetSubdomainClicks();
+ }
+ return state();
+};
 $("login").onsubmit=async event=>{event.preventDefault();if(!ready)return;
  const role=$("experience").value,button=event.submitter;button.disabled=true;$("message").textContent="";
  try{await submit(base+(role==="owner"?"/owner/login":"/login"),{email:$("identifier").value,identifier:$("identifier").value,password:$("password").value,bamboohrSubdomain:$("business").value,code:$("code").value,...($("newPassword").value?{newPassword:$("newPassword").value}:{})});}catch(error){$("message").textContent=error.message;}finally{button.disabled=false;}};
