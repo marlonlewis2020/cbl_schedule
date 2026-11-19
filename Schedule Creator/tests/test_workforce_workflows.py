@@ -491,7 +491,7 @@ class TradeWorkflowTests(unittest.TestCase):
             "start": (start + timedelta(days=day)).isoformat() + time,
             "end": (start + timedelta(days=day)).isoformat() + end,
         } for day in (0, 2) for person, numeric, time, end in (
-            ("emp-a", "101", "T11:00:00+00:00", "T19:00:00+00:00"),
+            ("emp-a", "101", "T11:00:00Z", "T19:00:00Z"),
             ("emp-b", "102", "T19:00:00+00:00", "T23:00:00+00:00"),
         )]
         with patch.object(scheduler, "fetch_bamboohr_scheduled_shifts", return_value=remote) as reads, \
@@ -507,11 +507,16 @@ class TradeWorkflowTests(unittest.TestCase):
             self.assertEqual(applied.status_code, 502, applied.get_json())
             writes.assert_called_once()
             self.assertEqual(applied.get_json()["remoteState"], "unknown")
+            with closing(scheduler.database_connect()) as c, c:
+                # Exercise the text format PostgreSQL emits for a whole-hour offset.
+                c.execute("UPDATE shift_trade_publish SET updated_at=? WHERE trade_id=?",
+                          ("2026-11-18 23:31:35.812074-05", trade))
             reads.reset_mock()
             reconciled = self.admin.post(f"/api/shift-trades/{trade}/reconcile", headers=self.headers,
                                          json={"confirmed": True, "reason": "Read all swapped days"})
             self.assertEqual(reconciled.status_code, 200, reconciled.get_json())
             self.assertEqual(reads.call_args.args[1:], (start, start + timedelta(days=2)))
+            writes.assert_called_once()
 
     def test_retry_old_overlap_failed_plan_removes_both_originals_before_creating(self):
         doc = self.seed()
@@ -819,6 +824,74 @@ class BillingWorkflowTests(unittest.TestCase):
             self.assertEqual(c.execute("SELECT membership_status FROM tenants WHERE tenant_id=?", (tenant,)).fetchone()[0], "paused")
             self.assertEqual(c.execute("SELECT access_state FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()[0], "active")
             self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='payment-reconciled'").fetchone()[0], 1)
+
+    def test_paid_reenrollment_reactivates_cancelled_membership_once(self):
+        tenant = self.seed()
+        plan = "P-" + "A" * 24
+        provider = scheduler.billing_provider
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE billing_configuration SET payload=?", (json.dumps({
+                "enabled": True, "prices": {}, "plans": {"gold:monthly:1": plan},
+            }),))
+            c.execute("UPDATE tenants SET membership_status='cancelled' WHERE tenant_id=?", (tenant,))
+            c.execute("UPDATE billing_accounts SET provider_status='CANCELLED',retry_state='cancelled'")
+
+        def verify(subscription):
+            with patch.object(provider, "subscription", return_value=subscription):
+                result = self.admin.post("/api/business/billing/reconcile", headers=self.headers)
+            self.assertEqual(result.status_code, 200, result.get_json())
+
+        old = self.subscription()
+        verify(dict(old, status="CANCELLED"))
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 403)
+        checkout = {"id": "I-NEW", "status": "APPROVAL_PENDING", "links": [
+            {"rel": "approve", "href": "https://www.sandbox.paypal.com/checkout/test"},
+        ]}
+        with patch.object(provider, "configured", return_value=True), \
+             patch.object(provider, "api", return_value=checkout) as create:
+            response = self.admin.post("/api/business/billing", headers=self.headers, json={
+                "confirmed": True, "tier": "gold", "period": "monthly", "autoRenew": True,
+            })
+        self.assertEqual(response.status_code, 201, response.get_json())
+        paid = dict(self.subscription(), id="I-NEW", plan_id=plan,
+                    custom_id=create.call_args.args[2]["custom_id"])
+        paid["billing_info"]["last_payment"]["amount"] = {"value": "10.00", "currency_code": "USD"}
+        verify(dict(paid, status="APPROVED"))
+        verify(dict(paid, billing_info={}))
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 403)
+
+        webhook = scheduler.app.test_client()
+        with patch.object(provider, "verify_webhook", return_value=True), \
+             patch.object(provider, "subscription", return_value=paid):
+            old_event = {"id": "old-sale", "resource": {"billing_agreement_id": "I-TEST"}}
+            self.assertTrue(webhook.post("/api/payments/paypal/webhook", json=old_event).get_json()["ignored"])
+            event = {"id": "new-sale", "resource": {"billing_agreement_id": "I-NEW"}}
+            self.assertEqual(webhook.post("/api/payments/paypal/webhook", json=event).status_code, 200)
+            self.assertTrue(webhook.post("/api/payments/paypal/webhook", json=event).get_json()["duplicate"])
+        verify(paid)
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 200)
+        with closing(scheduler.database_connect()) as c:
+            self.assertEqual(c.execute("SELECT membership_status,membership_tier FROM tenants WHERE tenant_id=?",
+                                       (tenant,)).fetchone(), ("active", "gold"))
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM billing_events WHERE kind='membership-reactivated'").fetchone()[0], 1)
+
+    def test_worker_verifies_paid_reenrollment_without_charging(self):
+        tenant = self.seed()
+        plan = "P-" + "A" * 24
+        provider = scheduler.billing_provider
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("UPDATE tenants SET membership_status='cancelled' WHERE tenant_id=?", (tenant,))
+            c.execute("UPDATE billing_accounts SET plan_id=?", (plan,))
+            billing.audit(c, tenant, "membership-reenrollment-started", "Test checkout",
+                          event_id="reenrollment:checkout-test")
+        paid = dict(self.subscription(), plan_id=plan)
+        paid["billing_info"]["last_payment"]["amount"] = {"value": "10.00", "currency_code": "USD"}
+        with scheduler.app.app_context(), \
+             patch.object(provider, "subscription", return_value=paid), \
+             patch.object(provider, "api") as payment_api:
+            billing.run_once(scheduler, provider)
+            payment_api.assert_not_called()
+        self.assertEqual(self.admin.get("/api/accepted-shifts").status_code, 200)
 
     def test_daily_retry_ceiling_and_unknown_outcomes(self):
         tenant = self.seed("failed")

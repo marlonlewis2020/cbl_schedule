@@ -21,11 +21,10 @@ database, and do not use production employee or schedule data.
 
 ## Current walkthrough deferrals
 
-User-directed on 2026-11-06: defer all outstanding PostgreSQL-related TODOs,
-including migrations, imports, row-level security, permission/quota checks and
-deployment acceptance. Keep them outstanding, not completed. Skip them during
-the current one-by-one walkthrough, alongside the previously excluded HTTPS/
-LAN-HTTP and PayPal TODOs. Completed PostgreSQL evidence remains unchanged.
+PostgreSQL verification and PayPal sandbox testing resumed on 2026-11-18
+at the user's request. See Test evidence and handoff for local results and
+the billing checklist for provider and worker acceptance still open. The
+separate HTTPS/LAN-HTTP deferral is unchanged.
 
 User-directed on 2026-11-14: defer `workload-fte-headcount-planning` during the
 current five-request walkthrough. Keep it approved and implementation pending;
@@ -240,8 +239,9 @@ remain for production use:
   confirmation, access gating, retained data, and audit records.
 - [x] Full SQLite test suite: 68 tests passed; the change-request tracker now
   marks this request complete.
-- [x] Validate the new PostgreSQL column migration and row-level access path in
-  a disposable schema. The configured PostgreSQL server was not available.
+- [x] Verified the legacy `membership_status` column migration, repeat startup,
+  and the membership lifecycle and audit with a tenant-aware local PostgreSQL
+  fixture on 2026-11-18.
 
 ## Attendance automation (`attendance-automation`) — complete
 
@@ -313,6 +313,14 @@ remain for production use:
 
 ## Attendance setup and reports navigation (`attendance-page-setup-and-reports`) — implemented, awaiting acceptance
 
+- **CR03 — Attendance Filter Loading:** Implemented for workspace Attendance.
+  Filter changes block Attendance actions and downloads until the new table
+  and totals are ready. Failed refreshes retain and label the previous
+  selection, with Retry for the attempted filters. Table downloads use the
+  displayed rows. Headless Chrome verified success, failure/retry, an empty
+  date, focus blocking, and export consistency; deployment acceptance remains
+  open.
+
 - [x] Group BambooHR attendance sync, shift source, filters and rules under
   Setup; group attendance snapshots and historical reports under Reports.
 - [x] Preserve existing behavior, authorization, direct links, report history,
@@ -344,9 +352,13 @@ the authenticated page is visible; do not introduce a second poller.
   shifts, clock evidence, late/absent, leave, early departure and overtime counts
   are surfaced from the selected source's saved attendance records.
 - Validation: three focused admin/manager/employee scope tests, Silver+ benefit
-  matrix test, Python/JavaScript syntax and diff checks passed. Browser fixture
-  showed all three role views and the location×role→shift hierarchy; PostgreSQL
-  verification and full mobile/browser acceptance remain outstanding.
+  matrix test, Python/JavaScript syntax and diff checks passed. The three
+  role-scope tests also passed on local PostgreSQL on 2026-11-18.
+- On 2026-11-19, added keyboard-accessible scrolling to individual dashboard
+  tables and replaced stale employee dashboard details with an explicit error
+  when the detail refresh fails. Chrome fixtures passed 13 checks each at
+  390px and 1280px across all three views. Authenticated acceptance on the
+  deployed app remains open.
 
 ## Source-specific attendance populations and history (`attendance-source-specific-populations-and-history`) — in progress
 
@@ -472,7 +484,8 @@ Implemented on 2026-11-05; user-confirmed live acceptance complete on
 2026-11-06 for switching My shifts/Manage teams, personal-shift visibility
 without expanded management access, retained MFA/access restrictions,
 administrator-only self-attendance corrections, and access revocation after
-reassignment or disabling. PostgreSQL verification remains deferred. Depends on
+reassignment or disabling. Local PostgreSQL regressions passed for linked
+manager scope, role switching, link conflicts, revocation and MFA enrollment. Depends on
 `manager-employee-access` and `schedule-portal`.
 
 - Link a scheduled manager's account to their verified, same-business employee
@@ -640,6 +653,9 @@ shifts or live payment endpoints were used.
   required separate confirmed retry. Completion combines user-verified live
   test-account publishing with isolated mocked recovery, not live failure tests
   or production/PostgreSQL certification.
+- Shift-trade preview and read-only reconciliation now accept both `Z` and
+  `+00:00` UTC timestamps on Python 3.10. The multi-day regression exercises
+  both formats and checks that reconciliation sends no additional writes.
 - [x] Configure PayPal sandbox credentials/webhook and all eight USD prices
   privately. Verified the registered webhook URL and event subscriptions,
   prepared and read back 16 active plans (eight single-period and eight
@@ -818,6 +834,10 @@ shifts or live payment endpoints were used.
   with Access is denied in this non-elevated session. No task exists; no elevation
   or registration workaround was attempted. User must run the installer in an
   elevated PowerShell window before scheduled start/crash/boot tests can proceed.
+  Update 2026-11-18: the local billing, relay and worker regression group passed
+  as part of 29 SQLite checks. The current shell is not elevated and no matching
+  scheduled task was listed. No provider calls were made; a subsequent sandbox
+  renewal, a controlled provider decline and supervised restart remain open.
 - [x] Apply/verify PostgreSQL startup or reference-schema migrations and forced
   tenant RLS for trade/billing tables in a disposable schema. The VS Code
   database connection was unavailable during this batch; no live migration
@@ -896,6 +916,13 @@ missed by more than two minutes are recorded, not reconstructed from later data.
 Worker heartbeat and BambooHR freshness failures remain visible. This does not
 implement staffing-vs-demand interval analytics (Gold/Platinum).
 
+- On 2026-11-19, fixed background captures using the default tenant instead of
+  the tenant selected by the report worker. Verified the 11 PM Jamaica capture
+  for a non-default tenant, its saved workbook and heartbeat, repeat-run
+  deduplication, and isolation from the default tenant's history. The report
+  regression suite passed 35 SQLite tests and three focused disposable
+  PostgreSQL tests. Deployed worker acceptance remains open.
+
 ## Interactive HTML attendance snapshot (`interactive-attendance-snapshot`) - implemented, awaiting acceptance
 
 - Added View HTML and Download HTML alongside existing Silver+ XLSX downloads.
@@ -932,7 +959,8 @@ implement staffing-vs-demand interval analytics (Gold/Platinum).
   employee-access membership checks. Audit the old/new role and administrator.
   Verified 43 access/trade/manual Python tests, 10 browser dialog checks and
   390px light/dark layout without horizontal overflow; editor checks passed.
-  Rebuilt manuals. Live PostgreSQL validation remains outstanding.
+  Rebuilt manuals. Three local PostgreSQL role-change tests passed on
+  2026-11-18; live deployment acceptance was not performed.
 
 - [x] Show manager-accepted trades pending administrator approval in the admin
   notification bell, alongside attendance alerts. Click opens a same-origin
@@ -1348,9 +1376,12 @@ Tier: all tiers (`managerRosterSettings`).
   roster scope, field permissions, locking, import safeguards, new-start
   availability, audit, reassignment and transaction rollback. The linked-manager
   personal-roster test is included.
-- Browser verification and PostgreSQL execution remain outstanding. PostgreSQL
-  validation stays deferred under the existing user instruction; do not mark
-  production acceptance complete based on SQLite results.
+- Local PostgreSQL checks passed for shared roster import, manager and employee
+  field permissions, linked-manager personal view, and locking. On 2026-11-19,
+  fixed manager row saves discarding unsaved edits in other rows. Eight Chrome
+  fixture checks passed for save isolation, failure feedback, field permissions,
+  and locking; eight focused SQLite API tests also passed. Authenticated browser
+  acceptance on the deployed app remains open.
 
 ## Manager-scoped META settings (`manager-scoped-meta-settings`) - implemented, acceptance verification pending
 
@@ -1382,13 +1413,48 @@ Tier: all tiers (`managerMetaSettings`).
   34-test manager/access suite, including shared-role location scope, read/write
   permissions, lock synchronization, revision conflicts, audit and preservation
   of an accepted schedule.
-- Browser verification and PostgreSQL execution remain outstanding. PostgreSQL
-  validation remains deferred under the existing user instruction.
+- Local Chrome fixture verified that saving one location preserves unsaved
+  changes at another, serializes saves against the shared revision, retains
+  edits on rejection, and keeps locked settings read-only. This does not
+  replace authenticated browser acceptance. Local PostgreSQL tests passed for
+  import, shared locking, personal-view denial, location scope, revisions,
+  audit and preservation of an accepted schedule.
 - Depends on `manager-employee-access`. Scope is confirmed and the feature is
-  implemented; browser verification and deferred PostgreSQL validation remain
-  outstanding.
+  implemented; authenticated browser and deployment acceptance remain open.
 
 ## Test evidence and handoff
+
+### Local PostgreSQL recheck (2026-11-18)
+
+- Used PostgreSQL 18.6 on loopback with a non-superuser, non-BYPASSRLS role
+  and uniquely named disposable schemas. All schemas created for the run
+  were removed. No Render, provider, or existing application records were used.
+- Fresh and repeat startup passed, including a simulated legacy
+  `membership_status` column migration. Verified ENABLE and FORCE row-level
+  security on 31 tables and tested cross-tenant read, update and insert
+  isolation plus empty and unknown tenant contexts on `application_settings`.
+- Initial workflow run: 71 of 89 tests passed, including linked-manager access,
+  shared roster settings, idle-session expiry, live attendance dashboards,
+  knowledge-base workflows, executive report generation and billing webhook
+  idempotence with a mocked provider. Three audit assertions used a literal
+  `LIKE` wildcard in a parameterized SQLite fixture query; one (manager META)
+  passed when rerun with a bound wildcard. Fourteen other tests attempted to
+  seed a second tenant without switching PostgreSQL tenant context and were
+  blocked by RLS. These fixture errors do not verify the affected workflows.
+- [x] Fixed the Python 3.10 shift-trade reconciliation error for PostgreSQL
+  journal timestamps with hour-only offsets. The multi-day test passed on
+  PostgreSQL with the Jamaica session time zone and on SQLite with a fixed
+  PostgreSQL-format timestamp, without extra provider writes.
+- [x] After parameterizing fixture SQL and setting explicit tenant contexts
+  without relaxing RLS, all 29 targeted PostgreSQL checks passed. Coverage
+  includes membership lifecycle and tenant-scoped quota, manager META, and
+  snapshot, executive and historical report workflows and tenant boundaries.
+- [x] Seven additional local PostgreSQL tests passed for account role changes
+  and administration, employee, team and location quotas, including downgrades.
+- [x] Imported a synthetic SQLite business into a disposable PostgreSQL schema.
+  Verified applied trade and audit history, access-account session revocation,
+  retained membership tier, disabled destination billing, and rejection of a
+  duplicate import. No live deployment was certified.
 
 - [x] PostgreSQL 18.6, server on the local network. The tests ran in
   disposable schemas (`cbl_verify_*`, created and dropped by the run) in the

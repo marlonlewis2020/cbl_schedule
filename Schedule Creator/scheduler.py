@@ -29,7 +29,7 @@ from flask import (
     Flask,
     abort,
     g,
-    has_request_context,
+    has_app_context,
     jsonify,
     make_response,
     redirect,
@@ -177,6 +177,14 @@ DEFAULT_APP_CONFIG = {
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 _validated_bamboo_keys: dict[str, tuple[str, str, datetime, str]] = {}
 STATIC_ASSETS = {
+    "propa-marketing.css",
+    "propa-marketing.js",
+    "marketing-media/mark.png",
+    "marketing-media/hero.webp",
+    "marketing-media/retail.webp",
+    "marketing-media/hospitality.webp",
+    "marketing-media/distribution.webp",
+    "marketing-media/fleet.webp",
     "propa-Scheduler2.css",
     "propa-Scheduler2.config.js",
     "propa-Scheduler2.js",
@@ -776,13 +784,8 @@ def database_connect():
             "PostgreSQL is configured but psycopg is not installed. Install requirements.txt."
         ) from error
     connection = psycopg.connect(DATABASE_URL, row_factory=tuple_row, connect_timeout=10)
-    tenant_id = (
-        getattr(g, "tenant_id", None)
-        if has_request_context()
-        else None
-    ) or DEFAULT_TENANT_ID
     wrapped = PostgresConnection(connection)
-    wrapped.execute("SELECT set_config('app.tenant_id', ?, false)", (tenant_id,))
+    wrapped.execute("SELECT set_config('app.tenant_id', ?, false)", (active_tenant_id(),))
     return wrapped
 
 
@@ -818,7 +821,7 @@ def mfa_cipher() -> Fernet:
 
 
 def active_tenant_id() -> str:
-    tenant_id = getattr(g, "tenant_id", None) if has_request_context() else None
+    tenant_id = getattr(g, "tenant_id", None) if has_app_context() else None
     return tenant_id or DEFAULT_TENANT_ID
 
 
@@ -3172,9 +3175,14 @@ def enforce_tenant_authentication():
             return jsonify(error="Sign in as a business administrator to continue."), 401
         if request.method not in {"GET", "HEAD", "OPTIONS"} and cross_origin_request():
             return jsonify(error="Cross-origin requests are not allowed."), 403
+        # Recovery pages need the signed-in shell profile even without scheduling access.
+        recovery_profile = (
+            request.path == "/api/application/state" and request.method in {"GET", "HEAD"}
+        )
         if (
             (g.tenant_status != "active" or g.tenant_membership_status != "active")
             and not request.path.startswith("/api/business/")
+            and not recovery_profile
         ):
             return jsonify(
                 error="This business membership is not active. Scheduling is unavailable.",
@@ -3193,7 +3201,7 @@ def audit_tenant_mutation(response):
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
-    if request.path == "/" or request.path.startswith(
+    if request.path in {"/", "/api/application/state"} or request.path.startswith(
         ("/api/tenant-auth/", "/api/hub/", "/api/business/", "/hub", "/api/access",
          "/access", "/api/schedule-portal/", "/trades", "/billing",
          "/api/shift-trades", "/api/shift-overrides", "/api/workspace/")
@@ -4268,7 +4276,7 @@ def update_business_membership():
             if not isinstance(next_tier, str) or next_tier not in MEMBERSHIP_TIERS:
                 return jsonify(error="Choose Bronze, Silver, Gold, or Platinum."), 400
             if membership_status == "cancelled":
-                return jsonify(error="A cancelled membership cannot be changed. Contact the platform owner to restore access."), 409
+                return jsonify(error="Re-enroll through Billing or contact the platform owner to restore a cancelled membership."), 409
             if current_tier == next_tier:
                 return jsonify(
                     membership=membership_summary(connection),
@@ -6960,10 +6968,17 @@ def employee_team_attendance():
 @app.get("/")
 def index():
     if not tenant_authenticated():
-        return send_from_directory(APP_DIRECTORY, "tenant-login.html" if request.args.get("legacyLogin") == "1" else "unified-login.html")
+        if request.args.get("legacyLogin") == "1":
+            return send_from_directory(APP_DIRECTORY, "tenant-login.html")
+        return marketing_page()
     if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return send_from_directory(APP_DIRECTORY, "business-status.html")
     return send_from_directory(APP_DIRECTORY, "propa-Scheduler2.html")
+
+
+@app.get("/explore")
+def marketing_page():
+    return send_from_directory(APP_DIRECTORY, "propa-marketing.html")
 
 
 @app.get("/hub")
@@ -6974,7 +6989,7 @@ def hub_page():
 @app.get("/business")
 def business_page():
     if not tenant_authenticated():
-        return redirect("/")
+        return redirect("/signin?experience=admin&next=/app/business")
     return send_from_directory(APP_DIRECTORY, "business-status.html")
 
 
@@ -6984,6 +6999,8 @@ def serve_asset(asset_name):
         asset_name = "propa-MicrosoftAuth.html"
     if asset_name not in STATIC_ASSETS:
         abort(404)
+    if asset_name.endswith(".webp"):
+        return send_from_directory(APP_DIRECTORY, asset_name, mimetype="image/webp")
     return send_from_directory(APP_DIRECTORY, asset_name)
 
 

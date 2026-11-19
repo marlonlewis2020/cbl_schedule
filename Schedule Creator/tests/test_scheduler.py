@@ -18,6 +18,10 @@ import scheduler
 # Unit tests must never use the deployment database loaded from .env.
 scheduler.DATABASE_URL = ""
 
+def set_fixture_tenant(connection, tenant_id):
+    if scheduler.DATABASE_URL:
+        connection.execute("SELECT set_config('app.tenant_id', ?, true)", (tenant_id,))
+
 def authenticate_test_admin(client):
     with closing(scheduler.database_connect()) as connection, connection:
         connection.execute(
@@ -367,7 +371,7 @@ class BusinessHubTests(unittest.TestCase):
     def tenant_id(self, name="Acme Foods"):
         return self.query("SELECT tenant_id FROM tenants WHERE business_name = ?", (name,))[0][0]
 
-    def sign_in_admin(self, email="ada@acme.example", password="correct-horse-battery"):
+    def sign_in_admin(self, email="ada@acme.example", password="correct-horse-battery", *, code=None):
         client = scheduler.app.test_client()
         token = client.get("/api/tenant-auth/state").get_json()["csrfToken"]
         login = client.post(
@@ -377,6 +381,7 @@ class BusinessHubTests(unittest.TestCase):
                 "bamboohrSubdomain": "acme",
                 "email": email,
                 "password": password,
+                "code": code,
             },
         )
         result = login.get_json()
@@ -387,6 +392,7 @@ class BusinessHubTests(unittest.TestCase):
                 headers={"X-CSRF-Token": result["csrfToken"]},
                 json={"code": code},
             ).get_json()
+        self.assertTrue(result.get("authenticated"), result.get("error"))
         return client, result["csrfToken"]
 
     def sign_in_owner(self):
@@ -882,6 +888,7 @@ class BusinessHubTests(unittest.TestCase):
         self.assertEqual(changed.get_json()["membership"]["tier"], "gold")
 
         with closing(scheduler.database_connect()) as connection, connection:
+            set_fixture_tenant(connection, tenant_id)
             connection.execute(
                 """
                 INSERT INTO accepted_schedules
@@ -925,9 +932,39 @@ class BusinessHubTests(unittest.TestCase):
         self.assertEqual(cancelled.status_code, 200)
         self.assertEqual(cancelled.get_json()["membership"]["status"], "cancelled")
         self.assertFalse(cancelled.get_json()["accessEnabled"])
-        self.assertEqual(
-            admin.get("/api/employees").get_json()["membershipStatus"], "cancelled"
-        )
+        with closing(scheduler.database_connect()) as connection:
+            set_fixture_tenant(connection, tenant_id)
+            encrypted_secret = connection.execute(
+                "SELECT mfa_secret FROM tenant_admins WHERE tenant_id = ? AND is_primary = 1",
+                (tenant_id,),
+            ).fetchone()[0]
+        secret = scheduler.mfa_cipher().decrypt(encrypted_secret.encode("ascii")).decode("ascii")
+        recovery, _ = self.sign_in_admin(code=scheduler.totp_value(secret, int(time.time() // 30)))
+        anonymous = scheduler.app.test_client()
+        self.assertEqual(anonymous.get("/api/application/state").status_code, 401)
+        for path, template in (
+            ("/", "business-status.html"),
+            ("/app/business", "business-status.html"),
+            ("/app/billing", "billing.html"),
+        ):
+            with self.subTest(path=path):
+                page = recovery.get(path)
+                self.assertEqual(page.status_code, 200)
+                self.assertEqual(page.get_data(), (scheduler.APP_DIRECTORY / template).read_bytes())
+                page.close()
+        self.assertTrue(anonymous.get("/app/business").location.startswith("/signin?"))
+        shell = recovery.get("/api/application/state")
+        self.assertEqual(shell.status_code, 200)
+        self.assertIn("no-store", shell.headers["Cache-Control"])
+        self.assertTrue(shell.get_json()["isPrimaryAdmin"])
+        status = recovery.get("/api/business/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.get_json()["membership"]["status"], "cancelled")
+        self.assertEqual(recovery.get("/api/business/billing").status_code, 200)
+        self.assertEqual(secondary.get("/api/business/billing").status_code, 403)
+        blocked = recovery.get("/api/employees")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(blocked.get_json()["membershipStatus"], "cancelled")
         self.assertEqual(
             self.query(
                 "SELECT membership_status, membership_tier FROM tenants WHERE tenant_id = ?",
@@ -935,18 +972,18 @@ class BusinessHubTests(unittest.TestCase):
             ),
             [("cancelled", "gold")],
         )
-        self.assertEqual(
-            self.query(
+        with closing(scheduler.database_connect()) as connection, connection:
+            set_fixture_tenant(connection, tenant_id)
+            retained = connection.execute(
                 "SELECT run_id FROM accepted_schedules WHERE tenant_id = ?",
                 (tenant_id,),
-            ),
-            [("membership-preserved",)],
-        )
-        membership_audit = self.query(
+            ).fetchall()
+            membership_audit = connection.execute(
                 "SELECT actor_email, action FROM tenant_audit_events "
-                "WHERE tenant_id = ? AND action LIKE 'membership-%' ORDER BY created_at, action",
-                (tenant_id,),
-            )
+                "WHERE tenant_id = ? AND action LIKE ? ORDER BY created_at, action",
+                (tenant_id, "membership-%"),
+            ).fetchall()
+        self.assertEqual(retained, [("membership-preserved",)])
         self.assertEqual(
             set(membership_audit),
             {
@@ -1450,6 +1487,7 @@ class MembershipEntitlementTests(unittest.TestCase):
         self.assertEqual(self.schedule_location("first", "Store A", "Sales").status_code, 201)
         self.assertEqual(self.schedule_location("second", "Store B", "Service").status_code, 201)
         with closing(scheduler.database_connect()) as connection, connection:
+            set_fixture_tenant(connection, "other-business")
             connection.execute(
                 """
                 INSERT INTO schedule_locations
@@ -5265,9 +5303,9 @@ class ManagerEmployeeAccessTests(unittest.TestCase):
             audit = connection.execute(
                 """
                 SELECT 1 FROM tenant_audit_events
-                WHERE tenant_id = ? AND action LIKE 'meta-settings-updated:Kingston:%'
+                WHERE tenant_id = ? AND action LIKE ?
                 """,
-                (scheduler.DEFAULT_TENANT_ID,),
+                (scheduler.DEFAULT_TENANT_ID, "meta-settings-updated:Kingston:%"),
             ).fetchone()
             accepted = connection.execute(
                 "SELECT payload FROM accepted_schedules WHERE run_id = 'meta-preserved-run'"

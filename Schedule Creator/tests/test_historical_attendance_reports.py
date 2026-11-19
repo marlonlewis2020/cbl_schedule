@@ -126,6 +126,7 @@ class HistoricalAttendanceReportTests(unittest.TestCase):
         self.add_shift("emp-a", "2026-11-06", "attended")
         self.add_shift("emp-b", "2026-11-03", "attended", "Montego Bay", name="Bob Montego")
         with closing(scheduler.database_connect()) as connection, connection:
+            test_scheduler.set_fixture_tenant(connection, "other")
             connection.execute(
                 """
                 INSERT INTO attendance_shift_records

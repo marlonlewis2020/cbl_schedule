@@ -29,6 +29,7 @@
         if(profile.role==='manager'&&profile.hasPersonalView){
             nav.push(['Personal view','/app/access?view=employee'],['Management view','/app/access']);
         }
+        if(profile.role!=='owner')nav.push(['Explore Propa','/explore']);
         const existing=document.getElementById('appMenu');
         if(existing){
             const links=document.createElement('div');links.className='shell-admin-links';

@@ -1,11 +1,28 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in | Propa WFM</title>
+<meta name="theme-color" content="#103e35">
+<link rel="icon" href="/marketing-media/mark.png">
 <link rel="stylesheet" href="/application-shell.css"></head>
-<body class="unified-login"><main>
-<h1>Propa WFM</h1><p>One application. Your authorized workspace.</p>
+<body class="unified-login">
+<header class="login-header">
+  <a class="login-brand" href="/explore"><img src="/marketing-media/mark.png" width="38" height="38" alt="">Propa WFM</a>
+  <a href="/explore">Explore Propa <span aria-hidden="true">&rarr;</span></a>
+</header>
+<main class="login-layout">
+<section class="login-story" aria-label="Propa WFM">
+  <div class="login-story-copy">
+    <p class="login-eyebrow">Every shift. In sight.</p>
+    <p class="login-headline">A clear view of your <em>next shift.</em></p>
+    <p>Keep schedules, shifts, and your team in sync.</p>
+  </div>
+</section>
+<section class="login-card" aria-labelledby="signin-title">
+<p class="login-eyebrow">Member access</p>
+<h1 id="signin-title">Welcome back.</h1>
+<p class="login-intro">Choose your account type to sign in to your Propa workspace.</p>
 <form id="login">
-<label>Account experience<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option><option value="owner">Platform owner</option></select></label>
+<label>Account type<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option><option value="owner">Platform owner</option></select></label>
 <label id="businessLabel">BambooHR subdomain<input id="business" maxlength="63" required autocomplete="organization"></label>
 <label>Email or employee ID<input id="identifier" maxlength="254" required autocomplete="username"></label>
 <label>Password<input id="password" type="password" required autocomplete="current-password"></label>
@@ -14,7 +31,11 @@
 <button type="submit">Sign in</button></form>
 <form id="enroll" hidden><p>Enroll your authenticator, then verify its six-digit code.</p><img id="qr" alt="Authenticator enrollment QR code" width="220" height="220"><details><summary>Manual enrollment key</summary><p id="secret"></p></details><label>Verification code<input id="setupCode" required maxlength="7" inputmode="numeric" autocomplete="one-time-code"></label><button>Verify and continue</button></form>
 <p id="message" role="alert"></p>
-<p><a href="/hub">Register a business</a> · <a href="/?legacyLogin=1">Initial local administrator setup</a> · <a href="/developer/change-requests">Developer access</a></p>
+<div class="login-links">
+  <p>New to Propa? <a href="/hub#registerSection">Register a business</a></p>
+  <div><a href="/?legacyLogin=1">Initial local administrator setup</a><a href="/developer/change-requests">Developer access</a></div>
+</div>
+</section>
 </main><script>
 (()=>{
 const $=id=>document.getElementById(id);

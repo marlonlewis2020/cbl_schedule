@@ -104,7 +104,7 @@
     const membershipDescriptions = {
       active: "Membership changes apply immediately. Optional PayPal sandbox billing is configured separately; no live payments are supported. Lower tiers retain records but can block additions above plan limits.",
       paused: "Membership is paused and scheduler access is disabled; data is retained. An enrolled sandbox subscription is suspended too. The main administrator can resume membership.",
-      cancelled: "Membership is cancelled and scheduler access is disabled; data is retained. An enrolled sandbox subscription is cancelled too. Contact the platform owner for membership restoration."
+      cancelled: "Membership is cancelled and scheduler access is disabled; data is retained. The main administrator can re-enroll through Billing when sandbox checkout is available, or contact the platform owner."
     };
 
     async function request(path, options = {}) {
@@ -268,7 +268,7 @@
         change_tier: `Change the membership tier to ${tier}? Existing records remain; plan limits apply immediately. Cancel/reconcile any enrolled sandbox subscription before changing its tier.`,
         pause: "Pause membership now? Scheduler access stops immediately and any enrolled sandbox subscription is suspended. Data is retained and the main administrator can resume later.",
         resume: "Resume membership and restore scheduler access now?",
-        cancel: "Cancel membership now? Scheduler access stops and any enrolled sandbox subscription is cancelled. Data is retained; no refund is issued. Contact the platform owner to restore membership."
+        cancel: "Cancel membership now? Scheduler access stops and any enrolled sandbox subscription is cancelled. Data is retained; no refund is issued. You can re-enroll through Billing when sandbox checkout is available or contact the platform owner."
       };
       if (!window.confirm(messages[action])) return;
       message.textContent = "";

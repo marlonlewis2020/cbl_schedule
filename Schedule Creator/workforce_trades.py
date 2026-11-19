@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import secrets
 from itertools import combinations
 from contextlib import closing
@@ -702,7 +703,7 @@ def register(app, s):
         for person in dict.fromkeys((trade["employeeA"], trade["employeeB"])):
             old = [shift for shift in remote if
                    any(str(employee["employeeId"]) == person for employee in shift["employees"]) and
-                   datetime.fromisoformat(shift["start"]).astimezone(s.ATTENDANCE_TIMEZONE).date() == shift_date]
+                   datetime.fromisoformat(shift["start"].replace("Z", "+00:00")).astimezone(s.ATTENDANCE_TIMEZONE).date() == shift_date]
             if len(old) > 1 or any(len(shift["employeeIds"]) != 1 for shift in old):
                 raise ValueError("Shared or multiple BambooHR shifts require manual reconciliation.")
             assigned = next(e for e in doc["employees"] if str(e["id"]) == person)
@@ -923,7 +924,8 @@ def register(app, s):
             ).fetchone()
             if not row or row[1] not in {"running", "unknown", "failed"}:
                 return fail("This publish does not need remote reconciliation.", 409)
-            updated = datetime.fromisoformat(row[2])
+            # PostgreSQL may render a text timestamp's UTC offset as "-05".
+            updated = datetime.fromisoformat(re.sub(r"([+-]\d{2})$", r"\1:00", row[2]))
             if updated.tzinfo is None:
                 updated = updated.replace(tzinfo=s.timezone.utc)
             if row[1] == "running" and (datetime.now(s.timezone.utc) - updated).total_seconds() < 600:
@@ -944,11 +946,13 @@ def register(app, s):
                     op["state"] = "pending" if exists else "success"
                 else:
                     payload = op["payload"]
+                    start = datetime.fromisoformat(payload["start"].replace("Z", "+00:00"))
+                    end = datetime.fromisoformat(payload["end"].replace("Z", "+00:00"))
                     matches = [shift for shift in remote if
                                str(shift["scheduleId"]) == str(payload["scheduleId"]) and
                                {str(value) for value in shift["employeeIds"]} == {str(value) for value in payload["employeeIds"]} and
-                               datetime.fromisoformat(shift["start"]) == datetime.fromisoformat(payload["start"]) and
-                               datetime.fromisoformat(shift["end"]) == datetime.fromisoformat(payload["end"])]
+                               datetime.fromisoformat(shift["start"].replace("Z", "+00:00")) == start and
+                               datetime.fromisoformat(shift["end"].replace("Z", "+00:00")) == end]
                     if len(matches) > 1:
                         return fail("Duplicate matching BambooHR shifts require manual correction before retrying.", 409)
                     op["state"] = "success" if matches else "pending"

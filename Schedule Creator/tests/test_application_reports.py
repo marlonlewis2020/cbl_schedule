@@ -13,6 +13,36 @@ import attendance_reports as reports
 import scheduler
 import test_scheduler
 import test_workforce_workflows as workflows
+from test_attendance_snapshot import move_fixture_report
+
+
+class MarketingPageTests(unittest.TestCase):
+    setUp = test_scheduler.ManagerEmployeeAccessTests.setUp
+    tearDown = test_scheduler.ManagerEmployeeAccessTests.tearDown
+
+    def test_public_home_links_to_real_registration_and_role_sign_in(self):
+        visitor = scheduler.app.test_client()
+        with visitor.get("/") as home, visitor.get("/explore") as explore:
+            self.assertEqual(home.status_code, 200)
+            self.assertEqual(home.data, explore.data)
+            for link in (b"/hub#registerSection", b"/signin?experience=admin", b"/signin?experience=workforce"):
+                self.assertIn(link, home.data)
+        with visitor.get("/hub") as hub:
+            self.assertIn(b'id="registerSection"', hub.data)
+        with visitor.get("/signin?experience=workforce") as signin:
+            self.assertIn(b'id="experience"', signin.data)
+        with visitor.get("/marketing-media/hero.webp") as image:
+            self.assertEqual(image.mimetype, "image/webp")
+
+    def test_member_can_browse_without_replacing_workspace_or_recovery_page(self):
+        with self.admin.get("/") as workspace:
+            self.assertEqual(workspace.data, (scheduler.APP_DIRECTORY / "propa-Scheduler2.html").read_bytes())
+        with self.admin.get("/explore") as marketing:
+            self.assertIn(b"Every shift.", marketing.data)
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute("UPDATE tenants SET membership_status='cancelled' WHERE tenant_id=?", (scheduler.DEFAULT_TENANT_ID,))
+        with self.admin.get("/") as recovery:
+            self.assertEqual(recovery.data, (scheduler.APP_DIRECTORY / "business-status.html").read_bytes())
 
 
 class ApplicationReportTests(unittest.TestCase):
@@ -276,7 +306,7 @@ class ApplicationReportTests(unittest.TestCase):
         self.assertEqual(self.admin.post(endpoint, headers=self.headers, json={}).status_code, 429)
         self.assertEqual(self.admin.get(endpoint + "/unknown/download").status_code, 404)
         with closing(scheduler.database_connect()) as c, c:
-            c.execute("UPDATE attendance_reports SET tenant_id='other'")
+            move_fixture_report(c, report_id, "other")
         self.assertEqual(self.admin.get(path).status_code, 404)
         self.assertEqual(self.admin.get(endpoint).get_json()["reports"], [])
 
@@ -300,6 +330,40 @@ class ApplicationReportTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as c:
             failed = c.execute("SELECT state,error FROM attendance_reports WHERE run_key='manual:failed'").fetchone()
         self.assertEqual(failed, ("failed", "Invalid fixture"))
+
+    def test_worker_captures_scheduled_snapshots_for_non_default_tenant(self):
+        tenant = "snapshot-worker-test"
+        cutoff = datetime(2026, 11, 5, 23, tzinfo=scheduler.ATTENDANCE_TIMEZONE)
+        now = cutoff + timedelta(seconds=30)
+        with closing(scheduler.database_connect()) as c, c:
+            c.execute("INSERT INTO tenants(tenant_id,business_name,status,membership_status,membership_tier) "
+                      "VALUES(?,?,'active','active','silver')", (tenant, "Snapshot Worker Test"))
+            test_scheduler.set_fixture_tenant(c, tenant)
+            c.execute("INSERT INTO attendance_report_settings(tenant_id,enabled,checked_at) VALUES(?,1,?)",
+                      (tenant, (cutoff - timedelta(minutes=1)).isoformat()))
+        captured_tenants = []
+
+        def no_key():
+            captured_tenants.append(scheduler.active_tenant_id())
+            return ""
+
+        with patch.object(scheduler, "bamboohr_api_key", side_effect=no_key):
+            for _ in range(2):
+                with scheduler.app.app_context():
+                    reports.run_once(scheduler, now)
+        self.assertEqual(set(captured_tenants), {tenant})
+        with closing(scheduler.database_connect()) as c:
+            test_scheduler.set_fixture_tenant(c, tenant)
+            saved = c.execute(
+                "SELECT cutoff,state,payload FROM attendance_reports WHERE tenant_id=?", (tenant,),
+            ).fetchall()
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0][:2], (cutoff.isoformat(), "stale"))
+            self.assertTrue(json.loads(saved[0][2])["workbook"])
+            self.assertEqual(c.execute(
+                "SELECT heartbeat FROM attendance_report_settings WHERE tenant_id=?", (tenant,),
+            ).fetchone(), (now.isoformat(),))
+        self.assertEqual(self.admin.get("/api/attendance/reports").get_json()["reports"], [])
 
     def test_worker_ready_refresh_uses_existing_classification(self):
         now = datetime.now(scheduler.ATTENDANCE_TIMEZONE)
@@ -370,6 +434,7 @@ class ApplicationReportTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as c, c:
             c.execute("INSERT INTO attendance_report_settings(tenant_id,enabled,checked_at) VALUES(?,0,?)",
                       (scheduler.DEFAULT_TENANT_ID, (now - timedelta(days=1)).isoformat()))
+            test_scheduler.set_fixture_tenant(c, "other")
             c.execute("INSERT INTO attendance_reports(tenant_id,id,run_key,cutoff,created_at,state,payload) VALUES('other','foreign','key',?,?,'ready','{}')",
                       (now.isoformat(), now.isoformat()))
         with scheduler.app.app_context(), patch.object(reports, "capture") as capture:

@@ -50,6 +50,18 @@ body{
     animation:readiness-spin .8s linear infinite
 }
 @keyframes readiness-spin{to{transform:rotate(360deg)}}
+#attendanceFilterLoading{
+    width:min(28rem, calc(100% - 2rem));
+    text-align:center;
+    color:var(--ink);
+    background:var(--bg);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:1.5rem
+}
+#attendanceFilterLoading::backdrop{background:#07192399}
+#attendanceFilterLoading .workspace-readiness-spinner{margin:0 auto}
+#attendanceFilterLoading p{margin:1rem 0 0}
 .readiness-limited{
     display:flex;
     align-items:center;

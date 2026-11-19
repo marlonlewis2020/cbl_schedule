@@ -138,6 +138,14 @@ operations in the target environment before production use.
 
 ## Membership tiers and entitlements
 
+Signed-out visitors land on the Propa marketing page at `/`. Members can browse
+the same page at `/explore` without signing out. The page links to business
+registration and role-specific sign-in, and compares standard plan benefits
+without collecting payments. Signed-in business admins still open their workspace
+or business status page at `/`.
+The shared `/signin` page uses the same Propa branding and supports business
+administrator, workforce, and platform owner sign-in.
+
 New businesses start on Bronze. The platform owner assigns or changes a tier
 from the Businesses panel at `/hub`. Admin seats are the user-license limit;
 teams are distinct location/role groups, and the location limit counts distinct
@@ -166,8 +174,13 @@ The main business administrator can view the current tier and membership
 status at `/business`, change tiers, pause, resume, or cancel membership. These
 actions take effect immediately and require confirmation. Pausing disables
 scheduler access but can be resumed by the main administrator. Cancellation
-also disables access, retains all business data, and requires the platform
-owner to restore access. Optional PayPal sandbox billing is disabled by default;
+disables scheduling and retains all business data. Administrators can still sign
+in to view Business Status, and the main administrator can access Billing.
+The main administrator can re-enroll through Billing. Once PayPal verifies a
+payment on the new sandbox subscription, Propa clears the membership cancellation
+and activates the purchased tier. The platform owner can also restore membership
+without checkout. Neither path lifts a separate business suspension.
+Optional PayPal sandbox billing is disabled by default;
 live payments are not supported. Enrolled sandbox subscriptions follow
 membership pause/resume/cancel actions after provider verification.
 Membership actions are recorded in the tenant audit log with the acting

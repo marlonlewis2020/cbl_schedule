@@ -10,6 +10,15 @@
     };
     const count=value=>Number(value||0).toLocaleString();
     const percent=value=>value===null||value===undefined?"N/A":`${Number(value).toFixed(1)}%`;
+    function appendTable(section,table,label){
+        const region=node("div",undefined,"attendance-dashboard-table");
+        region.tabIndex=0;
+        region.setAttribute("role","region");
+        region.setAttribute("aria-label",label);
+        for(const header of table.tHead.rows[0].cells)header.scope="col";
+        region.append(table);
+        section.append(region);
+    }
     document.addEventListener("toggle",event=>{
         if(event.target?.dataset?.dashboardDisclosure==="true")liveDashboardExpanded=event.target.open;
     },true);
@@ -80,7 +89,7 @@
                         for(const value of [shift.shiftStart,count(summary.expected),count(summary.clockedIn),percent(summary.attendancePercent),count(summary.late),count(summary.absent),count(summary.approvedLeave)])row.append(node("td",value));
                     }
                     if(!role.shifts?.length){const row=table.createTBody().insertRow(),cell=node("td","No shifts have started.");cell.colSpan=7;row.append(cell);}
-                    team.append(table);
+                    appendTable(team,table,`Shift breakdown: ${location.location} × ${role.role}`);
                 }
             }
             if(!locationGroups.length)team.append(node("p","No team shifts have started for this date.","note"));
@@ -113,7 +122,7 @@
                     for(const value of [shift.shiftStart,count(summary.expected),count(summary.clockedIn),percent(summary.attendancePercent),count(summary.late),count(summary.absent),count(summary.approvedLeave)])row.append(node("td",value));
                 }
                 if(!role.shifts?.length){const row=table.createTBody().insertRow(),cell=node("td","No shifts have started.");cell.colSpan=7;row.append(cell);}
-                breakdown.append(table);
+                appendTable(breakdown,table,`Shift breakdown: ${location.location} × ${role.role}`);
             }
         }
         if(!locationGroups.length)breakdown.append(node("p","No shifts have started for this date.","note"));
@@ -134,7 +143,7 @@
                 const row=body.insertRow();
                 for(const value of [item.name||item.employeeId,item.location,item.role,item.shiftStart,item.status,item.reason])row.append(node("td",value||""));
             }
-            section.append(table);
+            appendTable(section,table,"Attendance exceptions");
         }
         content.append(section);
     };

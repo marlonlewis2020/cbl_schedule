@@ -98,6 +98,8 @@
 .attendance-dashboard-breakdown th,.attendance-dashboard-breakdown td,.attendance-dashboard-exceptions th,.attendance-dashboard-exceptions td,.attendance-dashboard-team th,.attendance-dashboard-team td{padding:8px 10px;border-bottom:1px solid var(--line,#dce6eb);text-align:left;vertical-align:top}
 .attendance-dashboard-breakdown th,.attendance-dashboard-exceptions th,.attendance-dashboard-team th{background:var(--soft,#f2f7f8)}
 .attendance-dashboard-team{margin-top:14px}
-@media(max-width:600px){.attendance-dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.attendance-dashboard-breakdown,.attendance-dashboard-exceptions,.attendance-dashboard-team{overflow-x:auto}}
+.attendance-dashboard-table{max-width:100%;overflow-x:auto}
+.attendance-dashboard-table:focus-visible{outline:2px solid var(--blue,#159bd5);outline-offset:2px}
+@media(max-width:600px){.attendance-dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.trade-page{margin:12px}.trade-page main,.trade-page .trade-card{padding:16px}.trade-page-header{flex-wrap:wrap}.trade-page .trade-swap-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.workforce-trade{padding:16px}.workforce-trade .trade-fields{grid-template-columns:1fr}.workforce-trade footer{flex-wrap:wrap}}

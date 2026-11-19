@@ -1,4 +1,3 @@
-let liveDashboard='';
 const SCHEDULE_TEMPLATE_BASE="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";
 const SCHEDULE_TEMPLATE_FILES=["xl/workbook.xml", "xl/styles.xml", "xl/theme/theme1.xml", "xl/sharedStrings.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml", "xl/worksheets/sheet3.xml", "_rels/.rels", "xl/_rels/workbook.xml.rels", "[Content_Types].xml"];
 const BAMBOO_CONNECTOR_FILES={
@@ -761,13 +760,14 @@ function sortAttendanceItems(table,items,getters){
     }).map(entry=>entry.item)
 }
 function attendancePage(){
-    liveDashboard=membershipFeatureEnabled('attendanceDashboard')?'<section id="liveAttendanceDashboard" class="live-attendance-dashboard" aria-live="polite"></section>':'';
+    let liveDashboard=membershipFeatureEnabled('attendanceDashboard')?'<section id="liveAttendanceDashboard" class="live-attendance-dashboard" aria-live="polite"></section>':'';
     let data=attendanceData,settings=data?.settings||{latenessToleranceMinutes:15,scorePeriodDays:30},selectedDate=data?.date||attendanceSelectedDate,currentDate=data?.currentDate||selectedDate,sourceInfo=data?.shiftSource||{selected:'app',unresolvedDiscrepancies:null};
     let allShifts=data?.shifts||[],allScores=(data?.scores||[]).filter(item=>item.active);
-    let locations=[...new Set([...allShifts,...allScores].map(item=>item.location).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    let roles=[...new Set([...allShifts,...allScores].map(item=>item.role).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    if(!locations.includes(attendanceLocationFilter))attendanceLocationFilter='All';
-    if(!roles.includes(attendanceRoleFilter))attendanceRoleFilter='All';
+    const filterValues=[...allShifts,...allScores,...scheduleLocations];
+    let locations=[...new Set([attendanceLocationFilter,...filterValues.map(item=>item.location)].filter(value=>value&&value!=='All'))].sort((a,b)=>a.localeCompare(b));
+    let roles=[...new Set([attendanceRoleFilter,...filterValues.map(item=>item.role||item.roleGroup)].filter(value=>value&&value!=='All'))].sort((a,b)=>a.localeCompare(b));
+    let displayedFilters=attendanceFilterLabel(attendanceFilterSelection(),data);
+    let filterStatus=attendanceFilterFailure?`<div class="callout" role="alert"><p><b>Attendance filters could not be updated.</b> ${esc(attendanceFilterFailure.error)}</p><p>Attempted: ${esc(attendanceFilterLabel(attendanceFilterFailure.selection))}</p><button type="button" class="primary" data-action="retryAttendanceFilters">Retry</button></div>`:'';
     let matchesFilter=item=>(attendanceLocationFilter==='All'||item.location===attendanceLocationFilter)&&(attendanceRoleFilter==='All'||item.role===attendanceRoleFilter);
     let shifts=sortAttendanceItems('shifts',allShifts.filter(matchesFilter),{date:i=>i.date,name:i=>i.name,location:i=>i.location,role:i=>i.role,shiftStart:i=>Date.parse(i.shiftStart)||null,clockIn:i=>i.clockIn?Date.parse(i.clockIn)||null:null,status:i=>i.status,reason:i=>i.reason}),scores=sortAttendanceItems('scores',allScores.filter(matchesFilter),{name:i=>i.name,location:i=>i.location,role:i=>i.role,attended:i=>i.scheduled?i.attended/i.scheduled:null,computedScore:i=>i.computedScore,score:i=>i.score});
     let summary={expected:0,clockedIn:0,late:0,absent:0,approvedLeave:0,attendancePercent:null};
@@ -793,7 +793,7 @@ function attendancePage(){
         return `<tr><td>${esc(item.date)}</td><td>${esc(item.name)}<small>${esc(item.location)} · ${esc(item.role)}</small></td><td>${appShifts}</td><td>${bambooShifts}</td><td><div class="actions employee-actions attendance-actions">${item.canApplyApp?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="app_to_bamboohr" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use app shift</button>`:'<span class="note">App→BambooHR unavailable</span>'}${item.canApplyBambooHR?`<button type="button" data-action="reviewAttendanceDiscrepancy" data-discrepancy-id="${esc(item.id)}" data-direction="bamboohr_to_app" data-name="${esc(item.name)}" data-date="${esc(item.date)}">Use BambooHR shift</button>`:'<span class="note">BambooHR→app unavailable</span>'}</div></td></tr>`
     }).join('');
     let sourceControl=collapsiblePanel('attendance-source','Attendance shift source',`<div class="formgrid"><label>Use shifts from<select id="attendanceShiftSource"><option value="app" ${sourceInfo.selected==='app'?'selected':''}>Accepted shifts in this app</option><option value="bamboohr" ${sourceInfo.selected==='bamboohr'?'selected':''}>BambooHR shifts</option></select></label><div><button type="button" class="primary" data-action="saveAttendanceSource">Save shift source</button></div></div><p class="note">Current source: ${sourceInfo.selected==='app'?'this app’s accepted schedules':'BambooHR schedules'}. BambooHR clock events remain the source of attendance evidence.</p>`)+(sourceInfo.selected==='bamboohr'?collapsiblePanel('attendance-discrepancies','Unresolved BambooHR shift discrepancies',sourceInfo.bamboohrAvailable===true?(discrepancies.length?`<p>${discrepancies.length} unresolved difference${discrepancies.length===1?'':'s'} match the current filters. Differences are rechecked before each resolution.</p><div class="tablewrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Accepted app shift</th><th>BambooHR shift</th><th>Resolution</th></tr></thead><tbody>${discrepancyRows}</tbody></table></div>`:'<p>No unresolved shift discrepancies match the current filters.</p>'):'<p class="badtext">BambooHR shifts could not be checked. Refresh the attendance page before relying on this comparison.</p>'):'');
-    return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+liveDashboard+
+    return heading('PEOPLE / ATTENDANCE','Track clock-ins against accepted shifts.','The app syncs BambooHR time-tracking and approved time off while this page is open, then rechecks every five minutes. Automatic absence classification runs four hours after shift start.')+filterStatus+`<p id="attendanceDisplayedFilters" class="note" role="status" tabindex="-1">${data?'Showing attendance for '+esc(displayedFilters):'No attendance results have been loaded.'}</p>`+liveDashboard+
         '<section class="attendance-group" aria-labelledby="attendanceSetupHeading"><h2 id="attendanceSetupHeading">Setup</h2>'+collapsiblePanel('attendance-sync','BambooHR attendance sync',`<p>${attendanceSyncStatus?`<span class="badtext">${esc(attendanceSyncStatus)}</span>`:data?.lastSyncedAt?`Last successful sync: ${esc(new Date(data.lastSyncedAt).toLocaleString())}`:'Attendance has not synced yet.'}</p><div class="actions"><button type="button" class="primary" data-action="syncAttendance">Sync selected period</button><span class="note">Historical selections fetch up to 365 inclusive days. Automatic polling pauses while this browser tab is hidden or closed.</span></div>`)+
         sourceControl+
         collapsiblePanel('attendance-filters','Attendance filters',`<div class="formgrid"><label>Report period${select([['day','Single day'],['months','Month range']],attendancePeriodMode,'id="attendancePeriodMode"')}</label>${attendancePeriodMode==='day'?`<label>Attendance date<input id="attendanceDateFilter" type="date" value="${esc(selectedDate)}" max="${esc(currentDate)}"></label>`:`<label>From month<input id="attendanceStartMonth" type="month" value="${esc(attendanceStartMonth)}" max="${esc(currentDate.slice(0,7))}"></label><label>Through month<input id="attendanceEndMonth" type="month" value="${esc(attendanceEndMonth)}" max="${esc(currentDate.slice(0,7))}"></label>`}<label>Location${select([['All','All locations'],...locations.map(location=>[location,location])],attendanceLocationFilter,'id="attendanceLocationFilter"')}</label><label>Role${select([['All','All roles'],...roles.map(role=>[role,role])],attendanceRoleFilter,'id="attendanceRoleFilter"')}</label></div><p class="note">Month ranges include all recorded shifts from the first month through the selected last month. If attendance has not been synced for that period, choose Sync selected period to fetch it from BambooHR.</p>`)+
@@ -1032,21 +1032,9 @@ document.addEventListener('change',e=>{
     if(!model)return;let t=e.target;if(t.dataset.menuSetting){
         let id=t.dataset.menuSetting;if(!['controls','schedules'].includes(id))appSettings().menus[id]=t.checked;render();queueSave()
     }
-    if(t.id==='attendanceLocationFilter'||t.id==='attendanceRoleFilter'){
-        if(t.id==='attendanceLocationFilter')attendanceLocationFilter=t.value;
-        else attendanceRoleFilter=t.value;
-        render();
-        return
-    }
-    if(['attendancePeriodMode','attendanceDateFilter','attendanceStartMonth','attendanceEndMonth'].includes(t.id)){
-        if(t.id==='attendancePeriodMode')attendancePeriodMode=t.value;
-        if(t.id==='attendanceDateFilter')attendanceSelectedDate=t.value;
-        if(t.id==='attendanceStartMonth')attendanceStartMonth=t.value;
-        if(t.id==='attendanceEndMonth')attendanceEndMonth=t.value;
-        loadSelectedAttendance().catch(error=>{
-            attendanceSyncStatus=error.message;
-            if(page==='attendance')render(true)
-        });
+    const filterField=attendanceFilterFields.get(t.id);
+    if(filterField){
+        loadSelectedAttendance({...attendanceFilterSelection(),[filterField]:t.value},t.id);
         return
     }
     if(t.id==='workforceCcSetting'){
@@ -2343,6 +2331,12 @@ document.addEventListener('click',async e=>{
 let storageMode='unknown',storageReason='';
 let expandedPanels=new Set(),attendanceSort={shifts:{key:'',direction:'asc'},scores:{key:'',direction:'asc'}},model=null,page='home',filterLoc='All',filterRole='All',rosterStatusFilter='All',employeeLocationFilter='All',employeeRoleFilter='All',attendanceLocationFilter='All',attendanceRoleFilter='All',attendancePeriodMode='day',attendanceSelectedDate='',attendanceStartMonth='',attendanceEndMonth='',search='',resultFilter='All',previewId='',busy=false,sourceBytes=null,tenantAuthCsrfToken='',tenantMembership=null;
 let employeeDirectory=[],scheduleLocations=[],directoryError='',employeeSyncStatus='',pendingEmployeeSyncConflicts=[],pendingSourceImport=null,sourceReviewRows=[],assignLocationId='',assignEmployeeIds=new Set(),assignCandidateIds=new Set(),selectedEmployeeIds=new Set(),publishSelection=[],publishConfigured=false,publishError='',publishPreview=null,publishResults=[],attendanceData=null,attendanceDashboardData=null,attendanceDashboardError='',attendanceSyncStatus='',attendanceLastAttempt=0,attendanceSyncTimer=null,attendanceLoadSequence=0,sharedRoster=null,sharedRosterError='',sharedMeta=null,sharedMetaError='';
+const attendanceFilterFields=new Map([
+    ['attendanceLocationFilter','location'],['attendanceRoleFilter','role'],
+    ['attendancePeriodMode','mode'],['attendanceDateFilter','date'],
+    ['attendanceStartMonth','startMonth'],['attendanceEndMonth','endMonth']
+]);
+let attendanceFilterLoading=false,attendanceFilterFailure=null;
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }
@@ -2986,51 +2980,108 @@ function applyAttendanceScores(data){
     }
     return changed
 }
-function attendancePeriodRange(){
-    if(attendancePeriodMode==='day'){
-        let selectedDate=attendanceSelectedDate||attendanceData?.currentDate||attendanceData?.date;
+function attendanceFilterSelection(){
+    return {location:attendanceLocationFilter,role:attendanceRoleFilter,mode:attendancePeriodMode,
+        date:attendanceSelectedDate,startMonth:attendanceStartMonth,endMonth:attendanceEndMonth}
+}
+function attendanceFilterLabel(selection,data=null){
+    const period=selection.mode==='months'
+        ?`${data?.periodStart||selection.startMonth||'No start month'} to ${data?.periodEnd||selection.endMonth||'No end month'}`
+        :data?.periodStart||selection.date||data?.date||'No date';
+    return `${selection.location==='All'?'All locations':selection.location} · ${selection.role==='All'?'All roles':selection.role} · ${period}`
+}
+function attendancePeriodRange(selection=attendanceFilterSelection()){
+    if(selection.mode==='day'){
+        let selectedDate=selection.date||attendanceData?.currentDate||attendanceData?.date;
         if(!selectedDate)throw Error('Choose an attendance date.');
         return {start:selectedDate,end:selectedDate}
     }
-    if(!/^\d{4}-\d{2}$/.test(attendanceStartMonth)||!/^\d{4}-\d{2}$/.test(attendanceEndMonth))throw Error('Choose both a start and end month.');
-    if(attendanceStartMonth>attendanceEndMonth)throw Error('The start month must not be after the end month.');
-    let [startYear,startMonth]=attendanceStartMonth.split('-').map(Number),[endYear,endMonth]=attendanceEndMonth.split('-').map(Number);
+    if(!/^\d{4}-\d{2}$/.test(selection.startMonth)||!/^\d{4}-\d{2}$/.test(selection.endMonth))throw Error('Choose both a start and end month.');
+    if(selection.startMonth>selection.endMonth)throw Error('The start month must not be after the end month.');
+    let [startYear,startMonth]=selection.startMonth.split('-').map(Number),[endYear,endMonth]=selection.endMonth.split('-').map(Number);
     if(startMonth<1||startMonth>12||endMonth<1||endMonth>12)throw Error('Choose valid calendar months.');
-    let start=`${attendanceStartMonth}-01`,end=new Date(Date.UTC(endYear,endMonth,0)).toISOString().slice(0,10),currentDate=attendanceData?.currentDate;
+    let start=`${selection.startMonth}-01`,end=new Date(Date.UTC(endYear,endMonth,0)).toISOString().slice(0,10),currentDate=attendanceData?.currentDate;
     if(currentDate&&end>currentDate)end=currentDate;
     if(currentDate&&start>currentDate)throw Error('The selected period cannot start in the future.');
     if(startYear===endYear&&startMonth===endMonth&&end<start)throw Error('The selected month has no attendance dates yet.');
     return {start,end}
 }
-async function loadSelectedAttendance(){
-    let range=attendancePeriodRange();
-    attendanceSyncStatus='Loading attendance…';
-    render();
-    await loadAttendanceData(range.start,range.end);
-    attendanceSyncStatus='';
-    if(page==='attendance')render(true)
+async function loadSelectedAttendance(selection,focusId){
+    if(attendanceFilterLoading)return;
+    const dialog=$('attendanceFilterLoading'),content=$('content');
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),30000);
+    attendanceFilterLoading=true;
+    ++attendanceLoadSequence;
+    content.setAttribute('aria-busy','true');
+    dialog.oncancel=event=>event.preventDefault();
+    dialog.showModal();
+    try{
+        const range=attendancePeriodRange(selection);
+        const result=await fetchAttendanceData(range.start,range.end,controller.signal);
+        if(controller.signal.aborted)throw Error('The refresh timed out.');
+        attendanceLocationFilter=selection.location;
+        attendanceRoleFilter=selection.role;
+        attendancePeriodMode=selection.mode;
+        attendanceSelectedDate=selection.date;
+        attendanceStartMonth=selection.startMonth;
+        attendanceEndMonth=selection.endMonth;
+        commitAttendanceData(result);
+        attendanceFilterFailure=null;
+    }catch(error){
+        attendanceFilterFailure={selection,focusId,error:controller.signal.aborted?'The refresh timed out.':error.message};
+    }finally{
+        clearTimeout(timeout);
+        try{
+            if(page==='attendance')render(true);
+        }finally{
+            attendanceFilterLoading=false;
+            content.removeAttribute('aria-busy');
+            dialog.close();
+            if(page==='attendance'){
+                const nextFocus=attendanceFilterFailure && content.querySelector('[data-action="retryAttendanceFilters"]');
+                (nextFocus||$(focusId)||$('attendanceDisplayedFilters'))?.focus({preventScroll:true});
+            }
+        }
+    }
 }
-async function loadAttendanceData(startDate,endDate){
-    let sequence=++attendanceLoadSequence,path=startDate&&endDate?'/attendance?start='+encodeURIComponent(startDate)+'&end='+encodeURIComponent(endDate):'/attendance';
-    let result=await directoryRequest(path);
-    if(sequence!==attendanceLoadSequence)return;
-    attendanceData=result;
-    attendanceSelectedDate=result.date||result.currentDate;
+async function fetchAttendanceData(startDate,endDate,signal){
+    const path=startDate&&endDate?'/attendance?start='+encodeURIComponent(startDate)+'&end='+encodeURIComponent(endDate):'/attendance';
+    const data=await directoryRequest(path,{signal});
+    if(!Array.isArray(data.shifts)||!Array.isArray(data.scores)||!/^\d{4}-\d{2}-\d{2}$/.test(data.currentDate)){
+        throw Error('The server returned incomplete attendance results.');
+    }
+    let dashboard=null,dashboardError='';
     if(membershipFeatureEnabled('attendanceDashboard')){
         try{
-            attendanceDashboardData=await directoryRequest('/attendance/dashboard?date='+encodeURIComponent(attendanceSelectedDate||result.currentDate));
-            attendanceDashboardError=''
-        }catch(error){attendanceDashboardData=null;attendanceDashboardError=error.message}
-    }else{
-        attendanceDashboardData=null;attendanceDashboardError=''
+            dashboard=await directoryRequest('/attendance/dashboard?date='+encodeURIComponent(data.date||data.currentDate),{signal});
+        }catch(error){
+            if(signal)throw error;
+            dashboardError=error.message
+        }
     }
-    if(!attendanceStartMonth)attendanceStartMonth=result.currentDate.slice(0,7);
-    if(!attendanceEndMonth)attendanceEndMonth=result.currentDate.slice(0,7);
-    let changed=!startDate&&!endDate&&applyAttendanceScores(result);
+    return {data,dashboard,dashboardError}
+}
+function commitAttendanceData({data,dashboard,dashboardError}){
+    attendanceData=data;
+    attendanceDashboardData=dashboard;
+    attendanceDashboardError=dashboardError;
+    if(!attendanceSelectedDate)attendanceSelectedDate=data.date||data.currentDate;
+    if(!attendanceStartMonth)attendanceStartMonth=data.currentDate.slice(0,7);
+    if(!attendanceEndMonth)attendanceEndMonth=data.currentDate.slice(0,7)
+}
+async function loadAttendanceData(startDate,endDate){
+    if(attendanceFilterLoading)return;
+    const sequence=++attendanceLoadSequence;
+    const result=await fetchAttendanceData(startDate,endDate);
+    if(sequence!==attendanceLoadSequence)return;
+    commitAttendanceData(result);
+    let changed=!startDate&&!endDate&&applyAttendanceScores(result.data);
     if(changed)await saveState()
 }
 async function syncAttendance(silent=true,selectedPeriod=null){
-    if(!tenantAuthCsrfToken||document.hidden)return false;
+    if(!tenantAuthCsrfToken||document.hidden||attendanceFilterLoading||(silent&&!selectedPeriod&&attendanceFilterFailure))return false;
+    const sequence=attendanceLoadSequence;
     attendanceLastAttempt=Date.now();
     attendanceSyncStatus='Syncing BambooHR attendance…';
     let succeeded=false;
@@ -3038,9 +3089,12 @@ async function syncAttendance(silent=true,selectedPeriod=null){
         let synced=await directoryRequest('/attendance/sync',{
             method:'POST',headers:{'X-CSRF-Token':tenantAuthCsrfToken},body:JSON.stringify(selectedPeriod||{})
         });
+        if(attendanceFilterLoading||sequence!==attendanceLoadSequence){
+            attendanceSyncStatus='';
+            return false
+        }
         if(selectedPeriod){
             attendanceData=synced;
-            attendanceSelectedDate=synced.currentDate
         }
         else{
             if(applyAttendanceScores(synced))await saveState();
@@ -4414,7 +4468,12 @@ async function action(a,element=null){
         dismissFeedbackToast(element?.dataset.feedbackId);
         return
     }
-    if(busy)return;
+    if(busy||attendanceFilterLoading)return;
+    if(a==='retryAttendanceFilters'&&attendanceFilterFailure){
+        const {selection,focusId}=attendanceFilterFailure;
+        await loadSelectedAttendance(selection,focusId);
+        return
+    }
     if(['backup','restore','sourceInputs','sharePointConnect','sharePointDisconnect','sharePointSearch','sharePointOpenDrive','sharePointOpenSiteDrive','sharePointOpenSite','sharePointOpenFolder','sharePointImport','sharePointNext','sharePointBack'].includes(a)&&!pageAllowed('source')){
         message('Source & backups requires the primary business administrator and an enabled page.',true);
         return

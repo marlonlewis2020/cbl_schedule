@@ -8,7 +8,7 @@ from unittest.mock import patch
 import attendance_email
 import attendance_reports
 import scheduler
-from test_attendance_snapshot import SnapshotHtmlTests, example_payload
+from test_attendance_snapshot import SnapshotHtmlTests, example_payload, move_fixture_report
 
 
 class ReportActionTests(unittest.TestCase):
@@ -74,7 +74,7 @@ class ReportActionTests(unittest.TestCase):
         with closing(scheduler.database_connect()) as c:
             self.assertTrue(all(state == "deleted" and data == "{}" for state, data in c.execute("SELECT state,payload FROM attendance_reports")))
             self.assertEqual(c.execute("SELECT * FROM employees").fetchall(), original)
-            event = c.execute("SELECT action FROM tenant_audit_events WHERE route='delete_reports' AND action LIKE '{%'").fetchone()
+            event = c.execute("SELECT action FROM tenant_audit_events WHERE route='delete_reports' AND action LIKE ?", ("{%",)).fetchone()
             self.assertEqual(json.loads(event[0])["ids"], ["html-fixture", "second"])
         with scheduler.app.app_context():
             self.assertIsNone(attendance_reports.capture(scheduler, scheduler.DEFAULT_TENANT_ID, datetime.now(scheduler.ATTENDANCE_TIMEZONE), "scheduled:second"))
@@ -92,7 +92,7 @@ class ReportActionTests(unittest.TestCase):
             c.execute("UPDATE attendance_reports SET state='running'")
         self.assertEqual(self.admin.delete(path, headers=self.headers, json=valid).status_code, 409)
         with closing(scheduler.database_connect()) as c, c:
-            c.execute("UPDATE attendance_reports SET state='ready',tenant_id='other-tenant'")
+            move_fixture_report(c, "html-fixture", "other-tenant")
         self.assertEqual(self.admin.delete(path, headers=self.headers, json=valid).status_code, 404)
         with closing(scheduler.database_connect()) as c, c:
             c.execute("UPDATE tenants SET membership_tier='bronze'")
@@ -145,7 +145,8 @@ class ReportActionTests(unittest.TestCase):
             self.assertTrue(all(state == "ready" and payload != "{}" for report_id, state, payload in rows if report_id not in ids))
             self.assertEqual(c.execute("SELECT * FROM employees").fetchall(), employees)
             event = c.execute(
-                "SELECT action FROM tenant_audit_events WHERE route='delete_executive_reports' AND action LIKE '{%'",
+                "SELECT action FROM tenant_audit_events WHERE route='delete_executive_reports' AND action LIKE ?",
+                ("{%",),
             ).fetchone()
             self.assertEqual(json.loads(event[0]), {"action": "executive-reports-deleted", "ids": ids})
         with scheduler.app.app_context(), patch.object(scheduler, "sync_attendance_data", side_effect=AssertionError("Must not regenerate")):
@@ -180,7 +181,7 @@ class ReportActionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         with closing(scheduler.database_connect()) as c, c:
             self.assertEqual(c.execute("SELECT state FROM attendance_reports WHERE id='exec-scheduled'").fetchone()[0], "ready")
-            c.execute("UPDATE attendance_reports SET state='ready',tenant_id='other-tenant' WHERE id='exec-manual'")
+            move_fixture_report(c, "exec-manual", "other-tenant")
         self.assertEqual(self.admin.delete(path, headers=self.headers,
                                           json={"ids": ["exec-scheduled", "exec-manual"], "confirm": True}).status_code, 404)
         with closing(scheduler.database_connect()) as c, c:

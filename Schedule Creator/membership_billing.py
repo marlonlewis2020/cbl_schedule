@@ -143,7 +143,9 @@ def paid_period_end(value, period):
 
 
 def membership_action(c, tenant, provider, action):
-    row = c.execute("SELECT subscription_id,auto_renew FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()
+    row = c.execute("SELECT subscription_id,retry_state FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()
+    if action == "cancel" and row and not row[0] and row[1] in {"checkout", "unknown"}:
+        raise PaymentError("Resolve the pending sandbox checkout before cancelling membership.", unknown=True)
     if not row or not row[0]:
         return
     subscription = provider.subscription(row[0])
@@ -153,29 +155,31 @@ def membership_action(c, tenant, provider, action):
     if action not in operations:
         return
     operation, expected = operations[action]
-    if status == expected or status in {"CANCELLED", "EXPIRED"}:
-        return
-    provider.api("POST", "/v1/billing/subscriptions/" + quote(row[0], safe="") + "/" + operation,
-                 {"reason": "Main administrator membership action: " + action})
-    verified = provider.subscription(row[0])
-    if verified["status"] != expected:
-        raise PaymentError("The sandbox membership action is not yet verified. Reconcile before retrying.",
-                           unknown=True)
-    c.execute("UPDATE billing_accounts SET provider_status=? WHERE tenant_id=?", (expected, tenant))
+    if status != expected and status not in {"CANCELLED", "EXPIRED"}:
+        provider.api("POST", "/v1/billing/subscriptions/" + quote(row[0], safe="") + "/" + operation,
+                     {"reason": "Main administrator membership action: " + action})
+        status = provider.subscription(row[0])["status"]
+        if status != expected:
+            raise PaymentError("The sandbox membership action is not yet verified. Reconcile before retrying.",
+                               unknown=True)
+    c.execute("UPDATE billing_accounts SET provider_status=? WHERE tenant_id=?", (status, tenant))
     if action == "cancel":
         c.execute("UPDATE billing_accounts SET retry_state='cancelled',next_retry=NULL WHERE tenant_id=?", (tenant,))
     audit(c, tenant, "membership-" + action, "Sandbox subscription action verified.")
 
 
 def reconcile(c, tenant, provider, subscription):
+    # Serialize reconciliation with cancellation and replacement of this account.
+    c.execute("UPDATE billing_accounts SET provider_status=provider_status WHERE tenant_id=?", (tenant,))
     row = c.execute(
-        "SELECT subscription_id,checkout_id,tier,period,provider_status,last_payment,retry_state,paid_until "
+        "SELECT subscription_id,checkout_id,tier,period,provider_status,last_payment,retry_state,paid_until,plan_id "
         "FROM billing_accounts WHERE tenant_id=?", (tenant,),
     ).fetchone()
     if not row or subscription.get("id") != row[0] or subscription.get("custom_id") != row[1]:
         raise PaymentError("The PayPal subscription does not match this business checkout.")
     info = subscription.get("billing_info", {})
-    payment = info.get("last_payment", {}).get("time")
+    last_payment = info.get("last_payment", {})
+    payment = last_payment.get("time")
     balance = info.get("outstanding_balance", {})
     try:
         outstanding = Decimal(balance.get("value", "0"))
@@ -186,6 +190,34 @@ def reconcile(c, tenant, provider, subscription):
     status = subscription.get("status")
     if status not in {"APPROVAL_PENDING", "APPROVED", "ACTIVE", "SUSPENDED", "CANCELLED", "EXPIRED"}:
         raise PaymentError("PayPal returned an unsupported subscription status.")
+    if row[4] in {"CANCELLED", "EXPIRED"}:
+        return outstanding, balance, row[4]
+    reenrolling = row[5] is None and c.execute(
+        "SELECT 1 FROM billing_events WHERE tenant_id=? AND id=?",
+        (tenant, "reenrollment:" + row[1]),
+    ).fetchone()
+    if reenrolling:
+        if subscription.get("plan_id") != row[8]:
+            raise PaymentError("The PayPal plan does not match this membership checkout.")
+        if status == "ACTIVE" and payment and outstanding == 0:
+            amount = last_payment.get("amount", {})
+            try:
+                paid_amount = Decimal(amount.get("value", "0"))
+                until = paid_period_end(payment, row[3])
+            except (InvalidOperation, ValueError, TypeError) as error:
+                raise PaymentError("PayPal returned invalid payment details.") from error
+            if (not paid_amount.is_finite() or paid_amount <= 0 or amount.get("currency_code") != "USD"
+                    or datetime.fromisoformat(until) <= datetime.now(timezone.utc)):
+                raise PaymentError("PayPal has not confirmed a current paid membership period.")
+            activated = c.execute(
+                "UPDATE tenants SET membership_status='active',membership_tier=? "
+                "WHERE tenant_id=? AND membership_status='cancelled'",
+                (row[2], tenant),
+            )
+            if activated.rowcount:
+                audit(c, tenant, "membership-reactivated", "Verified payment for a new sandbox membership.")
+        else:
+            payment = None
     if payment and outstanding == 0 and (payment != row[5] or row[6] in {"running", "unknown", "failed"}):
         until = paid_period_end(payment, row[3])
         if row[7] and datetime.fromisoformat(row[7]) > datetime.fromisoformat(until):
@@ -195,10 +227,9 @@ def reconcile(c, tenant, provider, subscription):
             "retry_state='idle',access_state='active',last_error=NULL WHERE tenant_id=?",
             (until, payment, tenant),
         )
-        # A payment must not undo an administrator's pause, cancellation or business suspension.
         c.execute("UPDATE tenants SET membership_tier=? WHERE tenant_id=?", (row[2], tenant))
         audit(c, tenant, "payment-reconciled", "Verified sandbox payment; billing access restored.")
-    if outstanding > 0 and row[6] == "idle":
+    if outstanding > 0 and row[6] == "idle" and not reenrolling:
         c.execute(
             "UPDATE billing_accounts SET retry_state='failed',next_retry=? WHERE tenant_id=?",
             (int(time.time()) + 86400, tenant),
@@ -354,9 +385,17 @@ def register(app, s):
                 "VALUES(?,?,?,?,?,?,'CREATING','checkout') ON CONFLICT(tenant_id) DO UPDATE SET "
                 "checkout_id=excluded.checkout_id,plan_id=excluded.plan_id,tier=excluded.tier,period=excluded.period,"
                 "auto_renew=excluded.auto_renew,provider_status='CREATING',retry_state='checkout',"
-                "subscription_id=NULL,last_payment=NULL,retry_count=0,next_retry=NULL,last_error=NULL",
+                "subscription_id=NULL,last_payment=NULL,retry_count=0,next_retry=NULL,last_error=NULL "
+                "WHERE billing_accounts.provider_status IN ('CANCELLED','EXPIRED')",
                 (tenant, checkout_id, plan, tier, period, int(p["autoRenew"])),
             )
+            current = c.execute("SELECT checkout_id FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()
+            if current[0] != checkout_id:
+                return jsonify(error="A checkout already exists. Reconcile or cancel it before starting another."), 409
+            membership = c.execute("SELECT membership_status FROM tenants WHERE tenant_id=?", (tenant,)).fetchone()
+            if membership and membership[0] == "cancelled":
+                audit(c, tenant, "membership-reenrollment-started", "New checkout for a cancelled membership.",
+                      event_id="reenrollment:" + checkout_id)
         try:
             subscription = provider.api("POST", "/v1/billing/subscriptions", {
                 "plan_id": plan, "custom_id": checkout_id,
@@ -543,12 +582,18 @@ def run_once(s, provider):
                   "ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat", (now,))
         if not config(c)["enabled"]:
             return
-        tenants = [row[0] for row in c.execute("SELECT tenant_id FROM tenants WHERE status='active' AND membership_status='active'")]
-    for tenant in tenants:
+        tenants = c.execute("SELECT tenant_id,membership_status FROM tenants WHERE status='active' "
+                            "AND membership_status IN ('active','cancelled')").fetchall()
+    for tenant, membership in tenants:
         g.tenant_id = tenant
         with closing(s.database_connect()) as c:
-            polling = c.execute("SELECT subscription_id,retry_state,next_retry FROM billing_accounts WHERE tenant_id=?", (tenant,)).fetchone()
-        if polling and polling[0] and polling[1] == "idle" and (not polling[2] or polling[2] <= now):
+            polling = c.execute(
+                "SELECT subscription_id,retry_state,next_retry FROM billing_accounts b WHERE tenant_id=? "
+                "AND provider_status NOT IN ('CANCELLED','EXPIRED') AND (?='active' OR EXISTS "
+                "(SELECT 1 FROM billing_events e WHERE e.tenant_id=b.tenant_id AND e.id='reenrollment:' || b.checkout_id))",
+                (tenant, membership),
+            ).fetchone()
+        if polling and polling[0] and (polling[1] == "idle" or membership == "cancelled") and (not polling[2] or polling[2] <= now):
             try:
                 subscription = provider.subscription(polling[0])
                 with closing(s.database_connect()) as c, c:
@@ -559,6 +604,8 @@ def run_once(s, provider):
                     c.execute("UPDATE billing_accounts SET last_error=?,next_retry=? WHERE tenant_id=?",
                               (str(error), now + 600, tenant))
                     audit(c, tenant, "reconciliation-failed", str(error))
+        if membership == "cancelled":
+            continue
         with closing(s.database_connect()) as c, c:
             row = c.execute(
                 "SELECT subscription_id,retry_count,next_retry,retry_state,paid_until,auto_renew "

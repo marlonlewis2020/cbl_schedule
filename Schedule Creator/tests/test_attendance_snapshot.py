@@ -54,6 +54,18 @@ def example_payload():
     }
 
 
+def move_fixture_report(connection, report_id, tenant):
+    row = connection.execute(
+        "DELETE FROM attendance_reports WHERE id=? RETURNING id,run_key,cutoff,created_at,payload,error",
+        (report_id,),
+    ).fetchone()
+    test_scheduler.set_fixture_tenant(connection, tenant)
+    connection.execute(
+        "INSERT INTO attendance_reports(id,run_key,cutoff,created_at,payload,error,tenant_id,state) "
+        "VALUES(?,?,?,?,?,?,?,'ready')", (*row, tenant)
+    )
+
+
 class SnapshotHtmlTests(unittest.TestCase):
     setUp = test_scheduler.ManagerEmployeeAccessTests.setUp
     tearDown = test_scheduler.ManagerEmployeeAccessTests.tearDown
@@ -68,6 +80,7 @@ class SnapshotHtmlTests(unittest.TestCase):
         if "html" not in payload:
             payload["html"] = attendance_snapshot.render(payload)
         with closing(scheduler.database_connect()) as c, c:
+            test_scheduler.set_fixture_tenant(c, tenant or scheduler.DEFAULT_TENANT_ID)
             c.execute("INSERT INTO attendance_reports(tenant_id,id,run_key,cutoff,created_at,state,payload) VALUES(?,?,?,?,?,?,?)",
                       (tenant or scheduler.DEFAULT_TENANT_ID, "html-fixture", "manual:html-fixture",
                        payload["cutoff"], payload["generatedAt"], state, json.dumps(payload)))
@@ -110,7 +123,7 @@ class SnapshotHtmlTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.admin.get(path).status_code, 409)
         with closing(scheduler.database_connect()) as c, c:
-            c.execute("UPDATE attendance_reports SET state='ready',tenant_id='another-business'")
+            move_fixture_report(c, "html-fixture", "another-business")
         for path in paths:
             self.assertEqual(self.admin.get(path).status_code, 404)
 

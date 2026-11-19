@@ -241,8 +241,13 @@
       $("#teamSummary").textContent = `${result.date}: ${result.present} present of ${result.expected} expected; attendance ${result.attendancePercent === null ? "not available" : result.attendancePercent + "%"}. ` +
         Object.entries(result.counts).map(([status, count]) => `${count} ${status.replaceAll("_", " ")}`).join(", ") +
         ` · Recorded as of ${clockLabel(result.reportedAt)} Jamaica time.`;
-      const dashboard = await api(`/api/access/me/attendance/dashboard?date=${encodeURIComponent(result.date)}`);
-      window.renderLiveAttendanceDashboard?.($("#teamDashboardGroups"), dashboard, "employee");
+      const target = $("#teamDashboardGroups");
+      try {
+        const dashboard = await api(`/api/access/me/attendance/dashboard?date=${encodeURIComponent(result.date)}`);
+        window.renderLiveAttendanceDashboard?.(target, dashboard, "employee");
+      } catch (error) {
+        window.renderLiveAttendanceDashboard?.(target, null, "employee", error.message);
+      }
     }
 
     async function api(path, method = "GET", payload) {
@@ -315,8 +320,8 @@
       headings.push("Save");
       for (const heading of headings) { const th = document.createElement("th"); th.textContent = heading; head.append(th); }
       const body = table.createTBody(), personal = role === "employee" || personalMode;
-      for (const record of rosterSettingsRecords) {
-        const row = body.insertRow(), profile = record.settings;
+      function buildRow(record) {
+        const row = document.createElement("tr"), profile = record.settings;
         cell(row, `${record.name} (${record.employeeId})`);
         cell(row, `${record.location} · ${record.role}`);
         const editable = field => !rosterSettingsLocked &&
@@ -356,6 +361,8 @@
             if (JSON.stringify(next) !== control.dataset.original) changes[field] = next;
           }
           if (!Object.keys(changes).length) { $("#rosterSettingsMessage").textContent = "No changes to save."; return; }
+          const editableControls = controls.filter(control => !control.disabled);
+          editableControls.forEach(control => { control.disabled = true; });
           save.disabled = true; $("#rosterSettingsMessage").textContent = "Saving roster settings…";
           const endpoint = personal ? "/api/access/my/roster-settings" : "/api/access/roster-settings";
           try {
@@ -364,15 +371,21 @@
               revision: record.revision, changes
             });
             record.settings = result.settings; record.revision = result.revision;
+            if (!row.isConnected) return;
+            const replacement = buildRow(record);
+            row.replaceWith(replacement);
             $("#rosterSettingsMessage").textContent = "Roster settings saved.";
-            renderRosterSettings();
           } catch (error) {
+            if (!row.isConnected) return;
+            editableControls.forEach(control => { control.disabled = false; });
             save.disabled = false;
             $("#rosterSettingsMessage").textContent = error.message;
           }
         });
         saveCell.append(save);
+        return row;
       }
+      for (const record of rosterSettingsRecords) body.append(buildRow(record));
       container.append(table);
       $("#rosterSettingsNote").textContent = rosterSettingsLocked
         ? "Configuration is locked. Your roster settings are visible but read-only."
@@ -384,6 +397,7 @@
     async function openRosterSettings() {
       const panel = $("#rosterSettingsPanel");
       panel.hidden = false;
+      $("#rosterSettingsTable").replaceChildren();
       $("#rosterSettingsMessage").textContent = "Loading your authorized roster settings…";
       try {
         const endpoint = accountRole === "manager" && !personalMode
@@ -405,6 +419,7 @@
     let metaSettingsRecords = [];
     let metaSettingsRevision = 0;
     let metaSettingsLocked = false;
+    let metaSettingsSaving = false;
 
     function renderMetaSettings() {
       const container = $("#metaSettingsTable");
@@ -416,6 +431,7 @@
       headings.push("Save");
       for (const heading of headings) { const th = document.createElement("th"); th.textContent = heading; head.append(th); }
       const body = table.createTBody();
+      const updateSaveStates = [];
       for (const record of metaSettingsRecords) {
         const row = body.insertRow(), controls = [];
         cell(row, record.name);
@@ -441,12 +457,14 @@
         const saveCell = row.insertCell(), save = document.createElement("button");
         save.type = "button"; save.textContent = "Save";
         save.disabled = true;
-        const updateSaveState = () => { save.disabled = metaSettingsLocked || !controls.some(control => control.dataset.dirty === "true"); };
+        const updateSaveState = () => { save.disabled = metaSettingsLocked || metaSettingsSaving || !controls.some(control => control.dataset.dirty === "true"); };
+        updateSaveStates.push(updateSaveState);
         controls.forEach(control => control.addEventListener("change", () => {
           control.dataset.dirty = "true";
           updateSaveState();
         }));
         save.addEventListener("click", async () => {
+          if (metaSettingsLocked || metaSettingsSaving) return;
           const changes = controls.filter(control => control.dataset.dirty === "true").map(control => ({
             field: control.dataset.metaField,
             day: Number(control.dataset.metaDay),
@@ -455,7 +473,10 @@
               : control.value === "" ? null : Number(control.value) / 100
           }));
           if (!changes.length) { $("#metaSettingsMessage").textContent = "No changes to save."; return; }
-          save.disabled = true; $("#metaSettingsMessage").textContent = "Saving location settings…";
+          metaSettingsSaving = true;
+          updateSaveStates.forEach(update => update());
+          controls.forEach(control => { control.disabled = true; });
+          $("#metaSettingsMessage").textContent = "Saving location settings…";
           try {
             const result = await api("/api/access/meta-settings", "PUT", {
               location: record.name, revision: metaSettingsRevision, changes
@@ -463,11 +484,19 @@
             record.intensity = result.location.intensity;
             record.open = result.location.open;
             metaSettingsRevision = result.revision;
+            for (const control of controls) {
+              const day = Number(control.dataset.metaDay);
+              if (control.dataset.metaField === "open") control.checked = record.open[day] === 1;
+              else control.value = record.intensity[day] == null ? "" : String(Number(record.intensity[day]) * 100);
+              delete control.dataset.dirty;
+            }
             $("#metaSettingsMessage").textContent = "Location settings saved.";
-            renderMetaSettings();
           } catch (error) {
-            save.disabled = false;
             $("#metaSettingsMessage").textContent = error.message;
+          } finally {
+            metaSettingsSaving = false;
+            controls.forEach(control => { control.disabled = metaSettingsLocked; });
+            updateSaveStates.forEach(update => update());
           }
         });
         saveCell.append(save);
@@ -794,6 +823,7 @@
       await openRosterSettings();
     });
     $("#openMetaSettings").addEventListener("click", async () => {
+      if (metaSettingsSaving) return;
       if (!$("#metaSettingsPanel").hidden) { $("#metaSettingsPanel").hidden = true; return; }
       $("#rosterSettingsPanel").hidden = true;
       await openMetaSettings();
