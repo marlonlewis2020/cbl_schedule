@@ -83,6 +83,40 @@ pending; the retired general MFA bypass remains removed.
   workflows, workers, RLS isolation, migrations, rollback and failures.
 - Recording only; implementation pending. Depends on `tenant-identity`.
 
+## Versioned database migrations (`versioned-database-migrations`) - approved for recording only
+
+- Apply versioned migrations independently to the configured local database at
+  Start-Schedule-Creator startup and to the Render database before deployment
+  serves the new version. Schema changes do not synchronize business data.
+- Plan safe baselines for existing PostgreSQL and SQLite databases, reconcile
+  current startup initialization and the reference schema, and preserve data,
+  constraints, indexes and tenant row-level security.
+- Record and check migration status per database; serialize concurrent runs,
+  report failures and block incompatible startup. Require verified backups and
+  documented recovery before upgrades, without repeating backups unnecessarily
+  when there are no pending migrations.
+- Verify new installs, upgrades, repeated and concurrent runs, drift, failures,
+  recovery and isolation against disposable databases. Confirm the Render
+  deployment command and backup capabilities before implementation.
+
+## Business email settings and mailbox (`business-email-settings-and-mailbox`) - approved for recording only
+
+- Business Owners connect one Google Workspace or Microsoft 365 mailbox per
+  business, configure sender name and reply-to, send a test, inspect status and
+  reconnect. Confirm how Business Owner maps to the existing account model.
+- Support unattended automated email for scheduled reports and taxi dispatch;
+  separately authorize owner-only inbox reading, replies and new messages.
+  Enforce owner and tenant isolation on pages and direct API requests.
+- Provide multiple previewable manual signatures with defaults, switching and
+  No signature, plus an independent optional automated signature.
+- Confirm provider permissions for mailbox access, sending and unattended
+  delivery; complete applicable Google OAuth verification before enabling
+  Google Workspace inbox access in production. Coordinate with deferred
+  automated report email and taxi dispatch implementation.
+- Verify separate Google/Microsoft businesses, test and scheduled sending
+  while signed out, sender/reply-to, inbox operations, signatures, send-only
+  inbox denial, non-owner/cross-business denial and revoked authorization.
+
 ## Secure tenant identity foundation
 
 PostgreSQL checks have been run (see "Test evidence and handoff"). Items marked
