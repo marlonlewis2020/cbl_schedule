@@ -4532,6 +4532,50 @@ class DeveloperChangeRequestTests(unittest.TestCase):
         response = self.client.get("/api/developer/change-requests?status=blocked")
         self.assertEqual([item["id"] for item in response.get_json()["requests"]].count("cr13"), 1)
 
+    def test_new_platform_and_business_workflow_requests_seed_with_dependencies(self):
+        expected = {
+            "context-role-authorization": ("tenant-identity",),
+            "membership-entitlements-upgrade-preview": ("context-role-authorization",),
+            "developer-change-request-approval-workflow": (),
+            "gas-card-claims-and-reconciliation": (
+                "context-role-authorization",
+                "membership-entitlements-upgrade-preview",
+            ),
+            "peer-manager-reviews": (
+                "context-role-authorization",
+                "membership-entitlements-upgrade-preview",
+            ),
+            "business-user-access-lifecycle": ("context-role-authorization",),
+        }
+        definitions = {item[0]: item for item in scheduler.DEVELOPER_REQUESTS}
+        self.assertTrue(set(expected).issubset(definitions))
+        scheduler.initialize_database()
+        with closing(scheduler.database_connect()) as connection:
+            for request_id, dependencies in expected.items():
+                with self.subTest(request_id=request_id):
+                    definition = definitions[request_id]
+                    row = connection.execute(
+                        "SELECT title,description,status FROM developer_change_requests WHERE request_id=?",
+                        (request_id,),
+                    ).fetchone()
+                    self.assertEqual((row[0], row[2]), (definition[1], "pending"))
+                    self.assertTrue(row[1].startswith(definition[2]))
+                    actual_dependencies = tuple(
+                        item[0] for item in connection.execute(
+                            "SELECT depends_on FROM developer_change_request_dependencies "
+                            "WHERE request_id=? ORDER BY depends_on",
+                            (request_id,),
+                        ).fetchall()
+                    )
+                    self.assertEqual(set(actual_dependencies), set(dependencies))
+        lifecycle = definitions["business-user-access-lifecycle"][2]
+        self.assertIn("sole Business Owner cannot be terminated", lifecycle)
+        self.assertIn("Any existing Business Owner may transfer", lifecycle)
+        reviews = definitions["peer-manager-reviews"][2]
+        self.assertIn("at least three responses", reviews)
+        self.assertIn("reviewer identity hidden", reviews)
+        self.assertIn("Platinum feature", reviews)
+
     def test_manual_clock_actions_are_pending_and_preserved_on_restart(self):
         request_id = "attendance-manual-clock-actions"
         definition = next(item for item in scheduler.DEVELOPER_REQUESTS if item[0] == request_id)
