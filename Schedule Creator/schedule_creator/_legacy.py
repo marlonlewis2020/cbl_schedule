@@ -15,6 +15,7 @@ import io
 import ipaddress
 import hmac
 import struct
+import psycopg
 import time as time_module
 from getpass import getpass
 from datetime import datetime, timedelta, timezone
