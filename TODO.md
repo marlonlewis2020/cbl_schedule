@@ -82,8 +82,12 @@ pending; the retired general MFA bypass remains removed.
   workflows, workers, RLS isolation, migrations, rollback and failures.
 - Recording only; implementation pending. Depends on `tenant-identity`.
 
-## Versioned database migrations (`versioned-database-migrations`) - approved for recording only
+## Versioned database migrations (`versioned-database-migrations`) - in progress
 
+- In progress: offline migration planning, checksum/history checks and
+  transaction rehearsal on disposable in-memory SQLite only. No real migration,
+  production backup, PostgreSQL runner, baseline, startup or Render integration
+  is enabled. Deployment and backup arrangements are deferred by the user.
 - Apply versioned migrations independently to the configured local database at
   Start-Schedule-Creator startup and to the Render database before deployment
   serves the new version. Schema changes do not synchronize business data.

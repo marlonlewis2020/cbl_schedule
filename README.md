@@ -116,6 +116,10 @@ To install the tables on a new server ahead of time, run
 [`Schedule Creator/schema_postgres.sql`](<Schedule Creator/schema_postgres.sql>)
 as the application role (the file's header lists the role and database setup
 steps). The app also creates the same schema itself on first start.
+The versioned migration framework is currently limited to offline planning and
+disposable in-memory SQLite rehearsals. It does not migrate PostgreSQL or alter
+startup; production baselining, backup verification and deployment integration
+remain deferred.
 `SCHEDULE_CREATOR_TENANT_ID` identifies the app's business tenant and is
 separate from the BambooHR tenant ID in Settings.
 
