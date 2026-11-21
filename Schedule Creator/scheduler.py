@@ -232,7 +232,7 @@ DEVELOPER_REQUESTS = (
     (
         "business-subdomains",
         "Business-specific Propa subdomains",
-        "Provide each business with a unique address at <business>.propawfm.com, independent of its BambooHR subdomain. New businesses choose their address during registration; an existing business's primary administrator chooses it once, with later changes requiring platform support. Preserve shared sign-in, tenant isolation, account permissions and MFA; reject unknown or reserved hosts and cross-business sessions. Configure wildcard DNS and TLS, allow the shared Render hostname and protect database upgrades with backups. Implementation is enabled on Render; shared-host responses and unknown-host rejection were checked. Local PostgreSQL rollout and end-to-end sign-in on an assigned business host remain to be verified.",
+        "Provide each business with a unique address at <business>.propawfm.com, independent of its BambooHR subdomain. New businesses choose their address during registration; an existing business's primary administrator chooses it once, with later changes requiring platform support. Preserve shared sign-in, tenant isolation, account permissions and MFA; reject unknown or reserved hosts and cross-business sessions. Configure wildcard DNS and TLS, allow the shared Render hostname and protect database upgrades with backups. Implementation is enabled on Render; shared-host responses and unknown-host rejection were checked. Local PostgreSQL schema was verified; the user confirmed that subdomain login works as intended.",
         ("business-hub",),
     ),
     (
@@ -7172,6 +7172,11 @@ def marketing_page():
 @app.get("/hub")
 def hub_page():
     return send_from_directory(APP_DIRECTORY, "hub.html")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return send_from_directory(APP_DIRECTORY / "marketing-media", "mark.png", mimetype="image/png")
 
 
 @app.get("/business")

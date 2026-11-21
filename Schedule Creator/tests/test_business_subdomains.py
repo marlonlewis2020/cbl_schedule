@@ -56,6 +56,9 @@ class BusinessSubdomainTests(unittest.TestCase):
         self.assertEqual(client.get("/", base_url="https://other.example.com").status_code, 404)
         response = client.get("/", base_url="https://acme.propawfm.com")
         self.assertIn(b"Welcome back.", response.data)
+        with client.get("/favicon.ico", base_url="https://acme.propawfm.com") as icon:
+            self.assertEqual(icon.status_code, 200)
+            self.assertEqual(icon.mimetype, "image/png")
         self.assertEqual(client.get("/api/hub/state", base_url="https://acme.propawfm.com").status_code, 404)
         with self.admin.session_transaction() as state:
             admin_state = dict(state)

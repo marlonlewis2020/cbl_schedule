@@ -44,6 +44,24 @@ class MarketingPageTests(unittest.TestCase):
         with self.admin.get("/") as recovery:
             self.assertEqual(recovery.data, (scheduler.APP_DIRECTORY / "business-status.html").read_bytes())
 
+    def test_propa_icon_is_available_after_signin_and_on_browser_fallback(self):
+        pages = (
+            "propa-Scheduler2.html", "unified-login.html", "tenant-login.html",
+            "propa-marketing.html", "access.html", "trades.html", "billing.html",
+            "business-status.html", "business-change-requests.html",
+            "developer-change-requests.html", "help.html", "hub.html",
+            "propa-MicrosoftAuth.html",
+        )
+        for page in pages:
+            with self.subTest(page=page):
+                content = (scheduler.APP_DIRECTORY / page).read_text(encoding="utf-8")
+                self.assertTrue('rel="icon" href="/marketing-media/mark.png"' in content, page)
+        with scheduler.app.test_client().get("/favicon.ico") as fallback, \
+             scheduler.app.test_client().get("/marketing-media/mark.png") as icon:
+            self.assertEqual(fallback.status_code, 200)
+            self.assertEqual(fallback.mimetype, "image/png")
+            self.assertEqual(fallback.data, icon.data)
+
 
 class ApplicationReportTests(unittest.TestCase):
     setUp = test_scheduler.ManagerEmployeeAccessTests.setUp
