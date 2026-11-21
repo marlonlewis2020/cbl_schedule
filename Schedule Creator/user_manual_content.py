@@ -11,6 +11,7 @@ Block types: ("p", text) ("note", text) ("ul", [items]) ("ol", [items])
 MANUAL_TITLE = "CBL Schedule Creator User Manual"
 
 REVISIONS = [
+    ("2026-11-20", "When business subdomains are enabled, a new business chooses its Propa address during registration. An existing business's primary administrator chooses it once on the Business page; administrators, managers and employees can sign in at that address without entering a BambooHR subdomain. The shared sign-in remains available."),
     ("2026-11-16", "Any business administrator on Gold or Platinum can generate an executive end-of-day report on demand for today (labelled partial day) or the previous 14 days; manual reports are saved to the executive history, labelled Manual, and do not replace the scheduled report."),
     ("2026-11-14", "Gold and Platinum businesses can configure an automated executive end-of-day attendance report with 0–24-hour Jamaica-time delay, location summaries, exception counts and dated HTML download history."),
     ("2026-11-14", "Updated membership benefits: source-specific attendance and manual clock actions are Silver+; executive reports are Gold+; historical attendance reports and workload planning are Platinum; Help, notifications, roster and META remain all-tier."),
@@ -67,7 +68,7 @@ SECTIONS = [
             ]),
             ("h3", "Signing in"),
             ("p", "Use the shared sign-in page to choose Business administrator, Manager / employee or Platform owner. Enter the business subdomain for business/workforce accounts. Password replacement and authenticator enrollment/verification use the existing account rules; account identities are not merged. Initial local administrator setup remains linked from sign-in."),
-            ("p", "At each sign-in, enter the BambooHR subdomain of the business, the administrator email, the password and the authenticator code. The same email can administer several businesses; passwords and MFA are managed separately for each business. Use Sign out in the application header when finished."),
+            ("p", "At shared sign-in, enter the business's BambooHR subdomain, administrator email, password and authenticator code. When business subdomains are enabled, sign in at the business's chosen Propa address without entering its BambooHR subdomain. The same email can administer several businesses; passwords and MFA are managed separately for each business. Use Sign out in the application header when finished."),
         ],
     },
     {
@@ -296,7 +297,7 @@ SECTIONS = [
                 "id": "access",
                 "title": "5.14 Manager and employee access",
                 "blocks": [
-                    ("p", "Managers and employees sign in at /access (for example http://127.0.0.1:5001/access) with the BambooHR subdomain, their email (managers) or email/employee ID (employees) and password. Administrators keep signing in on the main page."),
+                    ("p", "Managers and employees can use shared sign-in with the BambooHR subdomain, their email (managers) or email/employee ID (employees) and password. When business subdomains are enabled, use the business's chosen Propa address and select Manager / employee without entering a BambooHR subdomain."),
                     ("h3", "Creating accounts (administrators)"),
                     ("ol", [
                         "Open Settings → Manager & employee access.",

@@ -48,6 +48,17 @@
     <p id="statusNote" class="note" hidden></p>
     <a id="openApp" class="button" href="/" hidden>Open the scheduler</a>
 
+    <section id="businessDomainSection" hidden>
+      <h2>Business website address</h2>
+      <p id="businessDomainCurrent"></p>
+      <form id="businessDomainForm" hidden>
+        <label for="businessDomainInput">Choose your Propa subdomain (cannot be changed later)</label>
+        <input id="businessDomainInput" maxlength="63" pattern="[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?" required>
+        <p>Your address will end in .propawfm.com.</p>
+        <button type="submit">Save address</button>
+      </form>
+    </section>
+
     <section id="membershipSection">
       <h2>Membership</h2>
       <p><a href="/billing">Sandbox checkout, billing status and reminders</a></p>
@@ -235,6 +246,18 @@
       if (status.error) { window.location.assign("/"); return; }
       csrfToken = status.csrfToken;
       isPrimary = status.isPrimaryAdmin;
+      $("#businessDomainSection").hidden = true;
+      if (isPrimary) {
+        const domainResponse = await fetch("/api/business/subdomain", {cache: "no-store"});
+        if (domainResponse.status !== 404) {
+          const domain = await domainResponse.json();
+          if (!domainResponse.ok) throw new Error(domain.error || "Unable to load the business address.");
+          $("#businessDomainSection").hidden = false;
+          $("#businessDomainForm").hidden = !!domain.subdomain;
+          $("#businessDomainCurrent").textContent = domain.subdomain
+            ? `Your business address: https://${domain.subdomain}.${domain.domain}` : "Choose a unique address for your business.";
+        }
+      }
       $("#businessName").textContent = status.businessName;
       $("#status").textContent = status.status;
       $("#status").className = `badge ${status.status}`;
@@ -262,6 +285,18 @@
       const adminResult = await (await fetch("/api/business/admins")).json();
       renderAdmins(adminResult.admins);
     }
+
+    $("#businessDomainForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      message.textContent = "";
+      if (!window.confirm(`Use ${$("#businessDomainInput").value.toLowerCase()}.propawfm.com? This address cannot be changed later.`)) return;
+      try {
+        await request("/api/business/subdomain", {
+          method: "POST", body: JSON.stringify({subdomain: $("#businessDomainInput").value})
+        });
+        await load();
+      } catch (error) { message.textContent = error.message; }
+    });
 
     async function changeMembership(action, tier) {
       const messages = {

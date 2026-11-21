@@ -689,6 +689,37 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 app.config["SESSION_COOKIE_SECURE"] = bool(DATABASE_URL) and not ALLOW_LAN_HTTP
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+_business_subdomains_setting = os.environ.get("PROPA_BUSINESS_SUBDOMAINS_ENABLED", "").strip()
+if _business_subdomains_setting not in {"", "0", "1"}:
+    raise RuntimeError("PROPA_BUSINESS_SUBDOMAINS_ENABLED must be 0 or 1.")
+app.config["BUSINESS_SUBDOMAINS_ENABLED"] = _business_subdomains_setting == "1"
+app.config["BUSINESS_DOMAIN"] = "propawfm.com"
+app.config["BUSINESS_SHARED_HOSTS"] = frozenset(
+    item.strip().lower() for item in os.environ.get("PROPA_SHARED_HOSTS", "").split(",")
+    if item.strip()
+)
+for _shared_host in app.config["BUSINESS_SHARED_HOSTS"]:
+    if (
+        len(_shared_host) > 253
+        or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", _shared_host)
+        or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part)
+               for part in _shared_host.split("."))
+        or (_shared_host.endswith(".propawfm.com") and _shared_host != "www.propawfm.com")
+    ):
+        raise RuntimeError("PROPA_SHARED_HOSTS must contain only exact shared hostnames, not business subdomains.")
+
+RESERVED_BUSINESS_SUBDOMAINS = frozenset({
+    "www", "api", "admin", "app", "auth", "billing", "developer", "help",
+    "hub", "login", "mail", "owner", "register", "signin", "support",
+})
+
+
+def valid_business_subdomain(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value) is not None
+        and value not in RESERVED_BUSINESS_SUBDOMAINS
+    )
 
 
 class PostgresConnection:
@@ -1387,6 +1418,13 @@ def initialize_database() -> None:
         ):
             if column not in tenant_columns:
                 connection.execute(f"ALTER TABLE tenants ADD COLUMN {column} {definition}")
+        if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+            if "propa_subdomain" not in tenant_columns:
+                connection.execute("ALTER TABLE tenants ADD COLUMN propa_subdomain TEXT")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS tenants_propa_subdomain_unique "
+                "ON tenants (LOWER(propa_subdomain)) WHERE propa_subdomain IS NOT NULL"
+            )
         if status_missing:
             connection.execute("UPDATE tenants SET status = 'suspended' WHERE active = 0")
         admin_columns = {
@@ -3162,6 +3200,52 @@ def enforce_tenant_authentication():
     g.tenant_id = session.get("tenant_id") or DEFAULT_TENANT_ID
     g.tenant_status = None
     g.tenant_membership_status = None
+    g.business_domain_tenant = None
+    g.business_domain_bamboo = None
+    if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+        try:
+            parsed_host = urlsplit("//" + request.host)
+            host = parsed_host.hostname
+            if parsed_host.username or parsed_host.password or parsed_host.path or parsed_host.query or parsed_host.fragment:
+                raise ValueError("Invalid host")
+            parsed_host.port
+        except ValueError:
+            return jsonify(error="Invalid host."), 400
+        host = host.lower() if host else ""
+        base = app.config["BUSINESS_DOMAIN"]
+        shared = {base, "www." + base} | set(app.config["BUSINESS_SHARED_HOSTS"])
+        local = (
+            host in {"localhost", "127.0.0.1", "::1"}
+            and request.remote_addr in LOCAL_CLIENT_ADDRESSES
+            and not request.headers.get("X-Forwarded-Host")
+            and not request.headers.get("X-Forwarded-For")
+        )
+        if host not in shared and not local:
+            suffix = "." + base
+            label = host[:-len(suffix)] if host.endswith(suffix) else ""
+            if not valid_business_subdomain(label):
+                return jsonify(error="Business site not found."), 404
+            with closing(database_connect()) as connection:
+                business = connection.execute(
+                    "SELECT tenant_id,bamboohr_subdomain FROM tenants "
+                    "WHERE LOWER(propa_subdomain)=? AND status<>'rejected'",
+                    (label,),
+                ).fetchone()
+            if not business:
+                return jsonify(error="Business site not found."), 404
+            g.business_domain_tenant, g.business_domain_bamboo = business
+            if any(
+                session.get(key) and session.get(key) != business[0]
+                for key in ("tenant_id", "access_tenant_id", "pending_tenant_id", "pending_access_tenant_id")
+            ):
+                return jsonify(error="This session belongs to a different business."), 403
+            if (
+                request.path == "/hub" or request.path.startswith("/api/hub/")
+                or request.path.startswith("/developer")
+                or request.path.startswith("/api/developer/")
+                or request.path == "/app/owner"
+            ):
+                return jsonify(error="This page is available on the shared site."), 404
     if DATABASE_URL and not http_allowed_for_client() and not is_secure_request(request):
         return (
             "HTTPS is required for PostgreSQL-backed deployments. Configure the app's trusted HTTPS reverse proxy.",
@@ -3286,10 +3370,12 @@ def tenant_auth_state():
         businessStatus=g.tenant_status if authenticated else None,
         membership=membership,
         workspaceReadinessEnabled=workspace_readiness_enabled(),
+        businessSite=bool(g.get("business_domain_tenant")),
         csrfToken=csrf_token,
         canBootstrap=(
             not DATABASE_URL
             and not configured
+            and not g.get("business_domain_tenant")
             and request.remote_addr in LOCAL_CLIENT_ADDRESSES
         ),
     )
@@ -3359,6 +3445,8 @@ def membership_feature_denied(feature: str):
 
 @app.post("/api/tenant-auth/bootstrap")
 def bootstrap_tenant_admin():
+    if g.get("business_domain_tenant"):
+        return jsonify(error="Use the shared local site for initial administrator setup."), 403
     if DATABASE_URL:
         return jsonify(error="Use the server-side bootstrap-admin command for PostgreSQL."), 403
     if request.remote_addr not in LOCAL_CLIENT_ADDRESSES:
@@ -3421,16 +3509,21 @@ def tenant_admin_login():
     if not tenant_auth_csrf_valid():
         return jsonify(error="The sign-in session expired. Reload the page and retry."), 400
     payload = request.get_json(silent=True)
+    business_tenant = g.get("business_domain_tenant")
+    bamboohr_subdomain = payload.get("bamboohrSubdomain") if isinstance(payload, dict) else None
     if (
         not isinstance(payload, dict)
         or not valid_admin_email(payload.get("email"))
         or not isinstance(payload.get("password"), str)
-        or not valid_tenant_id(payload.get("bamboohrSubdomain"))
+        or (not business_tenant and not valid_tenant_id(bamboohr_subdomain))
     ):
-        return jsonify(error="Enter your BambooHR subdomain, administrator email, and password."), 400
+        message = ("Enter your administrator email and password." if business_tenant
+                   else "Enter your BambooHR subdomain, administrator email, and password.")
+        return jsonify(error=message), 400
     email = payload["email"].strip().casefold()
-    bamboohr_subdomain = payload["bamboohrSubdomain"].strip().lower()
-    login_key = tenant_auth_attempt_key(email, bamboohr_subdomain)
+    tenant_selector = business_tenant or bamboohr_subdomain.strip().lower()
+    rate_tenant = (g.business_domain_bamboo or "propa:" + business_tenant) if business_tenant else tenant_selector
+    login_key = tenant_auth_attempt_key(email, rate_tenant)
     now = int(time_module.time())
     with closing(database_connect()) as connection, connection:
         attempt_state = tenant_auth_attempt_state(connection, login_key, now)
@@ -3443,13 +3536,14 @@ def tenant_admin_login():
                    a.mfa_enabled, a.auth_version, a.active
             FROM tenant_admins a
             JOIN tenants t ON t.tenant_id = a.tenant_id AND t.status != 'rejected'
-            WHERE a.email = ? AND LOWER(t.bamboohr_subdomain) = ?
-            """,
-            (email, bamboohr_subdomain),
+            WHERE a.email = ? AND """
+            + ("t.tenant_id = ?" if business_tenant else "LOWER(t.bamboohr_subdomain) = ?"),
+            (email, tenant_selector),
         ).fetchone()
         password_valid = bool(
             account
             and account[7]
+            and (not g.get("business_domain_tenant") or account[1] == g.business_domain_tenant)
             and check_password_hash(account[3], payload["password"])
         )
         if not password_valid:
@@ -3671,6 +3765,8 @@ def hub_state():
     return jsonify(
         csrfToken=session["hub_csrf"],
         registrationOpen=MULTI_BUSINESS,
+        businessSubdomainsEnabled=app.config["BUSINESS_SUBDOMAINS_ENABLED"],
+        businessDomain=app.config["BUSINESS_DOMAIN"],
         ownerConfigured=configured,
         ownerAuthenticated=authenticated,
         ownerEmail=session.get("platform_owner_email") if authenticated else None,
@@ -3694,6 +3790,13 @@ def hub_register():
     admin_name = payload.get("adminName")
     admin_email = payload.get("adminEmail")
     password = payload.get("password")
+    propa_subdomain = payload.get("propaSubdomain")
+    if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+        if not isinstance(propa_subdomain, str):
+            return jsonify(error="Choose a Propa business subdomain."), 400
+        propa_subdomain = propa_subdomain.strip().lower()
+        if not valid_business_subdomain(propa_subdomain):
+            return jsonify(error="Choose an available subdomain using letters, numbers and internal hyphens."), 400
     if (
         not isinstance(business_name, str)
         or not 2 <= len(business_name.strip()) <= 120
@@ -3729,6 +3832,10 @@ def hub_register():
                     "resolve domain ownership."
                 )
             ), 409
+        if app.config["BUSINESS_SUBDOMAINS_ENABLED"] and connection.execute(
+            "SELECT 1 FROM tenants WHERE LOWER(propa_subdomain)=?", (propa_subdomain,)
+        ).fetchone():
+            return jsonify(error="This Propa subdomain is already in use."), 409
     failure = check_bamboohr_credentials(subdomain, api_key)
     if failure:
         return jsonify(error=failure[0]), 400 if failure[1] in {401, 403} else failure[1]
@@ -3765,6 +3872,11 @@ def hub_register():
                 """,
                 (admin_id, tenant_id, email, admin_name.strip(), generate_password_hash(password)),
             )
+            if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+                connection.execute(
+                    "UPDATE tenants SET propa_subdomain=? WHERE tenant_id=?",
+                    (propa_subdomain, tenant_id),
+                )
             hub_audit(connection, "register", tenant_id, business_name)
     except BambooDomainConflict:
         return jsonify(
@@ -3778,6 +3890,10 @@ def hub_register():
         return jsonify(error="An administrator already uses that email address."), 409
     except database_integrity_errors():
         with closing(database_connect()) as connection:
+            if app.config["BUSINESS_SUBDOMAINS_ENABLED"] and connection.execute(
+                "SELECT 1 FROM tenants WHERE LOWER(propa_subdomain)=?", (propa_subdomain,)
+            ).fetchone():
+                return jsonify(error="This Propa subdomain is already in use."), 409
             duplicate_domain = connection.execute(
                 "SELECT 1 FROM tenants WHERE LOWER(bamboohr_subdomain) = ?",
                 (subdomain,),
@@ -3801,7 +3917,10 @@ def hub_register():
             connection.execute("DELETE FROM tenant_admins WHERE tenant_id = ?", (tenant_id,))
             connection.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
         return jsonify(error="The business could not be registered. Try again."), 500
-    return jsonify(registered=True, businessStatus="pending"), 201
+    result = {"registered": True, "businessStatus": "pending"}
+    if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+        result["businessUrl"] = f"https://{propa_subdomain}.{app.config['BUSINESS_DOMAIN']}"
+    return jsonify(result), 201
 
 
 @app.post("/api/hub/owner/login")
@@ -4155,6 +4274,45 @@ def business_status():
         email=session.get("tenant_admin_email"),
         csrfToken=session.get("tenant_auth_csrf"),
     )
+
+
+@app.route("/api/business/subdomain", methods=["GET", "POST"])
+def business_subdomain():
+    if not app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
+        return jsonify(error="Business subdomains are not enabled."), 404
+    denied = primary_admin_guard()
+    if denied:
+        return denied
+    tenant_id = active_tenant_id()
+    if request.method == "POST":
+        payload = request.get_json(silent=True)
+        name = payload.get("subdomain") if isinstance(payload, dict) else None
+        if not isinstance(name, str) or not valid_business_subdomain(name.strip().lower()):
+            return jsonify(error="Choose an available subdomain using letters, numbers and internal hyphens."), 400
+        name = name.strip().lower()
+        try:
+            with closing(database_connect()) as connection, connection:
+                updated = connection.execute(
+                    "UPDATE tenants SET propa_subdomain=? WHERE tenant_id=? AND propa_subdomain IS NULL",
+                    (name, tenant_id),
+                ).rowcount
+                if not updated:
+                    return jsonify(error="The business subdomain has already been chosen. Contact platform support to change it."), 409
+        except database_integrity_errors():
+            with closing(database_connect()) as connection:
+                exists = connection.execute(
+                    "SELECT 1 FROM tenants WHERE LOWER(propa_subdomain)=?", (name,),
+                ).fetchone()
+            if exists:
+                return jsonify(error="This Propa subdomain is already in use."), 409
+            raise
+    with closing(database_connect()) as connection:
+        row = connection.execute(
+            "SELECT propa_subdomain FROM tenants WHERE tenant_id=?", (tenant_id,),
+        ).fetchone()
+    if not row:
+        return jsonify(error="The business was not found."), 404
+    return jsonify(subdomain=row[0], domain=app.config["BUSINESS_DOMAIN"])
 
 
 @app.post("/api/business/profile")
@@ -6234,6 +6392,7 @@ def access_state():
         session["access_csrf"] = secrets.token_urlsafe(32)
     return jsonify(
         authenticated=user is not None,
+        businessSite=bool(g.get("business_domain_tenant")),
         csrfToken=session["access_csrf"],
         user=user and {
             "role": user["role"], "name": user["name"], "email": user["email"],
@@ -6249,18 +6408,23 @@ def access_login():
     payload = request.get_json(silent=True)
     identifier = payload.get("identifier") if isinstance(payload, dict) else None
     password = payload.get("password") if isinstance(payload, dict) else None
+    business_tenant = g.get("business_domain_tenant")
+    bamboohr_subdomain = payload.get("bamboohrSubdomain") if isinstance(payload, dict) else None
     if (
         not isinstance(identifier, str)
         or not 1 <= len(identifier.strip()) <= 254
         or not isinstance(password, str)
-        or not valid_tenant_id(payload.get("bamboohrSubdomain"))
+        or (not business_tenant and not valid_tenant_id(bamboohr_subdomain))
     ):
-        return jsonify(error="Enter your BambooHR subdomain, email or employee ID, and password."), 400
+        message = ("Enter your email or employee ID and password." if business_tenant
+                   else "Enter your BambooHR subdomain, email or employee ID, and password.")
+        return jsonify(error=message), 400
     identifier = identifier.strip()
-    subdomain = payload["bamboohrSubdomain"].strip().lower()
+    subdomain = business_tenant or bamboohr_subdomain.strip().lower()
     new_password = payload.get("newPassword")
     code = payload.get("code")
-    login_key = tenant_auth_attempt_key(f"user:{identifier.casefold()}", subdomain)
+    rate_tenant = (g.business_domain_bamboo or "propa:" + business_tenant) if business_tenant else subdomain
+    login_key = tenant_auth_attempt_key(f"user:{identifier.casefold()}", rate_tenant)
     now = int(time_module.time())
     with closing(database_connect()) as connection, connection:
         state = tenant_auth_attempt_state(connection, login_key, now)
@@ -6274,14 +6438,15 @@ def access_login():
                    u.mfa_secret, u.mfa_enabled, u.auth_version, u.active
             FROM tenant_users u
             JOIN tenants t ON t.tenant_id = u.tenant_id AND t.status != 'rejected'
-            WHERE LOWER(t.bamboohr_subdomain) = ?
-              AND (u.email = ? OR u.employee_id = ?)
-            """,
+            WHERE """ + ("t.tenant_id = ?" if business_tenant else "LOWER(t.bamboohr_subdomain) = ?")
+            + """ AND (u.email = ? OR u.employee_id = ?)""",
             (subdomain, identifier.casefold(), identifier),
         ).fetchall()
         account = rows[0] if len(rows) == 1 else None
         valid = bool(
-            account and account[10] and check_password_hash(account[4], password)
+            account and account[10]
+            and (not g.get("business_domain_tenant") or account[1] == g.business_domain_tenant)
+            and check_password_hash(account[4], password)
         )
         if valid and account[5] and account[6] < now:
             record_tenant_auth_failure(connection, login_key, failures, window_started_at, now)
@@ -6982,6 +7147,8 @@ def index():
     if not tenant_authenticated():
         if request.args.get("legacyLogin") == "1":
             return send_from_directory(APP_DIRECTORY, "tenant-login.html")
+        if g.get("business_domain_tenant"):
+            return send_from_directory(APP_DIRECTORY, "unified-login.html")
         return marketing_page()
     if g.tenant_status != "active" or g.tenant_membership_status != "active":
         return send_from_directory(APP_DIRECTORY, "business-status.html")

@@ -187,9 +187,13 @@ END $$;
 CREATE TABLE IF NOT EXISTS tenants (
     tenant_id TEXT PRIMARY KEY,
     business_name TEXT NOT NULL,
+    propa_subdomain TEXT,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS propa_subdomain TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS tenants_propa_subdomain_unique
+    ON tenants (LOWER(propa_subdomain)) WHERE propa_subdomain IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tenant_admins (
     id TEXT PRIMARY KEY,

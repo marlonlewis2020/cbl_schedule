@@ -55,6 +55,11 @@
       <form id="registerForm">
         <label for="businessName">Business name</label>
         <input id="businessName" maxlength="120" required>
+        <div id="propaSubdomainField" hidden>
+          <label for="propaSubdomain">Choose your Propa address (cannot be changed later)</label>
+          <input id="propaSubdomain" maxlength="63" pattern="[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?">
+          <p>Your address will be <strong><span id="propaAddressExample">your-business</span>.propawfm.com</strong>.</p>
+        </div>
         <label for="subdomain">BambooHR subdomain (the part before .bamboohr.com)</label>
         <input id="subdomain" maxlength="63" pattern="[A-Za-z0-9][A-Za-z0-9\-]*" required>
         <label for="apiKey">BambooHR API key</label>
@@ -68,6 +73,7 @@
         <button id="registerButton" type="submit">Register business</button>
       </form>
       <p id="registered" class="notice ok" hidden>Registration received. Sign in at the <a href="/signin?experience=admin">scheduler sign-in page</a> to set up your authenticator app and check your approval status.</p>
+      <p id="registeredBusinessAddress" hidden>Your Propa business address: <a id="registeredBusinessLink"></a></p>
     </section>
 
     <section id="ownerSection" hidden>
@@ -125,11 +131,14 @@
     $("#registerForm").addEventListener("submit", async event => {
       event.preventDefault();
       message.textContent = "";
+      if (!$("#propaSubdomainField").hidden &&
+          !window.confirm(`Use ${$("#propaSubdomain").value.toLowerCase()}.propawfm.com? This address cannot be changed later.`)) return;
       const button = $("#registerButton");
       button.disabled = true;
       try {
-        await send("/api/hub/register", {
+        const result = await send("/api/hub/register", {
           businessName: $("#businessName").value,
+          propaSubdomain: $("#propaSubdomain").value,
           bamboohrSubdomain: $("#subdomain").value,
           bamboohrApiKey: $("#apiKey").value,
           adminName: $("#adminName").value,
@@ -138,6 +147,11 @@
         });
         $("#registerForm").hidden = true;
         $("#registered").hidden = false;
+        if (result.businessUrl) {
+          $("#registeredBusinessLink").href = result.businessUrl;
+          $("#registeredBusinessLink").textContent = result.businessUrl;
+          $("#registeredBusinessAddress").hidden = false;
+        }
       } catch (error) {
         message.textContent = error.message;
       } finally {
@@ -331,6 +345,8 @@
       try {
         const state = await (await fetch("/api/hub/state")).json();
         csrfToken = state.csrfToken;
+        $("#propaSubdomainField").hidden = !state.businessSubdomainsEnabled;
+        $("#propaSubdomain").required = !!state.businessSubdomainsEnabled;
         $("#registrationClosed").hidden = state.registrationOpen;
         $("#registerForm").hidden = !state.registrationOpen;
         if (state.ownerAuthenticated) { showTab("owner"); await showDashboard(); }

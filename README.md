@@ -123,6 +123,34 @@ remain deferred.
 `SCHEDULE_CREATOR_TENANT_ID` identifies the app's business tenant and is
 separate from the BambooHR tenant ID in Settings.
 
+### Business subdomains
+
+Business subdomains are **disabled by default**. When enabled, new businesses
+choose an address during registration, and an existing business's primary
+administrator chooses it once on the Business page. The address uses
+`<business>.propawfm.com`, independently of its BambooHR subdomain. Shared
+sign-in remains available; tenant-site sign-ins still enforce the business,
+account permissions and applicable MFA. Changing an address later requires
+platform support. Unknown or reserved business hosts are rejected.
+
+Do not enable this on a real database until its backup and deployment process
+are confirmed. Enabling it causes `initialize_database()` to add a nullable
+tenant column and unique index; it is **not yet integrated with the deferred
+versioned migration framework**. A WSGI import alone does not run initialization.
+Coordinate initialization separately for every deployed database, with a
+verified backup, before serving traffic with the feature enabled.
+
+After rollout is approved, configure `PROPA_BUSINESS_SUBDOMAINS_ENABLED=1`
+and, if the shared Render hostname must remain usable, set
+`PROPA_SHARED_HOSTS` to its exact hostname (without a scheme or port). Multiple
+shared hostnames may be comma-separated. Configure wildcard DNS and TLS in
+Render for `*.propawfm.com` and the root domain as required by
+[Render's wildcard-domain instructions](https://render.com/docs/custom-domains#wildcard-domains).
+Render requires the root domain to point to Render for wildcard domains; check
+the effect on any existing site before changing DNS.
+Verify proxy trust, HTTPS, root/shared login and tenant isolation before use.
+DNS, certificates and Render configuration are not provisioned by this app.
+
 To import an existing local CBL database, configure PostgreSQL and the secrets
 above, then run `python scheduler.py migrate-sqlite` from `Schedule Creator`.
 The command defaults to the current SQLite database, prompts for confirmation,
