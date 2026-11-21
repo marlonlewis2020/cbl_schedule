@@ -120,6 +120,16 @@ pending; the retired general MFA bypass remains removed.
   while signed out, sender/reply-to, inbox operations, signatures, send-only
   inbox denial, non-owner/cross-business denial and revoked authorization.
 
+## Business-specific Propa subdomains (`business-subdomains`) - in progress
+
+- New businesses choose an address at registration; an existing business's
+  primary administrator chooses it once. Later changes require platform support.
+- Preserve shared sign-in, tenant isolation, permissions and MFA, independently
+  of BambooHR subdomains. Reject unknown or reserved hosts and foreign sessions.
+- Enabled on Render; shared hosts and unknown-host rejection were checked.
+  Local PostgreSQL rollout and end-to-end sign-in on an assigned business host
+  remain to be verified.
+
 ## Secure tenant identity foundation
 
 PostgreSQL checks have been run (see "Test evidence and handoff"). Items marked

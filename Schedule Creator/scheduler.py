@@ -230,6 +230,12 @@ DEVELOPER_REQUESTS = (
         ("business-hub",),
     ),
     (
+        "business-subdomains",
+        "Business-specific Propa subdomains",
+        "Provide each business with a unique address at <business>.propawfm.com, independent of its BambooHR subdomain. New businesses choose their address during registration; an existing business's primary administrator chooses it once, with later changes requiring platform support. Preserve shared sign-in, tenant isolation, account permissions and MFA; reject unknown or reserved hosts and cross-business sessions. Configure wildcard DNS and TLS, allow the shared Render hostname and protect database upgrades with backups. Implementation is enabled on Render; shared-host responses and unknown-host rejection were checked. Local PostgreSQL rollout and end-to-end sign-in on an assigned business host remain to be verified.",
+        ("business-hub",),
+    ),
+    (
         "tier-entitlements",
         "Membership tiers and feature entitlements",
         "Enforce Bronze (2 admin seats, 2 teams, 20 active employees, 2 locations), Silver (3 admin seats, 4 teams, 60 active employees, 4 locations), Gold (4 admin seats, unlimited teams and employees, 6 locations), and Platinum (8 admin seats, unlimited teams, employees, and locations). All tiers include schedule generation, sharing, BambooHR publishing, email configuration, employee management, and settings. Employee schedule access, shift trades, and schedule history are Silver and above; overtime forecasting is Gold and above. User licenses are admin seats. Downgrades retain existing over-limit records but block additions; never deactivate records automatically.",
