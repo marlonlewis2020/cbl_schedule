@@ -129,8 +129,8 @@ Business subdomains are **disabled by default**. When enabled, new businesses
 choose an address during registration, and an existing business's primary
 administrator chooses it once on the Business page. The address uses
 `<business>.propawfm.com`, independently of its BambooHR subdomain. Shared
-sign-in remains available; tenant-site sign-ins still enforce the business,
-account permissions and applicable MFA. Changing an address later requires
+sign-in remains available; tenant-site sign-in displays the business name and
+still enforces the business, account permissions and applicable MFA. Changing an address later requires
 platform support. Unknown or reserved business hosts are rejected.
 
 Do not enable this on a real database until its backup and deployment process

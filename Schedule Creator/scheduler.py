@@ -3208,6 +3208,7 @@ def enforce_tenant_authentication():
     g.tenant_membership_status = None
     g.business_domain_tenant = None
     g.business_domain_bamboo = None
+    g.business_domain_name = None
     if app.config["BUSINESS_SUBDOMAINS_ENABLED"]:
         try:
             parsed_host = urlsplit("//" + request.host)
@@ -3233,13 +3234,13 @@ def enforce_tenant_authentication():
                 return jsonify(error="Business site not found."), 404
             with closing(database_connect()) as connection:
                 business = connection.execute(
-                    "SELECT tenant_id,bamboohr_subdomain FROM tenants "
+                    "SELECT tenant_id,bamboohr_subdomain,business_name FROM tenants "
                     "WHERE LOWER(propa_subdomain)=? AND status<>'rejected'",
                     (label,),
                 ).fetchone()
             if not business:
                 return jsonify(error="Business site not found."), 404
-            g.business_domain_tenant, g.business_domain_bamboo = business
+            g.business_domain_tenant, g.business_domain_bamboo, g.business_domain_name = business
             if any(
                 session.get(key) and session.get(key) != business[0]
                 for key in ("tenant_id", "access_tenant_id", "pending_tenant_id", "pending_access_tenant_id")
@@ -3377,6 +3378,7 @@ def tenant_auth_state():
         membership=membership,
         workspaceReadinessEnabled=workspace_readiness_enabled(),
         businessSite=bool(g.get("business_domain_tenant")),
+        businessSiteName=g.get("business_domain_name"),
         csrfToken=csrf_token,
         canBootstrap=(
             not DATABASE_URL
@@ -6399,6 +6401,7 @@ def access_state():
     return jsonify(
         authenticated=user is not None,
         businessSite=bool(g.get("business_domain_tenant")),
+        businessSiteName=g.get("business_domain_name"),
         csrfToken=session["access_csrf"],
         user=user and {
             "role": user["role"], "name": user["name"], "email": user["email"],

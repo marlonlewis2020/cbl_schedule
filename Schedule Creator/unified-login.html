@@ -25,7 +25,7 @@
 <label>Account type<select id="experience"><option value="admin">Business administrator</option><option value="workforce">Manager / employee</option></select></label>
 <p id="ownerNotice" role="status" hidden></p>
 <label id="businessLabel">BambooHR subdomain<input id="business" maxlength="63" required autocomplete="organization"></label>
-<p id="businessSiteNotice" hidden>Sign in to this business's Propa workspace.</p>
+<p id="businessSiteNotice" hidden></p>
 <label>Email or employee ID<input id="identifier" maxlength="254" required autocomplete="username"></label>
 <label>Password<input id="password" type="password" required autocomplete="current-password"></label>
 <label id="changeLabel" hidden>New password (at least 14 characters)<input id="newPassword" type="password" minlength="14" autocomplete="new-password"></label>
@@ -87,6 +87,8 @@ async function state(){
  try{const response=await fetch(endpoint+"/state",{cache:"no-store"});const data=await responseData(response,"Unable to load sign-in");if(revision!==stateRevision)return;
  $("businessLabel").hidden=experience.value==="owner"||!!data.businessSite;
  business.required=experience.value!=="owner"&&!data.businessSite;
+ if(data.businessSite&&(typeof data.businessSiteName!=="string"||!data.businessSiteName.trim()))throw Error("The business name is unavailable. Please try again.");
+ $("businessSiteNotice").textContent=data.businessSite?`Sign in to ${data.businessSiteName}'s Propa workspace.`:"";
  $("businessSiteNotice").hidden=!data.businessSite;
  $("registerBusiness").href=data.businessSite?"https://propawfm.com/hub#registerSection":"/hub#registerSection";
  $("localSetup").hidden=!!data.businessSite;

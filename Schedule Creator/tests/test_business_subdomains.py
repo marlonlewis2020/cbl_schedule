@@ -63,6 +63,27 @@ class BusinessSubdomainTests(unittest.TestCase):
             state.update(admin_state)
         self.assertEqual(client.get("/api/employees", base_url="https://other.propawfm.com").status_code, 403)
 
+    def test_signin_states_return_only_the_resolved_business_name(self):
+        self.assertEqual(self.choose("acme").status_code, 200)
+        name = "Ada's <Market>"
+        with closing(scheduler.database_connect()) as connection, connection:
+            connection.execute(
+                "UPDATE tenants SET business_name=? WHERE tenant_id=?",
+                (name, scheduler.DEFAULT_TENANT_ID),
+            )
+        client = scheduler.app.test_client()
+        for endpoint in ("/api/tenant-auth/state", "/api/access/state"):
+            with self.subTest(endpoint=endpoint):
+                acme = client.get(endpoint, base_url="https://acme.propawfm.com")
+                self.assertEqual(acme.status_code, 200)
+                self.assertEqual(acme.get_json()["businessSiteName"], name)
+                other = client.get(endpoint, base_url="https://other.propawfm.com")
+                self.assertEqual(other.get_json()["businessSiteName"], "Other business")
+                shared = client.get(endpoint, base_url="https://propawfm.com")
+                self.assertIsNone(shared.get_json()["businessSiteName"])
+                self.assertFalse(shared.get_json()["businessSite"])
+                self.assertEqual(client.get(endpoint, base_url="https://unknown.propawfm.com").status_code, 404)
+
     def test_employee_login_uses_site_business_not_submitted_bamboo_domain(self):
         self.assertEqual(self.choose("acme").status_code, 200)
         created = self.create_account(role="employee", employeeId="emp-a").get_json()
